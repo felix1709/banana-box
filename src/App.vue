@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref, watchEffect } from 'vue'
 import { useLibraryStore } from '@/stores/library'
 import { useUiStore } from '@/stores/ui'
+import { readImageBytes } from '@/lib/ipc'
 import SearchBar from '@/components/SearchBar.vue'
 import CategoryTree from '@/components/CategoryTree.vue'
 import PromptCard from '@/components/PromptCard.vue'
@@ -10,10 +11,21 @@ import SettingsModal from '@/components/SettingsModal.vue'
 
 const lib = useLibraryStore()
 const ui = useUiStore()
+const previewUrl = ref('')
 
 onMounted(async () => {
   await lib.load()
   ui.showPanel()
+})
+
+watchEffect(async () => {
+  if (ui.previewImage) {
+    try {
+      previewUrl.value = await readImageBytes(ui.previewImage)
+    } catch {
+      previewUrl.value = ''
+    }
+  }
 })
 </script>
 
@@ -62,6 +74,17 @@ onMounted(async () => {
       class="toast"
     >
       {{ ui.toast }}
+    </div>
+    <div
+      v-if="ui.previewImage"
+      class="preview-mask"
+      @click="ui.preview(null)"
+    >
+      <img
+        :src="previewUrl"
+        class="preview-img"
+        alt="preview"
+      >
     </div>
   </div>
 </template>
@@ -118,5 +141,18 @@ onMounted(async () => {
   color: #fff;
   padding: 6px 12px;
   border-radius: 6px;
+}
+.preview-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+.preview-img {
+  max-width: 90%;
+  max-height: 90%;
 }
 </style>
