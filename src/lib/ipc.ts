@@ -1,8 +1,9 @@
 // src/lib/ipc.ts
 // 所有 Tauri 后端调用集中在此，组件/store 只调这里的函数。
-// 命令在 src-tauri/src/commands.rs 实现（Task 6/7）。
+// 命令在 src-tauri/src/commands.rs 实现。
 
 import { invoke } from '@tauri-apps/api/core'
+import { save, open } from '@tauri-apps/plugin-dialog'
 import type { Library } from '@/types'
 
 export async function loadLibrary(): Promise<Library> {
@@ -25,11 +26,27 @@ export async function deleteImage(path: string): Promise<void> {
   await invoke('delete_image', { path })
 }
 
-// 注意：export/import 的最终实现见 Task 7（用 dialog 插件选路径后再调命令）
+// 读图片字节并转成 blob URL 供 <img> 显示
+export async function readImageBytes(path: string): Promise<string> {
+  const bytes = await invoke<number[]>('read_image_bytes', { path })
+  const blob = new Blob([new Uint8Array(bytes)])
+  return URL.createObjectURL(blob)
+}
+
 export async function exportLibrary(): Promise<void> {
-  await invoke('export_library')
+  const dest = await save({
+    defaultPath: `banana-box-export-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.zip`,
+    filters: [{ name: 'zip', extensions: ['zip'] }],
+  })
+  if (!dest) return
+  await invoke('export_library', { dest })
 }
 
 export async function importLibrary(): Promise<Library | null> {
-  return await invoke<Library | null>('import_library')
+  const picked = await open({
+    filters: [{ name: 'zip', extensions: ['zip'] }],
+    multiple: false,
+  })
+  if (!picked || Array.isArray(picked)) return null
+  return await invoke<Library>('import_library', { zipPath: picked })
 }

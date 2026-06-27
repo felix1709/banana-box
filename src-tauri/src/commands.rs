@@ -47,3 +47,21 @@ pub fn delete_image(app: tauri::AppHandle, path: String) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[tauri::command]
+pub fn read_image_bytes(app: tauri::AppHandle, path: String) -> Result<Vec<u8>, String> {
+    let full = data_dir(&app).join(&path);
+    std::fs::read(&full).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn export_library(app: tauri::AppHandle, dest: String) -> Result<(), String> {
+    let zip_path = std::path::PathBuf::from(&dest);
+    library::export_library(&data_dir(&app), &zip_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn import_library(app: tauri::AppHandle, zip_path: String) -> Result<Library, String> {
+    library::import_library(std::path::Path::new(&zip_path), &data_dir(&app))
+        .map_err(|e| e.to_string())
+}

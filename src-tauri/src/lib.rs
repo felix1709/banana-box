@@ -15,6 +15,9 @@ pub fn run() {
             commands::copy_to_clipboard,
             commands::save_image,
             commands::delete_image,
+            commands::read_image_bytes,
+            commands::export_library,
+            commands::import_library,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

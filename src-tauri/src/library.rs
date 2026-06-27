@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -81,6 +82,68 @@ pub fn save_library(dir: &Path, lib: &Library) -> std::io::Result<()> {
     Ok(())
 }
 
+// 把 data_dir 的 library.json + images/ 打包成 zip。
+pub fn export_library(data_dir: &Path, zip_path: &Path) -> std::io::Result<()> {
+    let file = fs::File::create(zip_path)?;
+    let mut writer = zip::ZipWriter::new(file);
+    let opts = zip::write::SimpleFileOptions::default();
+
+    let json = serde_json::to_string_pretty(&load_library(data_dir))
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    writer.start_file("library.json", opts)?;
+    writer.write_all(json.as_bytes())?;
+
+    let images_dir = data_dir.join("images");
+    if images_dir.exists() {
+        for entry in fs::read_dir(&images_dir)? {
+            let entry = entry?;
+            let rel = format!("images/{}", entry.file_name().to_string_lossy());
+            writer.start_file(&rel, opts)?;
+            let mut f = fs::File::open(entry.path())?;
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf)?;
+            writer.write_all(&buf)?;
+        }
+    }
+    writer.finish()?;
+    Ok(())
+}
+
+// 解压 zip 到 data_dir（library.json + images/* 覆盖），返回读出的 Library。
+pub fn import_library(zip_path: &Path, data_dir: &Path) -> std::io::Result<Library> {
+    fs::create_dir_all(data_dir)?;
+    let file = fs::File::open(zip_path)?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let mut json_str: Option<String> = None;
+    for i in 0..archive.len() {
+        let mut f = archive
+            .by_index(i)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let name = f.name().to_string();
+        if name == "library.json" {
+            let mut s = String::new();
+            f.read_to_string(&mut s)?;
+            json_str = Some(s);
+        } else if let Some(rel) = name.strip_prefix("images/") {
+            if !rel.is_empty() {
+                let target = data_dir.join("images");
+                fs::create_dir_all(&target)?;
+                let mut buf = Vec::new();
+                f.read_to_end(&mut buf)?;
+                fs::write(target.join(rel), &buf)?;
+            }
+        }
+    }
+    let json = json_str.ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "no library.json in zip")
+    })?;
+    let lib: Library = serde_json::from_str(&json)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    save_library(data_dir, &lib)?;
+    Ok(lib)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,5 +181,35 @@ mod tests {
         save_library(dir.path(), &lib).unwrap();
         let loaded = load_library(dir.path());
         assert_eq!(loaded, lib);
+    }
+
+    #[test]
+    fn export_import_roundtrip() {
+        let data_dir = tempdir().unwrap();
+        let mut lib = Library::default();
+        lib.prompts.push(Prompt {
+            id: "p1".into(),
+            title: "t".into(),
+            content: "c".into(),
+            category_id: None,
+            tags: vec![],
+            image: Some("images/a.png".into()),
+            created_at: 1,
+            updated_at: 1,
+        });
+        fs::create_dir_all(data_dir.path().join("images")).unwrap();
+        fs::write(data_dir.path().join("images/a.png"), b"fakepng").unwrap();
+        save_library(data_dir.path(), &lib).unwrap();
+
+        let zip_path = data_dir.path().join("export.zip");
+        export_library(data_dir.path(), &zip_path).unwrap();
+
+        let data_dir2 = tempdir().unwrap();
+        let imported = import_library(&zip_path, data_dir2.path()).unwrap();
+        assert_eq!(imported.prompts.len(), 1);
+        assert_eq!(imported.prompts[0].image, Some("images/a.png".into()));
+        // 图片已解包
+        let restored = fs::read(data_dir2.path().join("images/a.png")).unwrap();
+        assert_eq!(restored, b"fakepng");
     }
 }
