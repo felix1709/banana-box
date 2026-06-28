@@ -65,3 +65,55 @@ pub fn import_library(app: tauri::AppHandle, zip_path: String) -> Result<Library
     library::import_library(std::path::Path::new(&zip_path), &data_dir(&app))
         .map_err(|e| e.to_string())
 }
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportFile {
+    pub filename: String,
+    pub content: String,
+}
+
+// 读取目录下所有 .md/.txt 文件内容，供前端解析
+#[tauri::command]
+pub fn read_import_dir(dir: String) -> Result<Vec<ImportFile>, String> {
+    let mut files = Vec::new();
+    let read = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
+    for entry in read {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            if ext == "md" || ext == "txt" {
+                let filename = entry.file_name().to_string_lossy().to_string();
+                let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+                files.push(ImportFile { filename, content });
+            }
+        }
+    }
+    Ok(files)
+}
+
+// 下载远程图片到 images/，返回相对路径
+#[tauri::command]
+pub fn download_image(app: tauri::AppHandle, url: String) -> Result<String, String> {
+    use std::io::Read;
+    let resp = ureq::get(&url).call().map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    resp.into_reader()
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    let dir = data_dir(&app).join("images");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let ext = url
+        .split('?')
+        .next()
+        .unwrap_or(&url)
+        .rsplit('.')
+        .next()
+        .filter(|s| ["png", "jpg", "jpeg", "webp", "gif"].contains(s))
+        .unwrap_or("png")
+        .to_string();
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    let name = format!("{}.{}", id, ext);
+    std::fs::write(dir.join(&name), &bytes).map_err(|e| e.to_string())?;
+    Ok(format!("images/{}", name))
+}

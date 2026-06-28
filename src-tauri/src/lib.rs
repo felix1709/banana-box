@@ -1,7 +1,7 @@
 mod commands;
 mod library;
 
-use tauri::{Manager, WindowEvent};
+use tauri::{Listener, Manager, WindowEvent};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -52,12 +52,21 @@ pub fn run() {
                     _ => {}
                 })
                 .build(app)?;
+
+            // 监听悬浮按钮的 toggle 事件 → 切换主面板
+            let app_handle = app.handle().clone();
+            app.listen("toggle-panel", move |_| {
+                toggle_panel(&app_handle);
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| {
-            // 失焦自动隐藏
+            // 只有主面板失焦隐藏；悬浮按钮常驻
             if let WindowEvent::Focused(false) = event {
-                let _ = window.hide();
+                if window.label() == "main" {
+                    let _ = window.hide();
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -69,6 +78,8 @@ pub fn run() {
             commands::read_image_bytes,
             commands::export_library,
             commands::import_library,
+            commands::read_import_dir,
+            commands::download_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

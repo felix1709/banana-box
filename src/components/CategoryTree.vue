@@ -1,11 +1,18 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useLibraryStore } from '@/stores/library'
+import CategoryDialog from '@/components/CategoryDialog.vue'
 
 const lib = useLibraryStore()
+const showDialog = ref(false)
 
 function onAdd() {
-  const name = window.prompt('分类名称')
-  if (name) lib.addCategory(name)
+  showDialog.value = true
+}
+
+function onConfirm(payload: { name: string; color: string }) {
+  lib.addCategory(payload.name, payload.color)
+  showDialog.value = false
 }
 </script>
 
@@ -43,6 +50,11 @@ function onAdd() {
     >
       ＋ 新建分类
     </button>
+    <CategoryDialog
+      :visible="showDialog"
+      @confirm="onConfirm"
+      @close="showDialog = false"
+    />
   </div>
 </template>
 
