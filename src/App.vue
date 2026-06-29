@@ -12,6 +12,7 @@ import SettingsModal from '@/components/SettingsModal.vue'
 const lib = useLibraryStore()
 const ui = useUiStore()
 const previewUrl = ref('')
+const expandedPromptId = ref<string | null>(null)
 
 onMounted(async () => {
   await lib.load()
@@ -58,6 +59,8 @@ watchEffect(async () => {
           v-for="p in lib.filteredPrompts"
           :key="p.id"
           :prompt="p"
+          :expanded="expandedPromptId === p.id"
+          @expand="expandedPromptId = $event"
         />
         <p
           v-if="lib.filteredPrompts.length === 0"
@@ -96,30 +99,43 @@ watchEffect(async () => {
   display: flex;
   flex-direction: column;
   font-family: system-ui, sans-serif;
+  overflow: hidden;
+  background: #fff;
+  color: #1f2937;
+  border: 1px solid #d7dde7;
+  border-radius: 8px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.24);
 }
 .topbar {
   display: flex;
   gap: 8px;
   padding: 8px;
   border-bottom: 1px solid #eee;
+  background: #f8fafc;
 }
 .body {
   flex: 1;
   display: flex;
   overflow: hidden;
+  min-height: 0;
 }
 .sidebar {
   width: 160px;
+  flex: 0 0 160px;
   border-right: 1px solid #eee;
   overflow-y: auto;
+  background: #f9fafb;
 }
 .content {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
+  background: #fff;
 }
 .empty {
   color: #999;
@@ -154,5 +170,8 @@ watchEffect(async () => {
 .preview-img {
   max-width: 90%;
   max-height: 90%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
 }
 </style>

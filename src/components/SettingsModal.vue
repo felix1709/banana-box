@@ -98,7 +98,7 @@ async function onBatchImport() {
     lib.library.prompts.push(...prompts)
     lib.persist()
     ui.showToast(`导入 ${prompts.length} 条 / 图 ${pending.length}`)
-  } catch (e) {
+  } catch {
     ui.showToast('导入失败')
   } finally {
     importing.value = false

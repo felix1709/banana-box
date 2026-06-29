@@ -1,7 +1,7 @@
 mod commands;
 mod library;
 
-use tauri::{Listener, Manager, WindowEvent};
+use tauri::{Manager, WindowEvent};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -12,7 +12,7 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
                     if event.state == ShortcutState::Pressed {
-                        toggle_panel(app);
+                        toggle_main_panel(app);
                     }
                 })
                 .build(),
@@ -37,7 +37,7 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        toggle_panel(tray.app_handle());
+                        toggle_main_panel(tray.app_handle());
                     }
                 })
                 .menu(
@@ -47,24 +47,21 @@ pub fn run() {
                         .build()?,
                 )
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    "show" => toggle_panel(app),
+                    "show" => toggle_main_panel(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
                 .build(app)?;
 
             // 监听悬浮按钮的 toggle 事件 → 切换主面板
-            let app_handle = app.handle().clone();
-            app.listen("toggle-panel", move |_| {
-                toggle_panel(&app_handle);
-            });
-
             Ok(())
         })
         .on_window_event(|window, event| {
             // 只有主面板失焦隐藏；悬浮按钮常驻
-            if let WindowEvent::Focused(false) = event {
-                if window.label() == "main" {
+            if let WindowEvent::Focused(focused) = event {
+                if window.label() == "floatbtn" && *focused {
+                    show_main_panel(window.app_handle());
+                } else if window.label() == "main" && !focused {
                     let _ = window.hide();
                 }
             }
@@ -80,12 +77,18 @@ pub fn run() {
             commands::import_library,
             commands::read_import_dir,
             commands::download_image,
+            toggle_panel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
-fn toggle_panel(app: &tauri::AppHandle) {
+#[tauri::command]
+fn toggle_panel(app: tauri::AppHandle) {
+    toggle_main_panel(&app);
+}
+
+fn toggle_main_panel(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         if win.is_visible().unwrap_or(false) {
             let _ = win.hide();
@@ -93,5 +96,12 @@ fn toggle_panel(app: &tauri::AppHandle) {
             let _ = win.show();
             let _ = win.set_focus();
         }
+    }
+}
+
+fn show_main_panel(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.set_focus();
     }
 }

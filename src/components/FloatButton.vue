@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { emit } from '@tauri-apps/api/event'
 
 const win = getCurrentWindow()
 let startX = 0
@@ -27,10 +26,8 @@ async function onMousemove(e: MouseEvent) {
   }
 }
 
-function onMouseup() {
-  if (!dragging) {
-    void emit('toggle-panel', null)
-  }
+function onClick() {
+  dragging = false
 }
 </script>
 
@@ -39,16 +36,24 @@ function onMouseup() {
     class="float-btn"
     @mousedown="onMousedown"
     @mousemove="onMousemove"
-    @mouseup="onMouseup"
+    @click="onClick"
   >
     🍌
   </div>
 </template>
 
 <style scoped>
+:global(html),
+:global(body),
+:global(#app) {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 .float-btn {
-  width: 48px;
-  height: 48px;
+  width: 100vw;
+  height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -56,5 +61,15 @@ function onMouseup() {
   cursor: pointer;
   user-select: none;
   background: transparent;
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", system-ui, sans-serif;
+  line-height: 1;
+}
+
+.float-btn:hover {
+  filter: drop-shadow(0 2px 5px rgba(15, 23, 42, 0.28));
+}
+
+.float-btn:active {
+  transform: scale(0.96);
 }
 </style>

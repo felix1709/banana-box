@@ -23,6 +23,10 @@ export async function copyToClipboard(text: string): Promise<void> {
   await invoke('copy_to_clipboard', { text })
 }
 
+export async function togglePanel(): Promise<void> {
+  await invoke('toggle_panel')
+}
+
 export async function saveImage(bytes: number[], ext: string): Promise<string> {
   return await invoke<string>('save_image', { bytes, ext })
 }
