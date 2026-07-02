@@ -63,8 +63,12 @@ async function onMousemove(e: MouseEvent) {
   }
 }
 
-function onClick() {
-  dragging = false
+async function onClick() {
+  if (dragging) {
+    dragging = false
+    return
+  }
+  await invoke('toggle_panel')
 }
 
 async function onDrop(e: DragEvent) {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watchEffect } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { invoke } from '@tauri-apps/api/core'
 import { useLibraryStore } from '@/stores/library'
 import { useUiStore } from '@/stores/ui'
 import { readImageBytes } from '@/lib/ipc'
@@ -19,6 +19,7 @@ const ui = useUiStore()
 const previewUrl = ref('')
 const expandedPromptId = ref<string | null>(null)
 const sortingPromptId = ref<string | null>(null)
+const windowDragActive = ref(false)
 let unlistenFloatingDrop: UnlistenFn | null = null
 
 interface FloatingFileDropPayload {
@@ -37,12 +38,14 @@ function isFloatingFileDropPayload(value: unknown): value is FloatingFileDropPay
   )
 }
 
-function onTopbarPointerDown(event: PointerEvent) {
+function onDragStripMouseDown(event: MouseEvent) {
   if (event.button !== 0) return
-  const target = event.target
-  if (!(target instanceof Element)) return
-  if (target.closest('button, input, textarea, select, a, [data-no-window-drag]')) return
-  void getCurrentWindow().startDragging()
+  windowDragActive.value = true
+  void invoke('begin_main_window_drag')
+}
+
+function clearWindowDragActive() {
+  windowDragActive.value = false
 }
 
 function onSortStart(id: string) {
@@ -92,10 +95,21 @@ watchEffect(async () => {
     @pointerup="onSortEnd"
     @pointercancel="onSortEnd"
   >
-    <header
-      class="topbar"
-      @pointerdown="onTopbarPointerDown"
+    <div
+      class="window-drag-strip"
+      title="拖动窗口"
+      aria-label="拖动窗口"
+      :class="{ 'window-drag-strip-active': windowDragActive }"
+      @mousedown="onDragStripMouseDown"
+      @mouseup="clearWindowDragActive"
+      @mouseleave="clearWindowDragActive"
     >
+      <span
+        class="window-drag-marker"
+        aria-hidden="true"
+      />
+    </div>
+    <header class="topbar">
       <SearchBar />
       <div
         class="window-drag-handle"
@@ -201,6 +215,48 @@ watchEffect(async () => {
   border-radius: 8px;
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.24);
 }
+.window-drag-strip {
+  height: 24px;
+  flex: 0 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  background: #f8fafc;
+  border-bottom: 1px solid #edf2f7;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.window-drag-strip:hover,
+.window-drag-strip-active {
+  background: #eaf2ff;
+  border-bottom-color: #bfdbfe;
+}
+.window-drag-strip:active {
+  cursor: grabbing;
+}
+.window-drag-marker {
+  width: 86px;
+  height: 4px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow:
+    0 -7px 0 rgba(148, 163, 184, 0.38),
+    0 7px 0 rgba(148, 163, 184, 0.38);
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+.window-drag-strip:hover .window-drag-marker,
+.window-drag-strip-active .window-drag-marker {
+  background: #2563eb;
+  box-shadow:
+    0 -7px 0 rgba(37, 99, 235, 0.28),
+    0 7px 0 rgba(37, 99, 235, 0.28);
+  transform: scaleX(1.08);
+}
 .topbar {
   display: flex;
   align-items: center;
@@ -210,6 +266,7 @@ watchEffect(async () => {
   background: #f8fafc;
 }
 .window-drag-handle {
+  display: none;
   width: 28px;
   height: 28px;
   flex: 0 0 28px;

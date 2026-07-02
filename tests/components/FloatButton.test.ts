@@ -39,12 +39,24 @@ describe('FloatButton', () => {
     expect(wrapper.text()).toBe('🍌')
   })
 
-  it('accepts click without changing the visual label', async () => {
+  it('toggles the main panel only when the floating button is clicked', async () => {
     const wrapper = mount(FloatButton)
 
     await wrapper.trigger('click')
+    expect(mocks.invoke).toHaveBeenCalledWith('toggle_panel')
 
     expect(wrapper.text()).toBe('🍌')
+  })
+
+  it('does not toggle the main panel after dragging the floating button', async () => {
+    const wrapper = mount(FloatButton)
+
+    await wrapper.trigger('mousedown', { button: 0, screenX: 10, screenY: 10 })
+    await wrapper.trigger('mousemove', { buttons: 1, screenX: 30, screenY: 30 })
+    await wrapper.trigger('click')
+
+    expect(mocks.startDragging).toHaveBeenCalledTimes(1)
+    expect(mocks.invoke).not.toHaveBeenCalledWith('toggle_panel')
   })
 
   it('emits an image drop action payload to the main window', async () => {

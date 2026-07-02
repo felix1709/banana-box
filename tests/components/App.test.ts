@@ -7,8 +7,8 @@ import { useLibraryStore } from '@/stores/library'
 import { useUiStore } from '@/stores/ui'
 
 let floatingDropHandler: ((event: { payload: unknown }) => void) | null = null
-const windowApi = vi.hoisted(() => ({
-  startDragging: vi.fn().mockResolvedValue(undefined),
+const coreApi = vi.hoisted(() => ({
+  invoke: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -19,7 +19,11 @@ vi.mock('@tauri-apps/api/event', () => ({
 }))
 
 vi.mock('@tauri-apps/api/window', () => ({
-  getCurrentWindow: vi.fn(() => windowApi),
+  getCurrentWindow: vi.fn(() => ({})),
+}))
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: coreApi.invoke,
 }))
 
 vi.mock('@/lib/ipc', () => ({
@@ -57,23 +61,37 @@ describe('App', () => {
     vi.useRealTimers()
   })
 
-  it('starts dragging the frameless main window from the topbar background', async () => {
+  it('starts dragging the frameless main window from the dedicated drag strip', async () => {
     const wrapper = mount(App)
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
-    await wrapper.find('.topbar').trigger('pointerdown')
+    await wrapper.find('.window-drag-strip').trigger('mousedown')
 
-    expect(windowApi.startDragging).toHaveBeenCalledTimes(1)
+    expect(coreApi.invoke).toHaveBeenCalledWith('begin_main_window_drag')
   })
 
-  it('does not start window dragging from interactive topbar controls', async () => {
+  it('marks and highlights the drag strip while pressing it', async () => {
     const wrapper = mount(App)
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
-    await wrapper.find('.search').trigger('pointerdown')
-    await wrapper.find('.btn').trigger('pointerdown')
+    expect(wrapper.find('.window-drag-marker').exists()).toBe(true)
 
-    expect(windowApi.startDragging).not.toHaveBeenCalled()
+    await wrapper.find('.window-drag-strip').trigger('mousedown')
+    expect(wrapper.find('.window-drag-strip').classes()).toContain('window-drag-strip-active')
+
+    await wrapper.find('.window-drag-strip').trigger('mouseup')
+    expect(wrapper.find('.window-drag-strip').classes()).not.toContain('window-drag-strip-active')
+  })
+
+  it('does not start window dragging from topbar clicks or interactive controls', async () => {
+    const wrapper = mount(App)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    await wrapper.find('.topbar').trigger('mousedown')
+    await wrapper.find('.search').trigger('mousedown')
+    await wrapper.find('.btn').trigger('mousedown')
+
+    expect(coreApi.invoke).not.toHaveBeenCalledWith('begin_main_window_drag')
   })
 
   it('keeps the new prompt action out of the topbar', async () => {

@@ -1,13 +1,22 @@
 mod commands;
 mod library;
 
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+struct MainWindowDragState {
+    ignore_focus_loss_until: Mutex<Option<Instant>>,
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(MainWindowDragState {
+            ignore_focus_loss_until: Mutex::new(None),
+        })
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -70,9 +79,22 @@ pub fn run() {
         .on_window_event(|window, event| {
             // 只有主面板失焦隐藏；悬浮按钮常驻
             if let WindowEvent::Focused(focused) = event {
-                if window.label() == "floatbtn" && *focused {
-                    show_main_panel(window.app_handle());
-                } else if window.label() == "main" && !focused {
+                let drag_ignore_until = window
+                    .app_handle()
+                    .try_state::<MainWindowDragState>()
+                    .and_then(|state| {
+                        state
+                            .ignore_focus_loss_until
+                            .lock()
+                            .ok()
+                            .and_then(|guard| *guard)
+                    });
+                if should_hide_main_on_focus_loss(
+                    window.label(),
+                    *focused,
+                    drag_ignore_until,
+                    Instant::now(),
+                ) {
                     let _ = window.hide();
                 }
             }
@@ -94,11 +116,26 @@ pub fn run() {
             commands::import_image_from_path,
             commands::compress_media,
             commands::suggest_compressed_output_path,
+            begin_main_window_drag,
             toggle_panel,
             show_panel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+fn begin_main_window_drag(
+    app: tauri::AppHandle,
+    state: tauri::State<MainWindowDragState>,
+) -> Result<(), String> {
+    if let Ok(mut ignore_until) = state.ignore_focus_loss_until.lock() {
+        *ignore_until = Some(Instant::now() + Duration::from_millis(1200));
+    }
+    let win = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    win.start_dragging().map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -126,5 +163,39 @@ fn show_main_panel(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.set_focus();
+    }
+}
+
+fn should_hide_main_on_focus_loss(
+    label: &str,
+    focused: bool,
+    drag_ignore_until: Option<Instant>,
+    now: Instant,
+) -> bool {
+    label == "main" && !focused && drag_ignore_until.is_none_or(|until| now >= until)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn main_window_focus_loss_hides_when_not_dragging() {
+        let now = Instant::now();
+
+        assert!(should_hide_main_on_focus_loss("main", false, None, now));
+    }
+
+    #[test]
+    fn main_window_focus_loss_does_not_hide_during_drag_grace_period() {
+        let now = Instant::now();
+
+        assert!(!should_hide_main_on_focus_loss(
+            "main",
+            false,
+            Some(now + Duration::from_millis(800)),
+            now,
+        ));
     }
 }
