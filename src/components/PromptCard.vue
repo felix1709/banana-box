@@ -1,16 +1,24 @@
 <script setup lang="ts">
-import { computed, ref, watchEffect, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watchEffect, onMounted, onUnmounted, type CSSProperties } from 'vue'
 import { useLibraryStore } from '@/stores/library'
 import { useUiStore } from '@/stores/ui'
 import { readImageBytes, saveImage } from '@/lib/ipc'
 import type { Prompt } from '@/types'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
-const props = withDefaults(defineProps<{ prompt: Prompt; expanded?: boolean | null }>(), {
+const props = withDefaults(
+  defineProps<{ prompt: Prompt; expanded?: boolean | null; sortingPromptId?: string | null }>(),
+  {
   expanded: null,
-})
+  sortingPromptId: null,
+  },
+)
 const emit = defineEmits<{
   expand: [id: string | null]
+  'reorder-before': [draggedId: string]
+  'sort-start': [id: string]
+  'sort-over': [id: string]
+  'sort-end': []
 }>()
 const lib = useLibraryStore()
 const ui = useUiStore()
@@ -18,9 +26,33 @@ const url = ref('')
 const localExpanded = ref(false)
 const showConfirm = ref(false)
 const showCategoryPicker = ref(false)
+const dragReady = ref(false)
+const dragOffsetX = ref(0)
+const dragOffsetY = ref(0)
+const dragFrame = ref<{ left: number; top: number; width: number; height: number } | null>(null)
+const suppressNextClick = ref(false)
 const cardRef = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const isExpanded = computed(() => props.expanded ?? localExpanded.value)
+const currentPrompt = computed(
+  () => lib.library.prompts.find((prompt) => prompt.id === props.prompt.id) ?? props.prompt,
+)
+const dragStyle = computed<CSSProperties | undefined>(() =>
+  dragReady.value && dragFrame.value
+    ? {
+        position: 'fixed',
+        left: `${dragFrame.value.left}px`,
+        top: `${dragFrame.value.top}px`,
+        width: `${dragFrame.value.width}px`,
+        height: `${dragFrame.value.height}px`,
+        transform: `translate3d(${dragOffsetX.value}px, ${dragOffsetY.value}px, 0px)`,
+      }
+    : undefined,
+)
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let lastSortOverId: string | null = null
+let dragStartX = 0
+let dragStartY = 0
 
 watchEffect(async () => {
   if (props.prompt.image) {
@@ -58,9 +90,99 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
   document.removeEventListener('paste', onPaste)
+  clearLongPressTimer()
+  removeSortDocumentListeners()
 })
 
+function clearLongPressTimer() {
+  if (!longPressTimer) return
+  clearTimeout(longPressTimer)
+  longPressTimer = null
+}
+
+function addSortDocumentListeners() {
+  document.addEventListener('pointermove', onDocumentPointerMove)
+  document.addEventListener('pointerup', onDocumentPointerUp)
+  document.addEventListener('pointercancel', onDocumentPointerUp)
+}
+
+function removeSortDocumentListeners() {
+  document.removeEventListener('pointermove', onDocumentPointerMove)
+  document.removeEventListener('pointerup', onDocumentPointerUp)
+  document.removeEventListener('pointercancel', onDocumentPointerUp)
+}
+
+function onPointerDown(e: PointerEvent) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  clearLongPressTimer()
+  dragReady.value = false
+  dragOffsetX.value = 0
+  dragOffsetY.value = 0
+  dragFrame.value = null
+  dragStartX = e.clientX
+  dragStartY = e.clientY
+  longPressTimer = setTimeout(() => {
+    const rect = cardRef.value?.getBoundingClientRect()
+    dragFrame.value = rect
+      ? {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+        }
+      : null
+    dragReady.value = true
+    lastSortOverId = null
+    addSortDocumentListeners()
+    emit('sort-start', props.prompt.id)
+  }, 400)
+}
+
+function onPointerUp() {
+  clearLongPressTimer()
+  finishSort()
+}
+
+function onPointerLeave() {
+  if (!dragReady.value) clearLongPressTimer()
+}
+
+function onDocumentPointerUp() {
+  clearLongPressTimer()
+  finishSort()
+}
+
+function onDocumentPointerMove(e: PointerEvent) {
+  if (!dragReady.value) return
+  dragOffsetX.value = e.clientX - dragStartX
+  dragOffsetY.value = e.clientY - dragStartY
+  const target = document.elementFromPoint?.(e.clientX, e.clientY)
+  const targetCard = target?.closest<HTMLElement>('[data-prompt-card-id]')
+  const targetId = targetCard?.dataset.promptCardId
+  if (!targetId || targetId === props.prompt.id || targetId === lastSortOverId) return
+  lastSortOverId = targetId
+  emit('sort-over', targetId)
+}
+
+function finishSort() {
+  if (dragReady.value) {
+    suppressNextClick.value = true
+    emit('sort-end')
+  }
+  dragReady.value = false
+  dragOffsetX.value = 0
+  dragOffsetY.value = 0
+  dragFrame.value = null
+  lastSortOverId = null
+  removeSortDocumentListeners()
+}
+
 function onClick(e: MouseEvent) {
+  if (suppressNextClick.value) {
+    suppressNextClick.value = false
+    return
+  }
   if (e.detail > 1) return
   if (e.button !== 0) return
   const nextExpanded = !isExpanded.value
@@ -74,6 +196,9 @@ function onDoubleClick() {
 }
 
 async function onCopy() {
+  localExpanded.value = false
+  showCategoryPicker.value = false
+  emit('expand', null)
   await lib.copyPrompt(props.prompt.id)
   ui.showToast('已复制 ✓')
   localExpanded.value = false
@@ -109,6 +234,10 @@ function onSelectCategory(categoryId: string | null) {
   showCategoryPicker.value = false
 }
 
+function onToggleFavorite() {
+  lib.toggleFavorite(props.prompt.id)
+}
+
 function onPreview() {
   if (props.prompt.image) ui.preview(props.prompt.image)
 }
@@ -142,8 +271,29 @@ async function onPickImage(e: Event) {
 
 async function onDrop(e: DragEvent) {
   e.preventDefault()
+  const draggedId =
+    typeof e.dataTransfer?.getData === 'function' ? e.dataTransfer.getData('text/plain') : ''
+  if (draggedId) {
+    emit('reorder-before', draggedId)
+    dragReady.value = false
+    return
+  }
   const file = e.dataTransfer?.files?.[0]
   if (file) await attachImage(file)
+}
+
+function onDragStart(e: DragEvent) {
+  e.preventDefault()
+}
+
+function onDragEnd() {
+  clearLongPressTimer()
+  finishSort()
+}
+
+function onPointerEnter() {
+  if (!props.sortingPromptId || props.sortingPromptId === props.prompt.id) return
+  emit('sort-over', props.prompt.id)
 }
 </script>
 
@@ -151,27 +301,71 @@ async function onDrop(e: DragEvent) {
   <div
     ref="cardRef"
     class="card"
-    :class="isExpanded ? 'expanded' : 'collapsed'"
+    :data-prompt-card-id="prompt.id"
+    :style="dragStyle"
+    :class="[
+      isExpanded ? 'expanded' : 'collapsed',
+      {
+        'category-menu-can-overflow': isExpanded,
+        'expanded-auto-height-card': isExpanded,
+        'flow-expanded-card': isExpanded,
+        'fixed-size-prompt-card': !isExpanded,
+        'drag-ready': dragReady,
+        'drag-floating': dragReady,
+      },
+    ]"
     tabindex="0"
-    @pointerdown.stop
+    draggable="false"
+    @pointerdown.stop="onPointerDown"
+    @pointerup.stop="onPointerUp"
+    @pointercancel.stop="onPointerUp"
+    @pointerleave.stop="onPointerLeave"
+    @pointerenter="onPointerEnter"
     @click.stop="onClick"
     @dblclick.stop="onDoubleClick"
+    @dragstart="onDragStart"
+    @dragend="onDragEnd"
     @dragover.prevent
     @drop.prevent="onDrop"
   >
-    <div class="card-main">
-      <div class="text-pane">
+    <button
+      type="button"
+      class="favorite-button icon-only-star"
+      :class="{ active: currentPrompt.favorite }"
+      :aria-pressed="currentPrompt.favorite"
+      title="Favorite"
+      @mousedown.stop
+      @pointerdown.stop
+      @click.stop.prevent="onToggleFavorite"
+    >
+      ★
+    </button>
+    <div
+      class="card-main fixed-card-layout"
+      :class="{ 'flow-card-main': isExpanded }"
+    >
+      <div
+        class="text-pane"
+        :class="{ 'flow-text-pane': isExpanded }"
+      >
         <div class="title">
           📄 {{ prompt.title }}
         </div>
-        <div class="content">
+        <div
+          class="content fixed-three-line-content"
+          :class="{ 'full-content': isExpanded, 'flow-content': isExpanded }"
+        >
           {{ prompt.content }}
         </div>
-        <div class="tags">
+        <div
+          class="tags"
+          :class="{ 'full-tags': isExpanded }"
+        >
           <span
             v-for="t in prompt.tags"
             :key="t"
             class="tag"
+            :class="{ 'full-tag': isExpanded }"
           >{{ t }}</span>
         </div>
         <div
@@ -243,7 +437,7 @@ async function onDrop(e: DragEvent) {
 
       <button
         type="button"
-        class="thumb-zone"
+        class="thumb-zone fit-box prompt-preview-thumb stable-preview-thumb"
         :class="{ empty: !url }"
         title="点击上传，拖拽或粘贴图片；已有图片时点击预览原始比例"
         @pointerdown.stop
@@ -251,7 +445,7 @@ async function onDrop(e: DragEvent) {
       >
         <img
           v-if="url"
-          class="thumb"
+          class="thumb fit-contain"
           :src="url"
           alt="参考图"
         >
@@ -281,35 +475,87 @@ async function onDrop(e: DragEvent) {
   border-radius: 6px;
   padding: 5px;
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
   overflow: hidden;
+  box-sizing: border-box;
+  height: 104px;
+  min-height: 104px;
+  max-height: 104px;
   max-width: 100%;
   background: #fff;
+  position: relative;
   transition:
     border-color 120ms ease,
     background-color 120ms ease;
 }
+.card.collapsed {
+  height: 104px;
+}
 .card.expanded {
   border-color: #cbd5e1;
   background: #fff;
-  padding-bottom: 7px;
+  padding-bottom: 5px;
+  height: auto;
+  min-height: 104px;
+  max-height: none;
   overflow: visible;
   position: relative;
   z-index: 2;
+}
+.card.flow-expanded-card {
+  height: auto;
+  min-height: 104px;
+  max-height: none;
+  flex: 0 0 auto;
+  align-self: stretch;
+}
+.card.drag-ready {
+  cursor: grabbing;
+}
+.card.drag-floating {
+  z-index: 30;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.94;
+  border-color: #94a3b8;
+  box-shadow: 0 10px 24px rgb(15 23 42 / 18%);
+  will-change: transform;
 }
 .card:hover {
   background: #fafafa;
 }
 .card-main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px;
+  grid-template-columns: minmax(0, 1fr) 96px;
   gap: 6px;
   align-items: start;
+  min-height: 100%;
 }
 .card.expanded .card-main {
-  grid-template-columns: minmax(0, 2fr) minmax(112px, 1fr);
+  grid-template-columns: minmax(0, 1fr) 96px;
+  height: auto;
+  min-height: 0;
+}
+.card-main.flow-card-main {
+  height: auto;
+  min-height: auto;
+  grid-auto-rows: max-content;
+  align-items: start;
 }
 .text-pane {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.card.expanded .text-pane {
+  overflow: visible;
+}
+.text-pane.flow-text-pane {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
 }
 .title {
   font-weight: 600;
@@ -324,23 +570,48 @@ async function onDrop(e: DragEvent) {
   font-size: 11px;
   line-height: 1.3;
   margin: 3px 0;
-  max-height: 2.6em;
+  height: 3.9em;
+  max-height: 3.9em;
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .card.expanded .content {
-  max-height: 5.2em;
-  -webkit-line-clamp: 4;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+  display: block;
+  -webkit-line-clamp: unset;
+}
+.content.full-content {
+  height: auto;
+  max-height: none;
+  overflow: visible;
+  display: block;
+  -webkit-line-clamp: unset;
+}
+.content.flow-content {
+  position: static;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+  overflow: visible;
 }
 .tags {
   display: flex;
   gap: 3px;
   flex-wrap: wrap;
   min-width: 0;
+  max-height: 14px;
+  overflow: hidden;
+}
+.tags.full-tags,
+.card.expanded .tags {
+  max-height: none;
+  overflow: visible;
 }
 .tag {
   background: #eee;
@@ -352,9 +623,19 @@ async function onDrop(e: DragEvent) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tag.full-tag,
+.card.expanded .tag {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .thumb-zone {
-  width: 64px;
-  aspect-ratio: 1 / 1;
+  width: 96px;
+  height: 72px;
+  min-height: 72px;
+  max-height: 72px;
+  aspect-ratio: 4 / 3;
   border: 1px solid #ddd;
   border-radius: 6px;
   padding: 0;
@@ -366,10 +647,44 @@ async function onDrop(e: DragEvent) {
   align-items: center;
   justify-content: center;
   font-size: 11px;
+  align-self: start;
   justify-self: end;
 }
+.favorite-button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 4;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 0;
+  line-height: 1;
+  padding: 0;
+}
+.favorite-button:hover {
+  background: transparent;
+  color: #d97706;
+}
+.favorite-button.active {
+  background: transparent;
+  color: #d97706;
+}
+.favorite-button::before {
+  content: "★";
+  font-size: 14px;
+  line-height: 1;
+}
 .card.expanded .thumb-zone {
-  width: 100%;
+  width: 96px;
+  height: 72px;
 }
 .thumb-zone.empty {
   border-style: dashed;
@@ -380,7 +695,8 @@ async function onDrop(e: DragEvent) {
 .thumb {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  background: #f8fafc;
 }
 .file-input {
   display: none;

@@ -15,6 +15,8 @@ export interface Prompt {
   categoryId: string | null
   tags: string[]
   image: string | null // 相对路径，如 images/abc.png
+  favorite: boolean
+  order: number
   createdAt: number
   updatedAt: number
 }
@@ -22,6 +24,10 @@ export interface Prompt {
 export interface Settings {
   hotkey: string
   theme: 'auto' | 'light' | 'dark'
+  apiBaseUrl: string
+  apiKey: string
+  reverseModel: string
+  availableReverseModels: string[]
 }
 
 export interface Library {

@@ -1,12 +1,49 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { emitTo } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
 const win = getCurrentWindow()
 let startX = 0
 let startY = 0
 let dragging = false
+let unlistenDragDrop: (() => void) | null = null
 
-// 手动区分单击/拖动：移动 >3px 算拖动 → startDragging；否则算单击 → toggle 主面板
+type DroppedFileType = 'image' | 'video'
+
+const imageExts = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif'])
+const videoExts = new Set(['mp4', 'mov', 'webm', 'avi', 'mkv'])
+
+function classifyFile(file: File): DroppedFileType | null {
+  if (file.type.startsWith('image/')) return 'image'
+  if (file.type.startsWith('video/')) return 'video'
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  if (imageExts.has(ext)) return 'image'
+  if (videoExts.has(ext)) return 'video'
+  return null
+}
+
+function classifyPath(path: string): DroppedFileType | null {
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  if (imageExts.has(ext)) return 'image'
+  if (videoExts.has(ext)) return 'video'
+  return null
+}
+
+function fileNameFromPath(path: string) {
+  return path.split(/[\\/]/).pop() || path
+}
+
+async function emitDroppedFile(filePath: string, fileName: string, fileType: DroppedFileType) {
+  await invoke('show_panel')
+  await emitTo('main', 'floating-file-dropped', {
+    filePath,
+    fileName,
+    fileType,
+  })
+}
+
 function onMousedown(e: MouseEvent) {
   if (e.button !== 0) return
   startX = e.screenX
@@ -29,6 +66,32 @@ async function onMousemove(e: MouseEvent) {
 function onClick() {
   dragging = false
 }
+
+async function onDrop(e: DragEvent) {
+  e.preventDefault()
+  const file = e.dataTransfer?.files?.[0]
+  if (!file) return
+  const fileType = classifyFile(file)
+  if (!fileType) return
+  const filePath = (file as File & { path?: string }).path ?? file.name
+  await emitDroppedFile(filePath, file.name, fileType)
+}
+
+onMounted(async () => {
+  unlistenDragDrop = await win.onDragDropEvent((event) => {
+    if (event.payload.type !== 'drop') return
+    const filePath = event.payload.paths[0]
+    if (!filePath) return
+    const fileType = classifyPath(filePath)
+    if (!fileType) return
+    void emitDroppedFile(filePath, fileNameFromPath(filePath), fileType)
+  })
+})
+
+onUnmounted(() => {
+  unlistenDragDrop?.()
+  unlistenDragDrop = null
+})
 </script>
 
 <template>
@@ -37,6 +100,8 @@ function onClick() {
     @mousedown="onMousedown"
     @mousemove="onMousemove"
     @click="onClick"
+    @dragover.prevent
+    @drop.prevent="onDrop"
   >
     🍌
   </div>

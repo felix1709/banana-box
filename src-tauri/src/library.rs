@@ -30,11 +30,40 @@ pub struct Prompt {
     pub updated_at: i64,
 }
 
+fn default_api_base_url() -> String {
+    "https://ai.leihuo.netease.com".to_string()
+}
+
+fn default_api_key() -> String {
+    String::new()
+}
+
+fn default_reverse_model() -> String {
+    "doubao-seed-1-6-vision-250815".to_string()
+}
+
+fn default_available_reverse_models() -> Vec<String> {
+    vec![
+        "doubao-seed-1-6-vision-250815".to_string(),
+        "gpt-5.4-mini".to_string(),
+        "qwen3.5-omni-plus".to_string(),
+        "qwen3-vl-plus".to_string(),
+    ]
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub hotkey: String,
     pub theme: String,
+    #[serde(default = "default_api_base_url")]
+    pub api_base_url: String,
+    #[serde(default = "default_api_key")]
+    pub api_key: String,
+    #[serde(default = "default_reverse_model")]
+    pub reverse_model: String,
+    #[serde(default = "default_available_reverse_models")]
+    pub available_reverse_models: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -55,6 +84,10 @@ impl Default for Library {
             settings: Settings {
                 hotkey: "Ctrl+Shift+B".to_string(),
                 theme: "auto".to_string(),
+                api_base_url: default_api_base_url(),
+                api_key: default_api_key(),
+                reverse_model: default_reverse_model(),
+                available_reverse_models: default_available_reverse_models(),
             },
         }
     }
@@ -211,5 +244,36 @@ mod tests {
         // 图片已解包
         let restored = fs::read(data_dir2.path().join("images/a.png")).unwrap();
         assert_eq!(restored, b"fakepng");
+    }
+
+    #[test]
+    fn load_old_settings_fills_reverse_api_defaults() {
+        let dir = tempdir().unwrap();
+        let json = r##"{
+          "version": 1,
+          "categories": [],
+          "prompts": [],
+          "settings": {
+            "hotkey": "Ctrl+Shift+B",
+            "theme": "auto"
+          }
+        }"##;
+        fs::create_dir_all(dir.path()).unwrap();
+        fs::write(library_path(dir.path()), json).unwrap();
+
+        let lib = load_library(dir.path());
+
+        assert_eq!(lib.settings.api_base_url, "https://ai.leihuo.netease.com");
+        assert_eq!(lib.settings.api_key, "");
+        assert_eq!(lib.settings.reverse_model, "doubao-seed-1-6-vision-250815");
+        assert_eq!(
+            lib.settings.available_reverse_models,
+            vec![
+                "doubao-seed-1-6-vision-250815".to_string(),
+                "gpt-5.4-mini".to_string(),
+                "qwen3.5-omni-plus".to_string(),
+                "qwen3-vl-plus".to_string(),
+            ]
+        );
     }
 }

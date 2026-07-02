@@ -1,7 +1,7 @@
 // tests/stores/library.test.ts
 import { setActivePinia, createPinia } from 'pinia'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { useLibraryStore } from '@/stores/library'
+import { FAVORITES_CATEGORY_ID, useLibraryStore } from '@/stores/library'
 import type { Library } from '@/types'
 
 // mock 掉 IPC 层，store 在 jsdom 里不触发真实 Tauri 调用
@@ -72,6 +72,36 @@ describe('library store', () => {
     expect(s.filteredPrompts.map((p) => p.id)).toEqual(['p1'])
   })
 
+  it('normalizes old prompts with favorite and order defaults', () => {
+    const s = useLibraryStore()
+
+    expect(s.library.prompts.map((p) => ({ id: p.id, favorite: p.favorite, order: p.order }))).toEqual([
+      { id: 'p1', favorite: false, order: 0 },
+      { id: 'p2', favorite: false, order: 1 },
+    ])
+  })
+
+  it('filters favorite prompts through the fixed favorites category', () => {
+    const s = useLibraryStore()
+    s.toggleFavorite('p2')
+    s.currentCategoryId = FAVORITES_CATEGORY_ID
+
+    expect(s.filteredPrompts.map((p) => p.id)).toEqual(['p2'])
+  })
+
+  it('sorts prompts by order and can move one prompt before another', () => {
+    const s = useLibraryStore()
+    s.updatePrompt('p1', { order: 10 })
+    s.updatePrompt('p2', { order: 20 })
+
+    s.movePromptBefore('p2', 'p1')
+
+    expect(s.filteredPrompts.map((p) => p.id)).toEqual(['p2', 'p1'])
+    expect(s.library.prompts.find((p) => p.id === 'p2')?.order).toBeLessThan(
+      s.library.prompts.find((p) => p.id === 'p1')?.order ?? 0,
+    )
+  })
+
   it('addPrompt appends with uuid and timestamps', () => {
     const s = useLibraryStore()
     const before = s.library.prompts.length
@@ -79,6 +109,8 @@ describe('library store', () => {
     expect(s.library.prompts.length).toBe(before + 1)
     expect(s.library.prompts[before].id.length).toBeGreaterThan(8)
     expect(s.library.prompts[before].createdAt).toBeGreaterThan(0)
+    expect(s.library.prompts[before].favorite).toBe(false)
+    expect(s.library.prompts[before].order).toBe(before)
   })
 
   it('deletePrompt removes prompt', () => {
@@ -99,5 +131,19 @@ describe('library store', () => {
     s.deleteCategory('c1')
     expect(s.library.categories.find((c) => c.id === 'c1')).toBeUndefined()
     expect(s.library.prompts[0].categoryId).toBeNull()
+  })
+
+  it('hydrates old libraries with default reverse API settings', () => {
+    const s = useLibraryStore()
+
+    expect((s.library.settings as any).apiBaseUrl).toBe('https://ai.leihuo.netease.com')
+    expect((s.library.settings as any).apiKey).toBe('')
+    expect((s.library.settings as any).reverseModel).toBe('doubao-seed-1-6-vision-250815')
+    expect((s.library.settings as any).availableReverseModels).toEqual([
+      'doubao-seed-1-6-vision-250815',
+      'gpt-5.4-mini',
+      'qwen3.5-omni-plus',
+      'qwen3-vl-plus',
+    ])
   })
 })

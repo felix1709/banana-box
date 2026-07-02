@@ -11,6 +11,54 @@ export interface ImportFile {
   content: string
 }
 
+export interface UpdateCheckResult {
+  currentVersion: string
+  latestVersion: string
+  updateAvailable: boolean
+  releaseUrl: string
+  downloadUrl: string
+}
+
+export interface CheckApiConnectionInput {
+  baseUrl: string
+  apiKey: string
+}
+
+export interface CheckApiConnectionResult {
+  ok: boolean
+  message: string
+  models: string[]
+}
+
+export interface ReverseImagePromptInput {
+  baseUrl: string
+  apiKey: string
+  model: string
+  imagePath: string
+}
+
+export interface ReverseImagePromptResult {
+  prompt: string
+}
+
+export interface ImportImageFromPathInput {
+  sourcePath: string
+}
+
+export interface CompressMediaInput {
+  sourcePath: string
+  targetMb: number
+  outputPath: string
+}
+
+export interface CompressMediaResult {
+  outputPath: string
+}
+
+export interface SuggestCompressedOutputPathInput {
+  sourcePath: string
+}
+
 export async function loadLibrary(): Promise<Library> {
   return await invoke<Library>('load_library')
 }
@@ -68,4 +116,34 @@ export async function readImportDir(dir: string): Promise<ImportFile[]> {
 // 下载远程图片到 images/，返回相对路径
 export async function downloadImage(url: string): Promise<string> {
   return await invoke<string>('download_image', { url })
+}
+
+export async function checkForUpdate(): Promise<UpdateCheckResult> {
+  return await invoke<UpdateCheckResult>('check_for_update')
+}
+
+export async function checkApiConnection(
+  input: CheckApiConnectionInput,
+): Promise<CheckApiConnectionResult> {
+  return await invoke<CheckApiConnectionResult>('check_api_connection', { input })
+}
+
+export async function reverseImagePrompt(
+  input: ReverseImagePromptInput,
+): Promise<ReverseImagePromptResult> {
+  return await invoke<ReverseImagePromptResult>('reverse_image_prompt', { input })
+}
+
+export async function importImageFromPath(input: ImportImageFromPathInput): Promise<string> {
+  return await invoke<string>('import_image_from_path', { input })
+}
+
+export async function compressMedia(input: CompressMediaInput): Promise<CompressMediaResult> {
+  return await invoke<CompressMediaResult>('compress_media', { input })
+}
+
+export async function suggestCompressedOutputPath(
+  input: SuggestCompressedOutputPathInput,
+): Promise<string> {
+  return await invoke<string>('suggest_compressed_output_path', { input })
 }

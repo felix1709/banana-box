@@ -13,11 +13,11 @@ const editing = computed(
 )
 
 const form = ref({
-  title: editing.value?.title ?? '',
-  content: editing.value?.content ?? '',
-  categoryId: (editing.value?.categoryId ?? null) as string | null,
-  tags: editing.value?.tags.join(', ') ?? '',
-  image: (editing.value?.image ?? null) as string | null,
+  title: editing.value?.title ?? ui.editorPrefill?.title ?? '',
+  content: editing.value?.content ?? ui.editorPrefill?.content ?? '',
+  categoryId: (editing.value?.categoryId ?? ui.editorPrefill?.categoryId ?? null) as string | null,
+  tags: editing.value?.tags.join(', ') ?? ui.editorPrefill?.tags?.join(', ') ?? '',
+  image: (editing.value?.image ?? ui.editorPrefill?.image ?? null) as string | null,
 })
 
 async function onPickImage(e: Event) {
