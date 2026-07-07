@@ -109,11 +109,11 @@ function onSave() {
 .mask {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.36);
+  background: rgba(0, 0, 0, 0.68);
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(5px);
   z-index: 20;
 }
 .dialog {
@@ -152,13 +152,13 @@ select {
   padding-top: 4px;
 }
 .primary {
-  border-color: var(--bb-primary);
-  background: var(--bb-primary);
-  color: #fff;
+  border-color: rgba(102, 247, 211, 0.55);
+  background: linear-gradient(180deg, var(--bb-primary-strong), var(--bb-primary));
+  color: #041017;
   font-weight: 600;
 }
 .primary:hover {
   border-color: var(--bb-primary-strong);
-  background: var(--bb-primary-strong);
+  background: linear-gradient(180deg, #c2fff2, #78ffdf);
 }
 </style>

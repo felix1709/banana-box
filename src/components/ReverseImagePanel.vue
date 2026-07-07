@@ -220,7 +220,9 @@ function clearReverseState() {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(102, 247, 211, 0.08), transparent 35%),
+    linear-gradient(180deg, rgba(9, 20, 30, 0.74), rgba(5, 13, 20, 0.9));
 }
 
 .upload-zone {
@@ -230,13 +232,15 @@ function clearReverseState() {
   align-items: center;
   justify-content: center;
   gap: 9px;
-  border: 1px dashed #b8c8dc;
+  border: 1px dashed rgba(102, 247, 211, 0.38);
   border-radius: var(--bb-radius-lg);
   background:
-    linear-gradient(180deg, rgba(248, 250, 252, 0.88), rgba(241, 245, 249, 0.72)),
+    radial-gradient(circle at 50% 0%, rgba(102, 247, 211, 0.1), transparent 42%),
+    linear-gradient(180deg, rgba(18, 33, 45, 0.9), rgba(8, 19, 29, 0.88)),
     var(--bb-surface-soft);
   color: var(--bb-text);
   text-align: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .upload-zone:focus-visible {
@@ -259,7 +263,7 @@ function clearReverseState() {
   overflow: hidden;
   border: 1px solid var(--bb-border);
   border-radius: var(--bb-radius-md);
-  background: var(--bb-surface);
+  background: rgba(5, 14, 22, 0.86);
   box-shadow: var(--bb-shadow-sm);
 }
 
@@ -292,14 +296,15 @@ function clearReverseState() {
   min-width: 72px;
 }
 .reverse-button {
-  border-color: var(--bb-primary);
-  background: var(--bb-primary);
-  color: #fff;
+  border-color: rgba(102, 247, 211, 0.55);
+  background: linear-gradient(180deg, var(--bb-primary-strong), var(--bb-primary));
+  color: #041017;
   font-weight: 600;
+  box-shadow: 0 0 24px rgba(102, 247, 211, 0.18);
 }
 .reverse-button:hover:not(:disabled) {
   border-color: var(--bb-primary-strong);
-  background: var(--bb-primary-strong);
+  background: linear-gradient(180deg, #c2fff2, #78ffdf);
 }
 .reverse-button:disabled {
   border-color: var(--bb-border);
@@ -315,7 +320,8 @@ function clearReverseState() {
   padding: 8px;
   font-size: 13px;
   line-height: 1.45;
-  background: var(--bb-surface);
+  background: rgba(5, 14, 22, 0.82);
+  box-shadow: inset 0 0 28px rgba(102, 247, 211, 0.03);
 }
 
 .error {

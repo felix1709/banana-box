@@ -316,11 +316,11 @@ async function onDownloadUpdate() {
 .mask {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.36);
+  background: rgba(0, 0, 0, 0.68);
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(5px);
   z-index: 20;
 }
 .dialog {
@@ -374,6 +374,7 @@ select {
   border-radius: var(--bb-radius-md);
   padding: 11px;
   background: var(--bb-surface-soft);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -407,6 +408,7 @@ select {
   border-radius: var(--bb-radius-md);
   padding: 11px;
   background: var(--bb-surface-soft);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 .version-header {
   display: flex;

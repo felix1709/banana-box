@@ -35,12 +35,12 @@ const emit = defineEmits<{
 .mask {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.36);
+  background: rgba(0, 0, 0, 0.68);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 20;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(5px);
 }
 .dialog {
   width: 300px;
@@ -67,8 +67,8 @@ const emit = defineEmits<{
 }
 .danger {
   border-color: var(--bb-danger);
-  background: var(--bb-danger);
-  color: #fff;
+  background: linear-gradient(180deg, #ff7d8a, var(--bb-danger));
+  color: #22050a;
   font-weight: 600;
 }
 .danger:hover {

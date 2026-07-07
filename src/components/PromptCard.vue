@@ -483,21 +483,24 @@ function onPointerEnter() {
   min-height: 104px;
   max-height: 104px;
   max-width: 100%;
-  background: var(--bb-surface);
+  background:
+    linear-gradient(180deg, rgba(20, 35, 47, 0.96), rgba(9, 21, 31, 0.96));
   position: relative;
   transition:
     border-color 120ms ease,
     background-color 120ms ease,
     box-shadow 120ms ease,
     transform 120ms ease;
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+  box-shadow: var(--bb-shadow-card);
 }
 .card.collapsed {
   height: 104px;
 }
 .card.expanded {
-  border-color: #b7c7dd;
-  background: var(--bb-surface);
+  border-color: rgba(123, 255, 226, 0.36);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(102, 247, 211, 0.1), transparent 38%),
+    linear-gradient(180deg, rgba(23, 41, 54, 0.98), rgba(10, 22, 32, 0.98));
   padding-bottom: 7px;
   height: auto;
   min-height: 104px;
@@ -505,7 +508,7 @@ function onPointerEnter() {
   overflow: visible;
   position: relative;
   z-index: 2;
-  box-shadow: var(--bb-shadow-card);
+  box-shadow: var(--bb-shadow-floating);
 }
 .card.flow-expanded-card {
   height: auto;
@@ -522,14 +525,17 @@ function onPointerEnter() {
   pointer-events: none;
   user-select: none;
   opacity: 0.94;
-  border-color: #8ea6c2;
+  border-color: rgba(123, 255, 226, 0.58);
   box-shadow: var(--bb-shadow-floating);
   will-change: transform;
 }
 .card:hover {
-  border-color: #c6d4e5;
-  background: #fbfdff;
-  box-shadow: var(--bb-shadow-sm);
+  border-color: rgba(123, 255, 226, 0.34);
+  background:
+    linear-gradient(180deg, rgba(24, 43, 57, 0.98), rgba(11, 25, 36, 0.98));
+  box-shadow:
+    var(--bb-shadow-card),
+    0 0 26px rgba(102, 247, 211, 0.08);
 }
 .card-main {
   display: grid;
@@ -623,12 +629,12 @@ function onPointerEnter() {
   overflow: visible;
 }
 .tag {
-  border: 1px solid #dbe5f0;
-  background: var(--bb-surface-soft);
+  border: 1px solid rgba(102, 247, 211, 0.16);
+  background: rgba(102, 247, 211, 0.08);
   border-radius: 999px;
   padding: 1px 6px;
   font-size: 10px;
-  color: #475569;
+  color: #b5d3dc;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -652,7 +658,7 @@ function onPointerEnter() {
   padding: 0;
   overflow: hidden;
   background:
-    linear-gradient(135deg, rgba(248, 250, 252, 0.92), rgba(241, 245, 249, 0.92)),
+    linear-gradient(135deg, rgba(21, 38, 51, 0.92), rgba(8, 18, 27, 0.92)),
     var(--bb-surface-soft);
   color: var(--bb-text-muted);
   cursor: pointer;
@@ -662,7 +668,9 @@ function onPointerEnter() {
   font-size: 11px;
   align-self: start;
   justify-self: end;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 0 24px rgba(102, 247, 211, 0.03);
 }
 .favorite-button {
   position: absolute;
@@ -707,14 +715,14 @@ function onPointerEnter() {
   border-style: dashed;
 }
 .thumb-zone:hover {
-  border-color: #b7c7dd;
+  border-color: rgba(123, 255, 226, 0.36);
   background: var(--bb-primary-soft);
 }
 .thumb {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  background: var(--bb-surface-soft);
+  background: #07121b;
 }
 .file-input {
   display: none;
@@ -734,7 +742,7 @@ function onPointerEnter() {
   padding: 3px 6px;
   border: 1px solid var(--bb-border);
   border-radius: var(--bb-radius-xs);
-  background: var(--bb-surface);
+  background: rgba(5, 14, 22, 0.74);
   cursor: pointer;
   font-size: 12px;
   color: var(--bb-text);
@@ -784,7 +792,7 @@ function onPointerEnter() {
   flex: 0 0 auto;
 }
 .category-dot.empty {
-  border: 1px solid #a8b3c2;
+  border: 1px solid rgba(181, 211, 220, 0.72);
   background: transparent;
 }
 </style>

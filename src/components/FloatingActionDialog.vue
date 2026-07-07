@@ -92,8 +92,8 @@ function openReverseImage() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 23, 42, 0.36);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(5px);
 }
 
 .dialog {
@@ -142,7 +142,8 @@ function openReverseImage() {
   padding: 10px 11px;
   border: 1px solid var(--bb-border);
   border-radius: var(--bb-radius-md);
-  background: var(--bb-surface);
+  background:
+    linear-gradient(180deg, rgba(20, 35, 47, 0.96), rgba(9, 21, 31, 0.96));
   color: var(--bb-text);
   cursor: pointer;
   text-align: left;
@@ -150,8 +151,9 @@ function openReverseImage() {
 }
 
 .action-button:hover {
-  border-color: #bfd3ff;
+  border-color: rgba(123, 255, 226, 0.34);
   background: var(--bb-primary-soft);
+  box-shadow: 0 0 24px rgba(102, 247, 211, 0.09);
 }
 
 .action-button:disabled {

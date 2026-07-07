@@ -210,12 +210,17 @@ watchEffect(async () => {
   font-family: var(--bb-font);
   overflow: hidden;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(248, 250, 252, 0.98)),
+    radial-gradient(circle at 78% 12%, rgba(102, 247, 211, 0.16), transparent 28%),
+    radial-gradient(circle at 18% 96%, rgba(82, 157, 255, 0.12), transparent 36%),
+    linear-gradient(135deg, rgba(7, 17, 24, 0.98), rgba(13, 24, 35, 0.98) 46%, rgba(4, 12, 19, 0.98)),
     var(--bb-bg);
   color: var(--bb-text);
-  border: 1px solid rgba(203, 213, 225, 0.92);
+  border: 1px solid rgba(123, 255, 226, 0.2);
   border-radius: var(--bb-radius-lg);
-  box-shadow: 0 22px 56px rgba(15, 23, 42, 0.26);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 28px 72px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(5, 14, 22, 0.84);
 }
 .window-drag-strip {
   height: 22px;
@@ -224,16 +229,16 @@ watchEffect(async () => {
   align-items: center;
   justify-content: center;
   cursor: grab;
-  background: rgba(248, 250, 252, 0.92);
-  border-bottom: 1px solid rgba(226, 232, 240, 0.95);
+  background: rgba(4, 12, 18, 0.78);
+  border-bottom: 1px solid rgba(123, 255, 226, 0.12);
   transition:
     background-color 120ms ease,
     border-color 120ms ease;
 }
 .window-drag-strip:hover,
 .window-drag-strip-active {
-  background: var(--bb-primary-soft);
-  border-bottom-color: #bfd3ff;
+  background: rgba(102, 247, 211, 0.1);
+  border-bottom-color: rgba(123, 255, 226, 0.3);
 }
 .window-drag-strip:active {
   cursor: grabbing;
@@ -242,10 +247,11 @@ watchEffect(async () => {
   width: 78px;
   height: 3px;
   border-radius: 999px;
-  background: #9aabc0;
+  background: rgba(102, 247, 211, 0.66);
   box-shadow:
-    0 -6px 0 rgba(154, 171, 192, 0.26),
-    0 6px 0 rgba(154, 171, 192, 0.26);
+    0 -6px 0 rgba(102, 247, 211, 0.16),
+    0 6px 0 rgba(102, 247, 211, 0.16),
+    0 0 18px rgba(102, 247, 211, 0.28);
   transition:
     background-color 120ms ease,
     box-shadow 120ms ease,
@@ -253,10 +259,11 @@ watchEffect(async () => {
 }
 .window-drag-strip:hover .window-drag-marker,
 .window-drag-strip-active .window-drag-marker {
-  background: #2563eb;
+  background: var(--bb-primary-strong);
   box-shadow:
-    0 -6px 0 rgba(37, 99, 235, 0.24),
-    0 6px 0 rgba(37, 99, 235, 0.24);
+    0 -6px 0 rgba(157, 255, 233, 0.22),
+    0 6px 0 rgba(157, 255, 233, 0.22),
+    0 0 24px rgba(102, 247, 211, 0.42);
   transform: scaleX(1.08);
 }
 .topbar {
@@ -264,8 +271,9 @@ watchEffect(async () => {
   align-items: center;
   gap: var(--bb-space-2);
   padding: 9px 10px;
-  border-bottom: 1px solid var(--bb-border);
-  background: rgba(248, 250, 252, 0.94);
+  border-bottom: 1px solid rgba(123, 255, 226, 0.12);
+  background: rgba(6, 14, 21, 0.74);
+  backdrop-filter: blur(14px);
 }
 .window-drag-handle {
   display: none;
@@ -278,21 +286,22 @@ watchEffect(async () => {
     radial-gradient(circle, #94a3b8 1.2px, transparent 1.4px) 6px 7px / 8px 8px;
 }
 .window-drag-handle:hover {
-  background-color: #eef2f7;
+  background-color: rgba(102, 247, 211, 0.1);
 }
 .body {
   flex: 1;
   display: flex;
   overflow: hidden;
   min-height: 0;
-  background: var(--bb-bg);
+  background: rgba(4, 12, 18, 0.36);
 }
 .sidebar {
   width: 168px;
   flex: 0 0 168px;
-  border-right: 1px solid var(--bb-border);
+  border-right: 1px solid rgba(123, 255, 226, 0.13);
   overflow-y: auto;
-  background: linear-gradient(180deg, #f8fafc 0%, #f1f6fb 100%);
+  background:
+    linear-gradient(180deg, rgba(8, 20, 30, 0.94) 0%, rgba(5, 13, 20, 0.9) 100%);
 }
 .content {
   flex: 1;
@@ -300,7 +309,8 @@ watchEffect(async () => {
   overflow-x: hidden;
   padding: 0;
   min-width: 0;
-  background: var(--bb-surface);
+  background:
+    linear-gradient(180deg, rgba(10, 22, 32, 0.58), rgba(5, 13, 20, 0.72));
 }
 .prompt-library {
   height: 100%;
@@ -318,7 +328,9 @@ watchEffect(async () => {
   flex-direction: column;
   gap: 9px;
   min-width: 0;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(102, 247, 211, 0.08), transparent 34%),
+    linear-gradient(180deg, rgba(9, 20, 30, 0.72), rgba(5, 13, 20, 0.86));
 }
 .animated-prompt-list :deep(.card) {
   transition:
@@ -339,7 +351,7 @@ watchEffect(async () => {
   flex: 0 0 104px;
   height: 104px;
   min-height: 104px;
-  border: 1px dashed #adc1dc;
+  border: 1px dashed rgba(102, 247, 211, 0.46);
   border-radius: var(--bb-radius-md);
   background: var(--bb-primary-soft);
   box-sizing: border-box;
@@ -367,6 +379,9 @@ watchEffect(async () => {
 .btn {
   padding: 5px 10px;
   cursor: pointer;
+  border-color: rgba(102, 247, 211, 0.22);
+  background: rgba(102, 247, 211, 0.09);
+  color: var(--bb-text);
 }
 .btn.primary {
   font-weight: bold;
@@ -376,8 +391,8 @@ watchEffect(async () => {
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(15, 23, 42, 0.94);
-  color: #fff;
+  background: rgba(5, 14, 22, 0.96);
+  color: var(--bb-text);
   padding: 7px 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
@@ -387,7 +402,7 @@ watchEffect(async () => {
 .preview-mask {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.78);
+  background: rgba(0, 0, 0, 0.78);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -401,6 +416,7 @@ watchEffect(async () => {
   height: auto;
   object-fit: contain;
   border-radius: var(--bb-radius-md);
+  border: 1px solid var(--bb-border-strong);
   box-shadow: var(--bb-shadow-dialog);
 }
 </style>

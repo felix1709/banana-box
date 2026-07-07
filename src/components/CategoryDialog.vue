@@ -89,12 +89,12 @@ function onConfirm() {
 .mask {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.36);
+  background: rgba(0, 0, 0, 0.68);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 20;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(5px);
 }
 .dialog {
   width: 320px;
@@ -129,7 +129,7 @@ input[type='text'] {
   height: 24px;
   min-height: 24px;
   border-radius: 999px;
-  border: 2px solid #fff;
+  border: 2px solid rgba(234, 255, 249, 0.9);
   box-shadow: 0 0 0 1px var(--bb-border);
   cursor: pointer;
 }
@@ -152,13 +152,13 @@ input[type='text'] {
   gap: 8px;
 }
 .primary {
-  border-color: var(--bb-primary);
-  background: var(--bb-primary);
-  color: #fff;
+  border-color: rgba(102, 247, 211, 0.55);
+  background: linear-gradient(180deg, var(--bb-primary-strong), var(--bb-primary));
+  color: #041017;
   font-weight: 600;
 }
 .primary:hover {
   border-color: var(--bb-primary-strong);
-  background: var(--bb-primary-strong);
+  background: linear-gradient(180deg, #c2fff2, #78ffdf);
 }
 </style>

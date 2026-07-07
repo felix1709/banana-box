@@ -102,12 +102,12 @@ function onConfirm(payload: { name: string; color: string }) {
   border-radius: 5px;
 }
 .item:hover {
-  background: rgba(255, 255, 255, 0.76);
+  background: rgba(102, 247, 211, 0.07);
   color: var(--bb-text);
 }
 .item.active {
-  border-color: var(--bb-border);
-  background: var(--bb-surface);
+  border-color: rgba(102, 247, 211, 0.2);
+  background: rgba(102, 247, 211, 0.1);
   color: var(--bb-text);
   font-weight: 600;
 }
@@ -115,7 +115,7 @@ function onConfirm(payload: { name: string; color: string }) {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 0 10px currentColor;
 }
 .favorite-dot {
   width: 12px;
@@ -146,7 +146,8 @@ function onConfirm(payload: { name: string; color: string }) {
   padding: 6px;
   cursor: pointer;
   color: var(--bb-primary);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(102, 247, 211, 0.07);
+  border-color: rgba(102, 247, 211, 0.16);
 }
 .tree.compact .add {
   min-height: 24px;

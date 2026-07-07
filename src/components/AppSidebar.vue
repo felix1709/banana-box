@@ -104,20 +104,20 @@ const tools: { id: ActiveTool; label: string }[] = [
   width: 32px;
   min-height: 32px;
   flex: 0 0 32px;
-  border: 1px solid var(--bb-primary);
+  border: 1px solid rgba(102, 247, 211, 0.55);
   border-radius: var(--bb-radius-md);
-  background: var(--bb-primary);
-  color: #fff;
+  background: linear-gradient(180deg, var(--bb-primary-strong), var(--bb-primary));
+  color: #041017;
   cursor: pointer;
   font-size: 20px;
   font-weight: 700;
   line-height: 1;
-  box-shadow: var(--bb-shadow-sm);
+  box-shadow: 0 0 22px rgba(102, 247, 211, 0.2);
 }
 
 .create-prompt-button:hover {
   border-color: var(--bb-primary-strong);
-  background: var(--bb-primary-strong);
+  background: linear-gradient(180deg, #c2fff2, #78ffdf);
 }
 
 .create-prompt-button:focus-visible {
@@ -126,17 +126,20 @@ const tools: { id: ActiveTool; label: string }[] = [
 }
 
 .tool-button:hover {
-  border-color: rgba(203, 213, 225, 0.72);
-  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(123, 255, 226, 0.16);
+  background: rgba(102, 247, 211, 0.07);
   color: var(--bb-text);
 }
 
 .tool-button.active {
-  border-color: #bfd3ff;
-  background: var(--bb-primary-soft);
-  color: #1e3a8a;
+  border-color: rgba(123, 255, 226, 0.32);
+  background:
+    linear-gradient(135deg, rgba(102, 247, 211, 0.18), rgba(82, 157, 255, 0.08));
+  color: var(--bb-text);
   font-weight: 600;
-  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.04);
+  box-shadow:
+    inset 0 0 0 1px rgba(102, 247, 211, 0.04),
+    0 0 26px rgba(102, 247, 211, 0.08);
 }
 
 .sidebar-category-list {
@@ -144,7 +147,7 @@ const tools: { id: ActiveTool; label: string }[] = [
   min-height: 48px;
   overflow-y: auto;
   overflow-x: hidden;
-  border-left: 1px solid var(--bb-border);
+  border-left: 1px solid rgba(102, 247, 211, 0.14);
   margin: -1px 0 2px 9px;
   padding: 3px 0 3px 5px;
   scrollbar-gutter: stable;
