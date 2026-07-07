@@ -92,17 +92,18 @@ function openReverseImage() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 23, 42, 0.28);
+  background: rgba(15, 23, 42, 0.36);
+  backdrop-filter: blur(2px);
 }
 
 .dialog {
   width: 360px;
   max-width: calc(100vw - 24px);
-  padding: 14px;
-  border: 1px solid #d7dde7;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.22);
+  padding: 15px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-lg);
+  background: var(--bb-surface);
+  box-shadow: var(--bb-shadow-dialog);
 }
 
 .header {
@@ -116,11 +117,12 @@ function openReverseImage() {
 .header h3 {
   margin: 0;
   font-size: 16px;
+  color: var(--bb-text);
 }
 
 .header p {
   margin: 4px 0 0;
-  color: #64748b;
+  color: var(--bb-text-muted);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
@@ -137,23 +139,26 @@ function openReverseImage() {
 
 .action-button {
   min-height: 58px;
-  padding: 9px 10px;
-  border: 1px solid #d7dde7;
-  border-radius: 6px;
-  background: #fff;
-  color: #1f2937;
+  padding: 10px 11px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-md);
+  background: var(--bb-surface);
+  color: var(--bb-text);
   cursor: pointer;
   text-align: left;
+  box-shadow: var(--bb-shadow-sm);
 }
 
 .action-button:hover {
-  background: #f8fafc;
+  border-color: #bfd3ff;
+  background: var(--bb-primary-soft);
 }
 
 .action-button:disabled {
   cursor: not-allowed;
-  color: #94a3b8;
-  background: #f8fafc;
+  color: var(--bb-text-soft);
+  background: var(--bb-surface-muted);
+  box-shadow: none;
 }
 
 .action-button strong,
@@ -163,7 +168,7 @@ function openReverseImage() {
 
 .action-button span {
   margin-top: 3px;
-  color: #64748b;
+  color: var(--bb-text-muted);
   font-size: 12px;
 }
 </style>

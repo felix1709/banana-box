@@ -85,29 +85,42 @@ function onConfirm(payload: { name: string; color: string }) {
 .item {
   padding: 6px 8px;
   cursor: pointer;
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--bb-radius-sm);
   display: flex;
   align-items: center;
   gap: 6px;
+  color: var(--bb-text-muted);
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
 }
 .tree.compact .item {
   min-height: 24px;
   padding: 4px 5px;
   border-radius: 5px;
 }
-.item:hover,
+.item:hover {
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--bb-text);
+}
 .item.active {
-  background: #f0f0f0;
+  border-color: var(--bb-border);
+  background: var(--bb-surface);
+  color: var(--bb-text);
+  font-weight: 600;
 }
 .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
 }
 .favorite-dot {
   width: 12px;
   flex: 0 0 12px;
-  color: #d97706;
+  color: var(--bb-favorite);
   font-size: 12px;
   line-height: 1;
 }
@@ -116,15 +129,24 @@ function onConfirm(payload: { name: string; color: string }) {
   border: none;
   background: none;
   cursor: pointer;
-  color: #c00;
+  color: var(--bb-text-soft);
   font-size: 11px;
   line-height: 1;
+  min-height: 18px;
+  width: 18px;
+  padding: 0;
+}
+.del:hover {
+  color: var(--bb-danger);
+  background: var(--bb-danger-soft);
 }
 .add {
   width: 100%;
   margin-top: 8px;
   padding: 6px;
   cursor: pointer;
+  color: var(--bb-primary);
+  background: rgba(255, 255, 255, 0.72);
 }
 .tree.compact .add {
   min-height: 24px;

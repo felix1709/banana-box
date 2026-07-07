@@ -349,7 +349,7 @@ function onPointerEnter() {
         :class="{ 'flow-text-pane': isExpanded }"
       >
         <div class="title">
-          📄 {{ prompt.title }}
+          {{ prompt.title }}
         </div>
         <div
           class="content fixed-three-line-content"
@@ -471,9 +471,9 @@ function onPointerEnter() {
 
 <style scoped>
 .card {
-  border: 1px solid #eee;
-  border-radius: 6px;
-  padding: 5px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-md);
+  padding: 7px;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
@@ -483,25 +483,29 @@ function onPointerEnter() {
   min-height: 104px;
   max-height: 104px;
   max-width: 100%;
-  background: #fff;
+  background: var(--bb-surface);
   position: relative;
   transition:
     border-color 120ms ease,
-    background-color 120ms ease;
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
 }
 .card.collapsed {
   height: 104px;
 }
 .card.expanded {
-  border-color: #cbd5e1;
-  background: #fff;
-  padding-bottom: 5px;
+  border-color: #b7c7dd;
+  background: var(--bb-surface);
+  padding-bottom: 7px;
   height: auto;
   min-height: 104px;
   max-height: none;
   overflow: visible;
   position: relative;
   z-index: 2;
+  box-shadow: var(--bb-shadow-card);
 }
 .card.flow-expanded-card {
   height: auto;
@@ -518,17 +522,19 @@ function onPointerEnter() {
   pointer-events: none;
   user-select: none;
   opacity: 0.94;
-  border-color: #94a3b8;
-  box-shadow: 0 10px 24px rgb(15 23 42 / 18%);
+  border-color: #8ea6c2;
+  box-shadow: var(--bb-shadow-floating);
   will-change: transform;
 }
 .card:hover {
-  background: #fafafa;
+  border-color: #c6d4e5;
+  background: #fbfdff;
+  box-shadow: var(--bb-shadow-sm);
 }
 .card-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 96px;
-  gap: 6px;
+  gap: 8px;
   align-items: start;
   min-height: 100%;
 }
@@ -560,18 +566,21 @@ function onPointerEnter() {
 .title {
   font-weight: 600;
   font-size: 13px;
+  color: var(--bb-text);
+  letter-spacing: 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-right: 20px;
 }
 .content {
-  color: #555;
+  color: var(--bb-text-muted);
   font-size: 11px;
-  line-height: 1.3;
-  margin: 3px 0;
-  height: 3.9em;
-  max-height: 3.9em;
+  line-height: 1.35;
+  margin: 4px 0;
+  height: 4.05em;
+  max-height: 4.05em;
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -602,10 +611,10 @@ function onPointerEnter() {
 }
 .tags {
   display: flex;
-  gap: 3px;
+  gap: 4px;
   flex-wrap: wrap;
   min-width: 0;
-  max-height: 14px;
+  max-height: 16px;
   overflow: hidden;
 }
 .tags.full-tags,
@@ -614,10 +623,12 @@ function onPointerEnter() {
   overflow: visible;
 }
 .tag {
-  background: #eee;
-  border-radius: 3px;
-  padding: 0 4px;
+  border: 1px solid #dbe5f0;
+  background: var(--bb-surface-soft);
+  border-radius: 999px;
+  padding: 1px 6px;
   font-size: 10px;
+  color: #475569;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -636,12 +647,14 @@ function onPointerEnter() {
   min-height: 72px;
   max-height: 72px;
   aspect-ratio: 4 / 3;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-md);
   padding: 0;
   overflow: hidden;
-  background: #f8fafc;
-  color: #777;
+  background:
+    linear-gradient(135deg, rgba(248, 250, 252, 0.92), rgba(241, 245, 249, 0.92)),
+    var(--bb-surface-soft);
+  color: var(--bb-text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -649,11 +662,12 @@ function onPointerEnter() {
   font-size: 11px;
   align-self: start;
   justify-self: end;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
 }
 .favorite-button {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: 7px;
+  right: 7px;
   z-index: 4;
   width: 18px;
   height: 18px;
@@ -663,7 +677,7 @@ function onPointerEnter() {
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: #94a3b8;
+  color: var(--bb-text-soft);
   cursor: pointer;
   font-size: 0;
   line-height: 1;
@@ -671,16 +685,19 @@ function onPointerEnter() {
 }
 .favorite-button:hover {
   background: transparent;
-  color: #d97706;
+  color: var(--bb-favorite);
 }
 .favorite-button.active {
   background: transparent;
-  color: #d97706;
+  color: var(--bb-favorite);
 }
 .favorite-button::before {
-  content: "★";
+  content: "☆";
   font-size: 14px;
   line-height: 1;
+}
+.favorite-button.active::before {
+  content: "★";
 }
 .card.expanded .thumb-zone {
   width: 96px;
@@ -690,13 +707,14 @@ function onPointerEnter() {
   border-style: dashed;
 }
 .thumb-zone:hover {
-  background: #f0f4f8;
+  border-color: #b7c7dd;
+  background: var(--bb-primary-soft);
 }
 .thumb {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  background: #f8fafc;
+  background: var(--bb-surface-soft);
 }
 .file-input {
   display: none;
@@ -707,21 +725,23 @@ function onPointerEnter() {
 .actions {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
-  margin-top: 6px;
-  padding-top: 2px;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 4px;
 }
 .actions button {
-  min-height: 23px;
-  padding: 2px 6px 3px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: #fff;
+  min-height: 25px;
+  padding: 3px 6px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-xs);
+  background: var(--bb-surface);
   cursor: pointer;
   font-size: 12px;
+  color: var(--bb-text);
 }
 .actions button:hover {
-  background: #f0f0f0;
+  border-color: var(--bb-border-strong);
+  background: var(--bb-surface-soft);
 }
 .category-menu {
   position: absolute;
@@ -732,10 +752,10 @@ function onPointerEnter() {
   max-height: 196px;
   overflow: auto;
   padding: 4px;
-  border: 1px solid #d6dde8;
-  border-radius: 6px;
-  background: #fff;
-  box-shadow: 0 8px 22px rgb(15 23 42 / 16%);
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-md);
+  background: var(--bb-surface);
+  box-shadow: var(--bb-shadow-floating);
 }
 .category-menu-item {
   width: 100%;
@@ -745,9 +765,9 @@ function onPointerEnter() {
   gap: 7px;
   padding: 4px 8px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--bb-radius-xs);
   background: transparent;
-  color: #1f2937;
+  color: var(--bb-text);
   cursor: pointer;
   font-size: 12px;
   line-height: 1.2;
@@ -755,7 +775,7 @@ function onPointerEnter() {
 }
 .category-menu-item:hover,
 .category-menu-item.active {
-  background: #eef2f7;
+  background: var(--bb-primary-soft);
 }
 .category-dot {
   width: 8px;

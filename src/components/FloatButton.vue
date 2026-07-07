@@ -129,13 +129,18 @@ onUnmounted(() => {
   font-size: 32px;
   cursor: pointer;
   user-select: none;
-  background: transparent;
+  background:
+    radial-gradient(circle at 45% 35%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0) 46%),
+    transparent;
   font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", system-ui, sans-serif;
   line-height: 1;
+  transition:
+    filter 140ms ease,
+    transform 140ms ease;
 }
 
 .float-btn:hover {
-  filter: drop-shadow(0 2px 5px rgba(15, 23, 42, 0.28));
+  filter: drop-shadow(0 4px 10px rgba(15, 23, 42, 0.24));
 }
 
 .float-btn:active {

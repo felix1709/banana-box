@@ -207,43 +207,45 @@ watchEffect(async () => {
   height: 520px;
   display: flex;
   flex-direction: column;
-  font-family: system-ui, sans-serif;
+  font-family: var(--bb-font);
   overflow: hidden;
-  background: #fff;
-  color: #1f2937;
-  border: 1px solid #d7dde7;
-  border-radius: 8px;
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.24);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(248, 250, 252, 0.98)),
+    var(--bb-bg);
+  color: var(--bb-text);
+  border: 1px solid rgba(203, 213, 225, 0.92);
+  border-radius: var(--bb-radius-lg);
+  box-shadow: 0 22px 56px rgba(15, 23, 42, 0.26);
 }
 .window-drag-strip {
-  height: 24px;
-  flex: 0 0 24px;
+  height: 22px;
+  flex: 0 0 22px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: grab;
-  background: #f8fafc;
-  border-bottom: 1px solid #edf2f7;
+  background: rgba(248, 250, 252, 0.92);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.95);
   transition:
     background-color 120ms ease,
     border-color 120ms ease;
 }
 .window-drag-strip:hover,
 .window-drag-strip-active {
-  background: #eaf2ff;
-  border-bottom-color: #bfdbfe;
+  background: var(--bb-primary-soft);
+  border-bottom-color: #bfd3ff;
 }
 .window-drag-strip:active {
   cursor: grabbing;
 }
 .window-drag-marker {
-  width: 86px;
-  height: 4px;
+  width: 78px;
+  height: 3px;
   border-radius: 999px;
-  background: #94a3b8;
+  background: #9aabc0;
   box-shadow:
-    0 -7px 0 rgba(148, 163, 184, 0.38),
-    0 7px 0 rgba(148, 163, 184, 0.38);
+    0 -6px 0 rgba(154, 171, 192, 0.26),
+    0 6px 0 rgba(154, 171, 192, 0.26);
   transition:
     background-color 120ms ease,
     box-shadow 120ms ease,
@@ -253,17 +255,17 @@ watchEffect(async () => {
 .window-drag-strip-active .window-drag-marker {
   background: #2563eb;
   box-shadow:
-    0 -7px 0 rgba(37, 99, 235, 0.28),
-    0 7px 0 rgba(37, 99, 235, 0.28);
+    0 -6px 0 rgba(37, 99, 235, 0.24),
+    0 6px 0 rgba(37, 99, 235, 0.24);
   transform: scaleX(1.08);
 }
 .topbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border-bottom: 1px solid #eee;
-  background: #f8fafc;
+  gap: var(--bb-space-2);
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--bb-border);
+  background: rgba(248, 250, 252, 0.94);
 }
 .window-drag-handle {
   display: none;
@@ -283,13 +285,14 @@ watchEffect(async () => {
   display: flex;
   overflow: hidden;
   min-height: 0;
+  background: var(--bb-bg);
 }
 .sidebar {
-  width: 160px;
-  flex: 0 0 160px;
-  border-right: 1px solid #eee;
+  width: 168px;
+  flex: 0 0 168px;
+  border-right: 1px solid var(--bb-border);
   overflow-y: auto;
-  background: #f9fafb;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f6fb 100%);
 }
 .content {
   flex: 1;
@@ -297,7 +300,7 @@ watchEffect(async () => {
   overflow-x: hidden;
   padding: 0;
   min-width: 0;
-  background: #fff;
+  background: var(--bb-surface);
 }
 .prompt-library {
   height: 100%;
@@ -310,11 +313,12 @@ watchEffect(async () => {
   overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  padding: 8px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
   min-width: 0;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
 }
 .animated-prompt-list :deep(.card) {
   transition:
@@ -335,9 +339,9 @@ watchEffect(async () => {
   flex: 0 0 104px;
   height: 104px;
   min-height: 104px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 6px;
-  background: #f8fafc;
+  border: 1px dashed #adc1dc;
+  border-radius: var(--bb-radius-md);
+  background: var(--bb-primary-soft);
   box-sizing: border-box;
 }
 .prompt-reorder-move,
@@ -352,11 +356,16 @@ watchEffect(async () => {
   opacity: 0;
 }
 .empty {
-  color: #999;
+  color: var(--bb-text-muted);
   text-align: center;
   margin-top: 32px;
+  padding: 18px;
+  border: 1px dashed var(--bb-border);
+  border-radius: var(--bb-radius-md);
+  background: var(--bb-surface-soft);
 }
 .btn {
+  padding: 5px 10px;
   cursor: pointer;
 }
 .btn.primary {
@@ -367,19 +376,23 @@ watchEffect(async () => {
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  background: #333;
+  background: rgba(15, 23, 42, 0.94);
   color: #fff;
-  padding: 6px 12px;
-  border-radius: 6px;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  box-shadow: var(--bb-shadow-floating);
+  font-size: 12px;
 }
 .preview-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(15, 23, 42, 0.78);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10;
+  backdrop-filter: blur(2px);
 }
 .preview-img {
   max-width: 90%;
@@ -387,5 +400,7 @@ watchEffect(async () => {
   width: auto;
   height: auto;
   object-fit: contain;
+  border-radius: var(--bb-radius-md);
+  box-shadow: var(--bb-shadow-dialog);
 }
 </style>

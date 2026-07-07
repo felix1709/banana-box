@@ -316,17 +316,19 @@ async function onDownloadUpdate() {
 .mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(15, 23, 42, 0.36);
   display: flex;
   align-items: center;
   justify-content: center;
+  backdrop-filter: blur(2px);
   z-index: 20;
 }
 .dialog {
-  background: #fff;
+  background: var(--bb-surface);
   padding: 16px;
-  border-radius: 8px;
-  width: 390px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-lg);
+  width: 410px;
   max-width: calc(100vw - 24px);
   max-height: calc(100vh - 32px);
   overflow-y: auto;
@@ -335,31 +337,43 @@ async function onDownloadUpdate() {
   scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  box-shadow: var(--bb-shadow-dialog);
+}
+.dialog h3 {
+  margin: 0 0 2px;
+  color: var(--bb-text);
+  font-size: 16px;
+}
+.dialog hr {
+  width: 100%;
+  margin: 2px 0;
+  border: 0;
+  border-top: 1px solid var(--bb-border);
 }
 input {
   width: 100%;
   min-width: 0;
-  padding: 6px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  padding: 7px 8px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-sm);
 }
 select {
   width: 100%;
   min-width: 0;
-  padding: 6px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  padding: 7px 8px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-sm);
 }
 .actions {
   display: flex;
   justify-content: flex-end;
 }
 .api-panel {
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 10px;
-  background: #f8fafc;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-md);
+  padding: 11px;
+  background: var(--bb-surface-soft);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -368,13 +382,13 @@ select {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  color: #334155;
+  color: var(--bb-text);
   font-size: 13px;
 }
 .api-header p,
 .api-status {
   margin: 4px 0 0;
-  color: #64748b;
+  color: var(--bb-text-muted);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -382,12 +396,17 @@ select {
   display: flex;
   gap: 8px;
   align-items: center;
+  min-width: 0;
+}
+.api-status {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .version-panel {
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 10px;
-  background: #f8fafc;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-md);
+  padding: 11px;
+  background: var(--bb-surface-soft);
 }
 .version-header {
   display: flex;
@@ -398,9 +417,10 @@ select {
 .version-header p,
 .version-status {
   margin: 4px 0 0;
-  color: #64748b;
+  color: var(--bb-text-muted);
   font-size: 12px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .version-check-button,
 .install-update-button {
@@ -410,6 +430,6 @@ select {
   margin-top: 8px;
 }
 .version-status.error {
-  color: #b91c1c;
+  color: var(--bb-danger);
 }
 </style>

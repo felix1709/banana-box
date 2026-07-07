@@ -216,28 +216,37 @@ function clearReverseState() {
 <style scoped>
 .tool-panel {
   min-height: 100%;
-  padding: 8px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
 }
 
 .upload-zone {
-  min-height: 220px;
+  min-height: 184px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 6px;
-  background: #f8fafc;
-  color: #334155;
+  gap: 9px;
+  border: 1px dashed #b8c8dc;
+  border-radius: var(--bb-radius-lg);
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.88), rgba(241, 245, 249, 0.72)),
+    var(--bb-surface-soft);
+  color: var(--bb-text);
+  text-align: center;
+}
+
+.upload-zone:focus-visible {
+  border-color: var(--bb-primary);
+  box-shadow: var(--bb-focus);
 }
 
 .upload-zone p {
   margin: 0;
-  color: #64748b;
+  color: var(--bb-text-muted);
   font-size: 13px;
 }
 
@@ -248,9 +257,10 @@ function clearReverseState() {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border: 1px solid #d7dde7;
-  border-radius: 6px;
-  background: #fff;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-md);
+  background: var(--bb-surface);
+  box-shadow: var(--bb-shadow-sm);
 }
 
 .image-preview {
@@ -268,32 +278,50 @@ function clearReverseState() {
 .file-name {
   max-width: 100%;
   overflow-wrap: anywhere;
+  color: var(--bb-text-muted);
 }
 
 .reverse-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .clear-button {
   min-width: 72px;
 }
+.reverse-button {
+  border-color: var(--bb-primary);
+  background: var(--bb-primary);
+  color: #fff;
+  font-weight: 600;
+}
+.reverse-button:hover:not(:disabled) {
+  border-color: var(--bb-primary-strong);
+  background: var(--bb-primary-strong);
+}
+.reverse-button:disabled {
+  border-color: var(--bb-border);
+}
 
 .reverse-result {
   width: 100%;
   resize: vertical;
-  min-height: 120px;
+  min-height: 104px;
   box-sizing: border-box;
-  border: 1px solid #d7dde7;
-  border-radius: 6px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-md);
   padding: 8px;
   font-size: 13px;
   line-height: 1.45;
+  background: var(--bb-surface);
 }
 
 .error {
-  color: #b91c1c;
+  min-width: 0;
+  color: var(--bb-danger);
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 </style>

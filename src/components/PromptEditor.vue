@@ -109,34 +109,56 @@ function onSave() {
 .mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(15, 23, 42, 0.36);
   display: flex;
   align-items: center;
   justify-content: center;
+  backdrop-filter: blur(2px);
+  z-index: 20;
 }
 .dialog {
-  background: #fff;
+  width: 430px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--bb-surface);
   padding: 16px;
-  border-radius: 8px;
-  width: 420px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-lg);
+  box-shadow: var(--bb-shadow-dialog);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
+}
+.dialog h3 {
+  margin: 0 0 4px;
+  color: var(--bb-text);
+  font-size: 16px;
 }
 input,
 textarea,
 select {
-  padding: 6px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-sm);
   font-size: 14px;
 }
 .actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  padding-top: 4px;
 }
 .primary {
-  font-weight: bold;
+  border-color: var(--bb-primary);
+  background: var(--bb-primary);
+  color: #fff;
+  font-weight: 600;
+}
+.primary:hover {
+  border-color: var(--bb-primary-strong);
+  background: var(--bb-primary-strong);
 }
 </style>

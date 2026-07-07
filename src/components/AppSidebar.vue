@@ -69,7 +69,7 @@ const tools: { id: ActiveTool; label: string }[] = [
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px;
+  padding: 9px 8px;
   height: 100%;
   min-height: 0;
 }
@@ -83,14 +83,16 @@ const tools: { id: ActiveTool; label: string }[] = [
 .tool-button {
   width: 100%;
   min-height: 32px;
-  padding: 6px 8px;
+  padding: 6px 9px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--bb-radius-md);
   background: transparent;
-  color: #334155;
+  color: var(--bb-text-muted);
   cursor: pointer;
   font-size: 13px;
+  font-weight: 500;
   text-align: left;
+  box-shadow: none;
 }
 
 .tool-row .tool-button {
@@ -102,35 +104,39 @@ const tools: { id: ActiveTool; label: string }[] = [
   width: 32px;
   min-height: 32px;
   flex: 0 0 32px;
-  border: 1px solid #fecaca;
-  border-radius: 6px;
-  background: #fee2e2;
-  color: #b91c1c;
+  border: 1px solid var(--bb-primary);
+  border-radius: var(--bb-radius-md);
+  background: var(--bb-primary);
+  color: #fff;
   cursor: pointer;
   font-size: 20px;
   font-weight: 700;
   line-height: 1;
+  box-shadow: var(--bb-shadow-sm);
 }
 
 .create-prompt-button:hover {
-  border-color: #fca5a5;
-  background: #fecaca;
+  border-color: var(--bb-primary-strong);
+  background: var(--bb-primary-strong);
 }
 
 .create-prompt-button:focus-visible {
-  outline: 2px solid #ef4444;
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--bb-focus);
 }
 
 .tool-button:hover {
-  background: #f1f5f9;
+  border-color: rgba(203, 213, 225, 0.72);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--bb-text);
 }
 
 .tool-button.active {
-  border-color: #cbd5e1;
-  background: #eaf0f7;
-  color: #0f172a;
+  border-color: #bfd3ff;
+  background: var(--bb-primary-soft);
+  color: #1e3a8a;
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.04);
 }
 
 .sidebar-category-list {
@@ -138,9 +144,9 @@ const tools: { id: ActiveTool; label: string }[] = [
   min-height: 48px;
   overflow-y: auto;
   overflow-x: hidden;
-  border-left: 2px solid #e2e8f0;
-  margin: -2px 0 2px 8px;
-  padding-left: 4px;
+  border-left: 1px solid var(--bb-border);
+  margin: -1px 0 2px 9px;
+  padding: 3px 0 3px 5px;
   scrollbar-gutter: stable;
 }
 </style>

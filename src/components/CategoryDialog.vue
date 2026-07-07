@@ -89,48 +89,61 @@ function onConfirm() {
 .mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(15, 23, 42, 0.36);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 20;
+  backdrop-filter: blur(2px);
 }
 .dialog {
-  background: #fff;
-  padding: 16px;
-  border-radius: 8px;
   width: 320px;
+  max-width: calc(100vw - 24px);
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-lg);
+  background: var(--bb-surface);
+  box-shadow: var(--bb-shadow-dialog);
+}
+.dialog h3 {
+  margin: 0 0 2px;
+  color: var(--bb-text);
+  font-size: 16px;
 }
 input[type='text'] {
-  padding: 6px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  padding: 7px 8px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-sm);
 }
 .colors {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 7px;
   align-items: center;
 }
 .swatch {
   width: 24px;
   height: 24px;
-  border-radius: 50%;
+  min-height: 24px;
+  border-radius: 999px;
   border: 2px solid #fff;
-  box-shadow: 0 0 0 1px #ddd;
+  box-shadow: 0 0 0 1px var(--bb-border);
   cursor: pointer;
 }
 .swatch.active {
-  box-shadow: 0 0 0 2px #333;
+  box-shadow:
+    0 0 0 2px var(--bb-primary),
+    0 4px 10px rgba(15, 23, 42, 0.14);
 }
 .picker {
   width: 32px;
   height: 32px;
-  border: none;
-  background: none;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-sm);
+  background: var(--bb-surface);
   cursor: pointer;
 }
 .actions {
@@ -139,6 +152,13 @@ input[type='text'] {
   gap: 8px;
 }
 .primary {
-  font-weight: bold;
+  border-color: var(--bb-primary);
+  background: var(--bb-primary);
+  color: #fff;
+  font-weight: 600;
+}
+.primary:hover {
+  border-color: var(--bb-primary-strong);
+  background: var(--bb-primary-strong);
 }
 </style>

@@ -168,10 +168,11 @@ async function onCompress() {
 <style scoped>
 .tool-panel {
   min-height: 100%;
-  padding: 8px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
 }
 
 .upload-zone {
@@ -180,17 +181,20 @@ async function onCompress() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 6px;
-  background: #f8fafc;
-  color: #334155;
+  gap: 9px;
+  border: 1px dashed #b8c8dc;
+  border-radius: var(--bb-radius-lg);
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.88), rgba(241, 245, 249, 0.72)),
+    var(--bb-surface-soft);
+  color: var(--bb-text);
+  text-align: center;
 }
 
 .upload-zone p,
 .status {
   margin: 0;
-  color: #64748b;
+  color: var(--bb-text-muted);
   font-size: 13px;
 }
 
@@ -203,19 +207,30 @@ async function onCompress() {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #334155;
+  color: var(--bb-text);
   font-size: 13px;
 }
 
 .target-mb-input {
   width: 96px;
-  padding: 6px;
-  border: 1px solid #d7dde7;
-  border-radius: 4px;
+  padding: 7px 8px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-sm);
 }
 
 .compress-button {
   align-self: flex-start;
+  border-color: var(--bb-primary);
+  background: var(--bb-primary);
+  color: #fff;
+  font-weight: 600;
+}
+.compress-button:hover:not(:disabled) {
+  border-color: var(--bb-primary-strong);
+  background: var(--bb-primary-strong);
+}
+.compress-button:disabled {
+  border-color: var(--bb-border);
 }
 
 .progress-panel {
@@ -229,25 +244,27 @@ async function onCompress() {
   height: 10px;
   overflow: hidden;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: var(--bb-surface-muted);
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.04);
 }
 
 .progress-fill {
   height: 100%;
   border-radius: inherit;
-  background: #2563eb;
+  background: linear-gradient(90deg, var(--bb-primary), #38bdf8);
   transition: width 160ms ease;
 }
 
 .progress-text {
   min-width: 64px;
-  color: #475569;
+  color: var(--bb-text-muted);
   font-size: 12px;
 }
 
 .error {
   margin: 0;
-  color: #b91c1c;
+  color: var(--bb-danger);
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 </style>
