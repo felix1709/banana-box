@@ -129,9 +129,7 @@ onUnmounted(() => {
   font-size: 32px;
   cursor: pointer;
   user-select: none;
-  background:
-    radial-gradient(circle at 45% 35%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0) 46%),
-    transparent;
+  background: transparent;
   font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", system-ui, sans-serif;
   line-height: 1;
   transition:
