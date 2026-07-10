@@ -86,6 +86,11 @@ pub fn run() {
         )
         .on_window_event(|window, event| {
             // 只有主面板失焦隐藏；悬浮按钮常驻
+            if matches!(event, WindowEvent::Resized(_)) && window.label() == "main" {
+                if let Some(state) = window.app_handle().try_state::<MainWindowDragState>() {
+                    protect_main_window_interaction(&state);
+                }
+            }
             if let WindowEvent::Focused(focused) = event {
                 let drag_ignore_until = window
                     .app_handle()
@@ -131,6 +136,7 @@ pub fn run() {
             commands::compress_media,
             commands::suggest_compressed_output_path,
             begin_main_window_drag,
+            begin_main_window_resize,
             set_main_window_pinned,
             toggle_panel,
             show_panel,
@@ -144,13 +150,22 @@ fn begin_main_window_drag(
     app: tauri::AppHandle,
     state: tauri::State<MainWindowDragState>,
 ) -> Result<(), String> {
-    if let Ok(mut ignore_until) = state.ignore_focus_loss_until.lock() {
-        *ignore_until = Some(Instant::now() + Duration::from_millis(1200));
-    }
+    protect_main_window_interaction(&state);
     let win = app
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
     win.start_dragging().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn begin_main_window_resize(state: tauri::State<MainWindowDragState>) {
+    protect_main_window_interaction(&state);
+}
+
+fn protect_main_window_interaction(state: &MainWindowDragState) {
+    if let Ok(mut ignore_until) = state.ignore_focus_loss_until.lock() {
+        *ignore_until = Some(Instant::now() + Duration::from_millis(1200));
+    }
 }
 
 #[tauri::command]

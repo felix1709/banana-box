@@ -12,6 +12,9 @@ let floatingDropHandler: ((event: { payload: unknown }) => void) | null = null
 const coreApi = vi.hoisted(() => ({
   invoke: vi.fn().mockResolvedValue(undefined),
 }))
+const windowApi = vi.hoisted(() => ({
+  startResizeDragging: vi.fn().mockResolvedValue(undefined),
+}))
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn((eventName: string, handler: (event: { payload: unknown }) => void) => {
@@ -21,7 +24,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 }))
 
 vi.mock('@tauri-apps/api/window', () => ({
-  getCurrentWindow: vi.fn(() => ({})),
+  getCurrentWindow: vi.fn(() => windowApi),
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -85,6 +88,31 @@ describe('App', () => {
     expect(wrapper.find('.window-drag-strip').classes()).not.toContain('window-drag-strip-active')
   })
 
+  it('shows resize handles around the frameless window', async () => {
+    const wrapper = mount(App)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(wrapper.findAll('.window-resize-handle')).toHaveLength(8)
+    expect(wrapper.find('.window-resize-handle-east').exists()).toBe(true)
+    expect(wrapper.find('.window-resize-handle-south-east').exists()).toBe(true)
+  })
+
+  it('starts protected window resizing and highlights the active edge', async () => {
+    const wrapper = mount(App)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    coreApi.invoke.mockClear()
+
+    const eastHandle = wrapper.find('.window-resize-handle-east')
+    await eastHandle.trigger('mousedown')
+
+    expect(coreApi.invoke).toHaveBeenCalledWith('begin_main_window_resize')
+    expect(windowApi.startResizeDragging).toHaveBeenCalledWith('East')
+    expect(eastHandle.classes()).toContain('window-resize-handle-active')
+
+    await eastHandle.trigger('mouseup')
+    expect(eastHandle.classes()).not.toContain('window-resize-handle-active')
+  })
+
   it('lets the app shell resize with the Tauri webview instead of staying at the launch size', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/App.vue'), 'utf8')
     const styleBlock = source.match(/\.app\s*\{(?<content>[\s\S]*?)\n\}/)?.groups?.content ?? ''
@@ -121,6 +149,17 @@ describe('App', () => {
 
     expect(coreApi.invoke).toHaveBeenCalledWith('set_main_window_pinned', { pinned: true })
     expect(pinButton.classes()).toContain('window-pin-button-active')
+  })
+
+  it('renders the main window pin action as an icon-only button', async () => {
+    const wrapper = mount(App)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    const pinButton = wrapper.find('.window-pin-button')
+
+    expect(pinButton.text().trim()).toBe('')
+    expect(pinButton.find('.window-pin-icon').exists()).toBe(true)
+    expect(pinButton.find('.window-pin-icon').attributes('aria-hidden')).toBe('true')
   })
 
   it('keeps the new prompt action out of the topbar', async () => {

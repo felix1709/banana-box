@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref, watchEffect } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useLibraryStore } from '@/stores/library'
 import { useUiStore } from '@/stores/ui'
 import { readImageBytes } from '@/lib/ipc'
@@ -22,6 +23,29 @@ const sortingPromptId = ref<string | null>(null)
 const windowDragActive = ref(false)
 const mainWindowPinned = ref(false)
 let unlistenFloatingDrop: UnlistenFn | null = null
+
+type ResizeDirection =
+  | 'North'
+  | 'South'
+  | 'West'
+  | 'East'
+  | 'NorthWest'
+  | 'NorthEast'
+  | 'SouthWest'
+  | 'SouthEast'
+
+const activeResizeDirection = ref<ResizeDirection | null>(null)
+
+const resizeHandles = [
+  { direction: 'North', className: 'window-resize-handle-north' },
+  { direction: 'South', className: 'window-resize-handle-south' },
+  { direction: 'West', className: 'window-resize-handle-west' },
+  { direction: 'East', className: 'window-resize-handle-east' },
+  { direction: 'NorthWest', className: 'window-resize-handle-north-west' },
+  { direction: 'NorthEast', className: 'window-resize-handle-north-east' },
+  { direction: 'SouthWest', className: 'window-resize-handle-south-west' },
+  { direction: 'SouthEast', className: 'window-resize-handle-south-east' },
+] as const
 
 interface FloatingFileDropPayload {
   filePath: string
@@ -47,6 +71,19 @@ function onDragStripMouseDown(event: MouseEvent) {
 
 function clearWindowDragActive() {
   windowDragActive.value = false
+}
+
+async function onResizeHandleMouseDown(event: MouseEvent, direction: ResizeDirection) {
+  if (event.button !== 0) return
+  event.preventDefault()
+  event.stopPropagation()
+  activeResizeDirection.value = direction
+  await invoke('begin_main_window_resize')
+  await getCurrentWindow().startResizeDragging(direction)
+}
+
+function clearResizeActive() {
+  activeResizeDirection.value = null
 }
 
 async function toggleMainWindowPinned() {
@@ -77,6 +114,7 @@ function onSortEnd() {
 onMounted(async () => {
   await lib.load()
   ui.showPanel()
+  window.addEventListener('mouseup', clearResizeActive)
   unlistenFloatingDrop = await listen('floating-file-dropped', (event) => {
     if (!isFloatingFileDropPayload(event.payload)) return
     ui.showPanel()
@@ -85,6 +123,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('mouseup', clearResizeActive)
   unlistenFloatingDrop?.()
   unlistenFloatingDrop = null
 })
@@ -107,6 +146,20 @@ watchEffect(async () => {
     @pointerup="onSortEnd"
     @pointercancel="onSortEnd"
   >
+    <button
+      v-for="handle in resizeHandles"
+      :key="handle.direction"
+      class="window-resize-handle"
+      :class="[
+        handle.className,
+        { 'window-resize-handle-active': activeResizeDirection === handle.direction },
+      ]"
+      type="button"
+      aria-hidden="true"
+      tabindex="-1"
+      @mousedown="onResizeHandleMouseDown($event, handle.direction)"
+      @mouseup="clearResizeActive"
+    />
     <div
       class="window-drag-strip"
       title="拖动窗口"
@@ -131,7 +184,25 @@ watchEffect(async () => {
         @mousedown.stop
         @click.stop="toggleMainWindowPinned"
       >
-        钉
+        <svg
+          class="window-pin-icon"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            d="M14.5 4.5 19.5 9.5M8.7 13.4l-3.2 3.2M9.8 5.5l8.7 8.7M7.1 8.2l8.7 8.7"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+          />
+          <path
+            d="M10.4 6.1 6.9 9.6l7.5 7.5 3.5-3.5-2.1-2.1 2.4-2.4-3.3-3.3-2.4 2.4-2.1-2.1Z"
+            fill="currentColor"
+            opacity="0.2"
+          />
+        </svg>
       </button>
     </div>
     <header class="topbar">
@@ -228,6 +299,7 @@ watchEffect(async () => {
 
 <style scoped>
 .app {
+  position: relative;
   width: 100vw;
   height: 100vh;
   min-width: 0;
@@ -248,6 +320,83 @@ watchEffect(async () => {
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     0 28px 72px rgba(0, 0, 0, 0.5),
     0 0 0 1px rgba(5, 14, 22, 0.84);
+}
+.window-resize-handle {
+  position: absolute;
+  z-index: 20;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.window-resize-handle:hover:not(:disabled),
+.window-resize-handle-active {
+  opacity: 1;
+  border: 0;
+  background: rgba(102, 247, 211, 0.18);
+  box-shadow: 0 0 18px rgba(102, 247, 211, 0.28);
+}
+.window-resize-handle-north,
+.window-resize-handle-south {
+  left: 12px;
+  right: 12px;
+  height: 7px;
+}
+.window-resize-handle-west,
+.window-resize-handle-east {
+  top: 12px;
+  bottom: 12px;
+  width: 7px;
+}
+.window-resize-handle-north {
+  top: 0;
+  cursor: n-resize;
+}
+.window-resize-handle-south {
+  bottom: 0;
+  cursor: s-resize;
+}
+.window-resize-handle-west {
+  left: 0;
+  cursor: w-resize;
+}
+.window-resize-handle-east {
+  right: 0;
+  cursor: e-resize;
+}
+.window-resize-handle-north-west,
+.window-resize-handle-north-east,
+.window-resize-handle-south-west,
+.window-resize-handle-south-east {
+  width: 14px;
+  height: 14px;
+}
+.window-resize-handle-north-west {
+  top: 0;
+  left: 0;
+  cursor: nw-resize;
+}
+.window-resize-handle-north-east {
+  top: 0;
+  right: 0;
+  cursor: ne-resize;
+}
+.window-resize-handle-south-west {
+  bottom: 0;
+  left: 0;
+  cursor: sw-resize;
+}
+.window-resize-handle-south-east {
+  right: 0;
+  bottom: 0;
+  cursor: se-resize;
 }
 .window-drag-strip {
   height: 22px;
@@ -276,11 +425,17 @@ watchEffect(async () => {
   height: 18px;
   min-height: 18px;
   padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--bb-radius-sm);
   color: var(--bb-text-soft);
-  font-size: 12px;
-  line-height: 16px;
   cursor: pointer;
+}
+.window-pin-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 .window-pin-button:hover,
 .window-pin-button-active {
