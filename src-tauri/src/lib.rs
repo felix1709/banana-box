@@ -11,11 +11,18 @@ struct MainWindowDragState {
     ignore_focus_loss_until: Mutex<Option<Instant>>,
 }
 
+struct MainWindowPinState {
+    pinned: Mutex<bool>,
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(MainWindowDragState {
             ignore_focus_loss_until: Mutex::new(None),
+        })
+        .manage(MainWindowPinState {
+            pinned: Mutex::new(false),
         })
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -30,6 +37,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .setup(
@@ -89,11 +97,17 @@ pub fn run() {
                             .ok()
                             .and_then(|guard| *guard)
                     });
+                let main_window_pinned = window
+                    .app_handle()
+                    .try_state::<MainWindowPinState>()
+                    .and_then(|state| state.pinned.lock().ok().map(|guard| *guard))
+                    .unwrap_or(false);
                 if should_hide_main_on_focus_loss(
                     window.label(),
                     *focused,
                     drag_ignore_until,
                     Instant::now(),
+                    main_window_pinned,
                 ) {
                     let _ = window.hide();
                 }
@@ -117,6 +131,7 @@ pub fn run() {
             commands::compress_media,
             commands::suggest_compressed_output_path,
             begin_main_window_drag,
+            set_main_window_pinned,
             toggle_panel,
             show_panel,
         ])
@@ -136,6 +151,16 @@ fn begin_main_window_drag(
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
     win.start_dragging().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn set_main_window_pinned(
+    state: tauri::State<MainWindowPinState>,
+    pinned: bool,
+) -> Result<(), String> {
+    let mut guard = state.pinned.lock().map_err(|err| err.to_string())?;
+    *guard = pinned;
+    Ok(())
 }
 
 #[tauri::command]
@@ -171,8 +196,9 @@ fn should_hide_main_on_focus_loss(
     focused: bool,
     drag_ignore_until: Option<Instant>,
     now: Instant,
+    pinned: bool,
 ) -> bool {
-    label == "main" && !focused && drag_ignore_until.is_none_or(|until| now >= until)
+    label == "main" && !focused && !pinned && drag_ignore_until.is_none_or(|until| now >= until)
 }
 
 #[cfg(test)]
@@ -184,7 +210,7 @@ mod tests {
     fn main_window_focus_loss_hides_when_not_dragging() {
         let now = Instant::now();
 
-        assert!(should_hide_main_on_focus_loss("main", false, None, now));
+        assert!(should_hide_main_on_focus_loss("main", false, None, now, false));
     }
 
     #[test]
@@ -196,6 +222,14 @@ mod tests {
             false,
             Some(now + Duration::from_millis(800)),
             now,
+            false,
         ));
+    }
+
+    #[test]
+    fn main_window_focus_loss_does_not_hide_when_pinned() {
+        let now = Instant::now();
+
+        assert!(!should_hide_main_on_focus_loss("main", false, None, now, true));
     }
 }

@@ -20,6 +20,7 @@ const previewUrl = ref('')
 const expandedPromptId = ref<string | null>(null)
 const sortingPromptId = ref<string | null>(null)
 const windowDragActive = ref(false)
+const mainWindowPinned = ref(false)
 let unlistenFloatingDrop: UnlistenFn | null = null
 
 interface FloatingFileDropPayload {
@@ -46,6 +47,17 @@ function onDragStripMouseDown(event: MouseEvent) {
 
 function clearWindowDragActive() {
   windowDragActive.value = false
+}
+
+async function toggleMainWindowPinned() {
+  const nextPinned = !mainWindowPinned.value
+  mainWindowPinned.value = nextPinned
+  try {
+    await invoke('set_main_window_pinned', { pinned: nextPinned })
+  } catch {
+    mainWindowPinned.value = !nextPinned
+    ui.showToast('窗口常驻设置失败')
+  }
 }
 
 function onSortStart(id: string) {
@@ -104,10 +116,23 @@ watchEffect(async () => {
       @mouseup="clearWindowDragActive"
       @mouseleave="clearWindowDragActive"
     >
+      <span aria-hidden="true" />
       <span
         class="window-drag-marker"
         aria-hidden="true"
       />
+      <button
+        class="window-pin-button"
+        :class="{ 'window-pin-button-active': mainWindowPinned }"
+        type="button"
+        :title="mainWindowPinned ? '取消窗口常驻' : '窗口常驻显示'"
+        :aria-label="mainWindowPinned ? '取消窗口常驻' : '窗口常驻显示'"
+        :aria-pressed="mainWindowPinned"
+        @mousedown.stop
+        @click.stop="toggleMainWindowPinned"
+      >
+        钉
+      </button>
     </div>
     <header class="topbar">
       <SearchBar />
@@ -225,9 +250,10 @@ watchEffect(async () => {
 .window-drag-strip {
   height: 22px;
   flex: 0 0 22px;
-  display: flex;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
   align-items: center;
-  justify-content: center;
+  justify-items: center;
   cursor: grab;
   background: rgba(4, 12, 18, 0.78);
   border-bottom: 1px solid rgba(123, 255, 226, 0.12);
@@ -242,6 +268,26 @@ watchEffect(async () => {
 }
 .window-drag-strip:active {
   cursor: grabbing;
+}
+.window-pin-button {
+  width: 24px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  border-radius: var(--bb-radius-sm);
+  color: var(--bb-text-soft);
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+.window-pin-button:hover,
+.window-pin-button-active {
+  color: var(--bb-primary-strong);
+  border-color: var(--bb-border-strong);
+  background: var(--bb-primary-soft);
+}
+.window-pin-button-active {
+  box-shadow: 0 0 16px rgba(102, 247, 211, 0.14);
 }
 .window-drag-marker {
   width: 78px;

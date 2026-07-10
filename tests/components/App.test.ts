@@ -94,6 +94,23 @@ describe('App', () => {
     expect(coreApi.invoke).not.toHaveBeenCalledWith('begin_main_window_drag')
   })
 
+  it('pins the main window without starting a drag from the pin button', async () => {
+    const wrapper = mount(App)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    coreApi.invoke.mockClear()
+
+    const pinButton = wrapper.find('.window-pin-button')
+    expect(pinButton.exists()).toBe(true)
+
+    await pinButton.trigger('mousedown')
+    expect(coreApi.invoke).not.toHaveBeenCalledWith('begin_main_window_drag')
+
+    await pinButton.trigger('click')
+
+    expect(coreApi.invoke).toHaveBeenCalledWith('set_main_window_pinned', { pinned: true })
+    expect(pinButton.classes()).toContain('window-pin-button-active')
+  })
+
   it('keeps the new prompt action out of the topbar', async () => {
     const wrapper = mount(App)
     await new Promise((resolve) => window.setTimeout(resolve, 0))
