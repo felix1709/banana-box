@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -81,6 +83,16 @@ describe('App', () => {
 
     await wrapper.find('.window-drag-strip').trigger('mouseup')
     expect(wrapper.find('.window-drag-strip').classes()).not.toContain('window-drag-strip-active')
+  })
+
+  it('lets the app shell resize with the Tauri webview instead of staying at the launch size', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/App.vue'), 'utf8')
+    const styleBlock = source.match(/\.app\s*\{(?<content>[\s\S]*?)\n\}/)?.groups?.content ?? ''
+
+    expect(styleBlock).toContain('width: 100vw')
+    expect(styleBlock).toContain('height: 100vh')
+    expect(styleBlock).not.toContain('width: 720px')
+    expect(styleBlock).not.toContain('height: 520px')
   })
 
   it('does not start window dragging from topbar clicks or interactive controls', async () => {

@@ -228,8 +228,10 @@ watchEffect(async () => {
 
 <style scoped>
 .app {
-  width: 720px;
-  height: 520px;
+  width: 100vw;
+  height: 100vh;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   font-family: var(--bb-font);
