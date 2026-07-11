@@ -225,7 +225,9 @@ mod tests {
     fn main_window_focus_loss_hides_when_not_dragging() {
         let now = Instant::now();
 
-        assert!(should_hide_main_on_focus_loss("main", false, None, now, false));
+        assert!(should_hide_main_on_focus_loss(
+            "main", false, None, now, false
+        ));
     }
 
     #[test]
@@ -245,6 +247,8 @@ mod tests {
     fn main_window_focus_loss_does_not_hide_when_pinned() {
         let now = Instant::now();
 
-        assert!(!should_hide_main_on_focus_loss("main", false, None, now, true));
+        assert!(!should_hide_main_on_focus_loss(
+            "main", false, None, now, true
+        ));
     }
 }
