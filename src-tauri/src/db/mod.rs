@@ -323,6 +323,35 @@ mod tests {
     }
 
     #[test]
+    fn backup_step_loop_pauses_once_for_locked_before_completing() {
+        let clock = Cell::new(Duration::ZERO);
+        let step_count = Cell::new(0);
+        let pause_count = Cell::new(0);
+
+        run_backup_step_loop(
+            || {
+                let next_step = step_count.get() + 1;
+                step_count.set(next_step);
+                Ok::<_, rusqlite::Error>(if next_step == 1 {
+                    StepResult::Locked
+                } else {
+                    StepResult::Done
+                })
+            },
+            Duration::from_secs(1),
+            || clock.get(),
+            |pause| {
+                pause_count.set(pause_count.get() + 1);
+                clock.set(clock.get() + pause);
+            },
+        )
+        .unwrap();
+
+        assert_eq!(step_count.get(), 2);
+        assert_eq!(pause_count.get(), 1);
+    }
+
+    #[test]
     fn backup_step_loop_counts_step_time_against_the_deadline() {
         let clock = Cell::new(Duration::ZERO);
         let error = run_backup_step_loop(

@@ -23,15 +23,6 @@ const REQUIRED_TABLES: [&str; 15] = [
     "storyboard_message_blocks",
     "reminder_log",
 ];
-const REQUIRED_INDEXES: [&str; 7] = [
-    "idx_projects_main_stage",
-    "idx_projects_release_date",
-    "idx_project_stages_project",
-    "idx_daily_groups_day_position",
-    "idx_daily_tasks_group_position",
-    "idx_daily_tasks_carry_source",
-    "one_active_agent_request_per_thread",
-];
 
 pub fn migrate(connection: &mut Connection) -> Result<(), String> {
     let transaction = connection
@@ -133,7 +124,7 @@ fn schema_fingerprint(connection: &Connection) -> Result<String, rusqlite::Error
         "
         SELECT type, name, tbl_name, sql
         FROM sqlite_master
-        WHERE type IN ('table', 'index') AND name NOT GLOB 'sqlite_*'
+        WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT GLOB 'sqlite_*'
         ORDER BY type, name, tbl_name, sql
         ",
     )?;
@@ -143,10 +134,6 @@ fn schema_fingerprint(connection: &Connection) -> Result<String, rusqlite::Error
     while let Some(row) = rows.next()? {
         let object_type: String = row.get(0)?;
         let name: String = row.get(1)?;
-        if !is_migration_schema_object(&object_type, &name) {
-            continue;
-        }
-
         let table_name: String = row.get(2)?;
         let sql: Option<String> = row.get(3)?;
         let normalized_sql = normalize_schema_sql(sql.as_deref().unwrap_or_default());
@@ -157,14 +144,6 @@ fn schema_fingerprint(connection: &Connection) -> Result<String, rusqlite::Error
     }
 
     Ok(format!("{:x}", hasher.finalize()))
-}
-
-fn is_migration_schema_object(object_type: &str, name: &str) -> bool {
-    match object_type {
-        "table" => REQUIRED_TABLES.contains(&name),
-        "index" => REQUIRED_INDEXES.contains(&name),
-        _ => false,
-    }
 }
 
 fn update_schema_fingerprint_field(hasher: &mut Sha256, value: &str) {
@@ -220,6 +199,30 @@ mod tests {
                 "
                 DROP TABLE projects;
                 CREATE TABLE projects (id TEXT PRIMARY KEY);
+                ",
+            )
+            .unwrap();
+
+        let error = validate(&connection).unwrap_err();
+
+        assert_eq!(
+            error,
+            format!("{DATABASE_SCHEMA_INVALID}: schema fingerprint mismatch")
+        );
+    }
+
+    #[test]
+    fn validate_rejects_a_v1_database_with_an_unexpected_trigger() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        migrate(&mut connection).unwrap();
+        connection
+            .execute_batch(
+                "
+                CREATE TRIGGER unexpected_projects_trigger
+                AFTER INSERT ON projects
+                BEGIN
+                    SELECT 1;
+                END;
                 ",
             )
             .unwrap();
