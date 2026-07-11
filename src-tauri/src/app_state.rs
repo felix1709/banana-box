@@ -14,11 +14,13 @@ pub struct AppOperationGate {
     idle: Condvar,
 }
 
+#[must_use = "hold the permit until the protected operation has finished"]
 pub struct OperationPermit {
     gate: Arc<AppOperationGate>,
     released: bool,
 }
 
+#[must_use = "hold the lease until maintenance has completed or been sealed for restart"]
 pub struct MaintenanceLease {
     gate: Arc<AppOperationGate>,
     sealed_for_restart: bool,
@@ -162,12 +164,16 @@ impl RestoreBlockerRegistry {
     }
 
     pub fn first_active(&self) -> Result<Option<RestoreBlockerInfo>, String> {
-        let participants = self
-            .0
-            .read()
-            .map_err(|_| RESTORE_BLOCKER_REGISTRY_UNAVAILABLE.to_string())?;
+        let participants = {
+            let participants = self
+                .0
+                .read()
+                .map_err(|_| RESTORE_BLOCKER_REGISTRY_UNAVAILABLE.to_string())?;
+            participants.clone()
+        };
+
         Ok(participants
-            .iter()
+            .into_iter()
             .find_map(|participant| participant.active_blocker()))
     }
 }
@@ -345,6 +351,27 @@ mod tests {
         }
     }
 
+    struct InactiveRestoreBlocker;
+
+    impl RestoreBlocker for InactiveRestoreBlocker {
+        fn active_blocker(&self) -> Option<RestoreBlockerInfo> {
+            None
+        }
+    }
+
+    struct ReentrantRestoreBlocker {
+        registry: Arc<RestoreBlockerRegistry>,
+    }
+
+    impl RestoreBlocker for ReentrantRestoreBlocker {
+        fn active_blocker(&self) -> Option<RestoreBlockerInfo> {
+            self.registry
+                .register(Arc::new(InactiveRestoreBlocker))
+                .unwrap();
+            None
+        }
+    }
+
     #[test]
     fn restore_blocker_registry_reads_the_first_safe_active_blocker() {
         let registry = RestoreBlockerRegistry::default();
@@ -357,6 +384,29 @@ mod tests {
             blocker.message,
             "An active storyboard request is still running."
         );
+    }
+
+    #[test]
+    fn restore_blocker_registry_releases_its_lock_before_calling_participants() {
+        let registry = Arc::new(RestoreBlockerRegistry::default());
+        registry
+            .register(Arc::new(ReentrantRestoreBlocker {
+                registry: registry.clone(),
+            }))
+            .unwrap();
+        let registry_for_check = registry.clone();
+        let (result_tx, result_rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            result_tx.send(registry_for_check.first_active()).unwrap();
+        });
+
+        assert!(result_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("participant callback should not self-deadlock")
+            .unwrap()
+            .is_none());
+        assert_eq!(registry.0.read().unwrap().len(), 2);
     }
 
     fn migration_summary() -> MigrationSummary {
