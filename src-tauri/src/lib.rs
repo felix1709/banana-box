@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod fs_atomic;
 mod library;
+mod providers;
 mod secrets;
 
 use std::sync::Mutex;
