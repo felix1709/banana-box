@@ -191,6 +191,11 @@ impl ProviderService {
             &input.chat_completions_url,
             input.confirm_cross_origin,
         )?;
+        let expected_kind =
+            seeded_provider_kind(&input.id).ok_or_else(|| PROVIDER_KIND_MISMATCH.to_string())?;
+        if input.kind != expected_kind {
+            return Err(PROVIDER_KIND_MISMATCH.into());
+        }
         let _mutation_guard = self
             .credential_mutations
             .acquire()
@@ -198,7 +203,7 @@ impl ProviderService {
         let current = self
             .load_stored_provider(&input.id)?
             .ok_or_else(|| PROVIDER_KIND_MISMATCH.to_string())?;
-        if current.provider.kind != input.kind {
+        if current.provider.kind != expected_kind {
             return Err(PROVIDER_KIND_MISMATCH.into());
         }
 
@@ -213,7 +218,7 @@ impl ProviderService {
         database_result(self.database.with_immediate_transaction(|transaction| {
             let live = load_stored_provider_from_transaction(transaction, &provider_id)?
                 .ok_or_else(|| PROVIDER_KIND_MISMATCH.to_string())?;
-            if live.provider.kind != input.kind {
+            if live.provider.kind != expected_kind {
                 return Err(PROVIDER_KIND_MISMATCH.into());
             }
             let endpoints_changed = live.provider.base_url != endpoints.base_url
@@ -483,6 +488,14 @@ impl ProviderKind {
     }
 }
 
+fn seeded_provider_kind(id: &str) -> Option<ProviderKind> {
+    match id {
+        "reverse-image" => Some(ProviderKind::ReverseImage),
+        "storyboard" => Some(ProviderKind::Storyboard),
+        _ => None,
+    }
+}
+
 impl StructuredMode {
     fn from_database(value: &str) -> Option<Self> {
         match value {
@@ -614,21 +627,69 @@ fn stored_provider_from_raw(raw: RawProvider) -> Result<StoredProvider, String> 
 }
 
 fn stored_provider_is_valid(stored: &StoredProvider) -> bool {
-    canonicalize_endpoints(
+    let Some(expected_kind) = seeded_provider_kind(&stored.provider.id) else {
+        return false;
+    };
+    if stored.provider.kind != expected_kind {
+        return false;
+    }
+    let Ok(endpoints) = canonicalize_endpoints(
         &stored.provider.base_url,
         &stored.provider.models_url,
         &stored.provider.chat_completions_url,
         true,
-    )
-    .map(|endpoints| {
-        stored.provider.bound_host.as_deref() == Some(endpoints.origin_fingerprint.as_str())
-    })
-    .unwrap_or(false)
+    ) else {
+        return false;
+    };
+    if stored.provider.bound_host.as_deref() != Some(endpoints.origin_fingerprint.as_str()) {
+        return false;
+    }
+
+    match (
+        stored.credential_ref.as_deref(),
+        stored.provider.needs_credentials,
+    ) {
+        (None, true) => true,
+        (Some(credential_ref), false) => credential_ref_matches_binding(
+            credential_ref,
+            &stored.provider.id,
+            &endpoints.origin_fingerprint,
+        ),
+        _ => false,
+    }
 }
 
 fn credential_reference(provider_id: &str, origin_fingerprint: &str) -> String {
-    let origin_hash = format!("{:x}", Sha256::digest(origin_fingerprint.as_bytes()));
+    let origin_hash = origin_fingerprint_hash(origin_fingerprint);
     format!("provider/{provider_id}/{origin_hash}/{}", Uuid::new_v4())
+}
+
+fn credential_ref_matches_binding(
+    credential_ref: &str,
+    provider_id: &str,
+    origin_fingerprint: &str,
+) -> bool {
+    let mut parts = credential_ref.split('/');
+    let (Some(prefix), Some(reference_provider_id), Some(origin_hash), Some(reference_uuid)) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    if parts.next().is_some()
+        || prefix != "provider"
+        || reference_provider_id != provider_id
+        || origin_hash != origin_fingerprint_hash(origin_fingerprint)
+    {
+        return false;
+    }
+
+    Uuid::parse_str(reference_uuid)
+        .map(|uuid| uuid.hyphenated().to_string() == reference_uuid)
+        .unwrap_or(false)
+}
+
+fn origin_fingerprint_hash(origin_fingerprint: &str) -> String {
+    format!("{:x}", Sha256::digest(origin_fingerprint.as_bytes()))
 }
 
 fn insert_cleanup_reference(
@@ -647,7 +708,18 @@ fn insert_cleanup_reference(
 }
 
 fn database_result<T>(result: Result<T, String>) -> Result<T, String> {
-    result.map_err(|_| PROVIDER_STORAGE_UNAVAILABLE.to_string())
+    result.map_err(|error| {
+        is_controlled_transaction_error(&error)
+            .then_some(error)
+            .unwrap_or_else(|| PROVIDER_STORAGE_UNAVAILABLE.to_string())
+    })
+}
+
+fn is_controlled_transaction_error(error: &str) -> bool {
+    matches!(
+        error,
+        PROVIDER_KIND_MISMATCH | PROVIDER_NOT_FOUND | PROVIDER_STORAGE_UNAVAILABLE
+    )
 }
 
 fn canonical_origins(endpoints: [&Url; 3]) -> Vec<String> {
@@ -707,6 +779,7 @@ mod tests {
     struct RecordingCredentialStore {
         entries: Mutex<HashMap<String, String>>,
         mutations: Mutex<usize>,
+        reads: Mutex<usize>,
         fail_set: Mutex<bool>,
         fail_delete: Mutex<bool>,
         on_next_set: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
@@ -715,6 +788,10 @@ mod tests {
     impl RecordingCredentialStore {
         fn mutation_count(&self) -> usize {
             *self.mutations.lock().unwrap()
+        }
+
+        fn read_count(&self) -> usize {
+            *self.reads.lock().unwrap()
         }
 
         fn stored_secret(&self, credential_ref: &str) -> Option<String> {
@@ -740,17 +817,18 @@ mod tests {
             if std::mem::take(&mut *self.fail_set.lock().unwrap()) {
                 return Err("credential store unavailable".into());
             }
-            if let Some(callback) = self.on_next_set.lock().unwrap().take() {
-                callback();
-            }
             self.entries
                 .lock()
                 .unwrap()
                 .insert(credential_ref.into(), secret.into());
+            if let Some(callback) = self.on_next_set.lock().unwrap().take() {
+                callback();
+            }
             Ok(())
         }
 
         fn get(&self, credential_ref: &str) -> Result<Option<String>, String> {
+            *self.reads.lock().unwrap() += 1;
             Ok(self.entries.lock().unwrap().get(credential_ref).cloned())
         }
 
@@ -772,8 +850,9 @@ mod tests {
         service: Arc<ProviderService>,
     }
 
-    #[derive(Debug, Eq, PartialEq)]
+    #[derive(Clone, Debug, Eq, PartialEq)]
     struct DatabaseProviderState {
+        kind: String,
         display_name: String,
         base_url: String,
         models_url: String,
@@ -874,7 +953,7 @@ mod tests {
             connection
                 .query_row(
                     "SELECT
-                        display_name, base_url, models_url, chat_completions_url,
+                        kind, display_name, base_url, models_url, chat_completions_url,
                         default_model, available_models_json, probed_model, structured_mode,
                         interactive_compatible, bound_host, needs_credentials, credential_ref,
                         config_revision, capability_revision
@@ -882,20 +961,21 @@ mod tests {
                     [id],
                     |row| {
                         Ok(DatabaseProviderState {
-                            display_name: row.get(0)?,
-                            base_url: row.get(1)?,
-                            models_url: row.get(2)?,
-                            chat_completions_url: row.get(3)?,
-                            default_model: row.get(4)?,
-                            available_models_json: row.get(5)?,
-                            probed_model: row.get(6)?,
-                            structured_mode: row.get(7)?,
-                            interactive_compatible: row.get(8)?,
-                            bound_host: row.get(9)?,
-                            needs_credentials: row.get(10)?,
-                            credential_ref: row.get(11)?,
-                            config_revision: row.get(12)?,
-                            capability_revision: row.get(13)?,
+                            kind: row.get(0)?,
+                            display_name: row.get(1)?,
+                            base_url: row.get(2)?,
+                            models_url: row.get(3)?,
+                            chat_completions_url: row.get(4)?,
+                            default_model: row.get(5)?,
+                            available_models_json: row.get(6)?,
+                            probed_model: row.get(7)?,
+                            structured_mode: row.get(8)?,
+                            interactive_compatible: row.get(9)?,
+                            bound_host: row.get(10)?,
+                            needs_credentials: row.get(11)?,
+                            credential_ref: row.get(12)?,
+                            config_revision: row.get(13)?,
+                            capability_revision: row.get(14)?,
                         })
                     },
                 )
@@ -922,6 +1002,36 @@ mod tests {
         .unwrap()
     }
 
+    fn assert_invalid_provider_blocks_credential_reads(context: &TestContext) {
+        let credential_reads = context.credentials.read_count();
+        let mut preflight_called = false;
+
+        context
+            .service
+            .with_request_preflight("storyboard", |preflight| {
+                preflight_called = true;
+                assert!(matches!(
+                    preflight.credential,
+                    Err(SafeCredentialError::StoreUnavailable)
+                ));
+                Ok(())
+            })
+            .unwrap();
+        let mut resolved_called = false;
+        let error = context
+            .service
+            .with_resolved_for_request("storyboard", |_| {
+                resolved_called = true;
+                Ok(())
+            })
+            .unwrap_err();
+
+        assert!(preflight_called);
+        assert!(!resolved_called);
+        assert_eq!(error, PROVIDER_CREDENTIAL_STORE_UNAVAILABLE);
+        assert_eq!(context.credentials.read_count(), credential_reads);
+    }
+
     #[test]
     fn provider_service_uses_the_injected_credential_coordinator() {
         let context = test_context();
@@ -929,6 +1039,93 @@ mod tests {
         assert!(Arc::ptr_eq(
             &context.service.credential_mutations,
             &context.mutations
+        ));
+    }
+
+    #[test]
+    fn database_result_preserves_only_controlled_transaction_errors() {
+        let transaction_errors = [
+            PROVIDER_KIND_MISMATCH,
+            PROVIDER_NOT_FOUND,
+            PROVIDER_STORAGE_UNAVAILABLE,
+        ];
+
+        for error in transaction_errors {
+            assert_eq!(database_result::<()>(Err(error.into())).unwrap_err(), error);
+        }
+        for error in [
+            INVALID_PROVIDER_URL,
+            INSECURE_PROVIDER_URL,
+            PROVIDER_CREDENTIALS_REQUIRED,
+            PROVIDER_CREDENTIAL_STORE_UNAVAILABLE,
+            "sqlite error: no such table",
+        ] {
+            assert_eq!(
+                database_result::<()>(Err(error.into())).unwrap_err(),
+                PROVIDER_STORAGE_UNAVAILABLE
+            );
+        }
+        assert_eq!(
+            database_result::<()>(Err(format!(
+                "{CROSS_ORIGIN_CONFIRMATION_REQUIRED}: https://api.example.test|https://models.example.test"
+            )))
+            .unwrap_err(),
+            PROVIDER_STORAGE_UNAVAILABLE
+        );
+    }
+
+    #[test]
+    fn credential_reference_requires_exact_provider_origin_and_uuid_binding() {
+        let origin = "https://story.example.test";
+        let credential_ref = credential_reference("storyboard", origin);
+        let mut parts = credential_ref.split('/');
+        assert_eq!(parts.next(), Some("provider"));
+        assert_eq!(parts.next(), Some("storyboard"));
+        let origin_hash = parts.next().unwrap();
+        let reference_uuid = parts.next().unwrap();
+        assert_eq!(parts.next(), None);
+
+        assert!(credential_ref_matches_binding(
+            &credential_ref,
+            "storyboard",
+            origin
+        ));
+        assert!(!credential_ref_matches_binding(
+            &credential_ref,
+            "reverse-image",
+            origin
+        ));
+        assert!(!credential_ref_matches_binding(
+            &credential_ref,
+            "storyboard",
+            "https://other.example.test"
+        ));
+        assert!(!credential_ref_matches_binding(
+            &format!("provider/storyboard/{}/not-a-uuid", origin_hash),
+            "storyboard",
+            origin
+        ));
+        assert!(!credential_ref_matches_binding(
+            &format!(
+                "provider/storyboard/{}/A0000000-0000-4000-8000-000000000000",
+                origin_hash
+            ),
+            "storyboard",
+            origin
+        ));
+        assert!(!credential_ref_matches_binding(
+            &format!(
+                "provider/storyboard/{}/{}",
+                origin_hash.to_ascii_uppercase(),
+                reference_uuid
+            ),
+            "storyboard",
+            origin
+        ));
+        assert!(!credential_ref_matches_binding(
+            &format!("{credential_ref}/extra"),
+            "storyboard",
+            origin
         ));
     }
 
@@ -1126,6 +1323,282 @@ mod tests {
             })
             .unwrap();
         assert_eq!(candidate_count, 1);
+    }
+
+    #[test]
+    fn save_preserves_live_kind_mismatch_without_switching_the_credential() {
+        let context = test_context();
+        let input = save_input(
+            "storyboard",
+            ProviderKind::Storyboard,
+            "https://story.example.test",
+        );
+        context
+            .service
+            .save(input.clone(), Some("old-key"))
+            .unwrap();
+        let old_ref = active_credential_ref(&context.db, "storyboard").unwrap();
+        let db = context.db.clone();
+        let corrupted_state = Arc::new(Mutex::new(None::<DatabaseProviderState>));
+        let callback_state = corrupted_state.clone();
+        context.credentials.run_on_next_set(Arc::new(move || {
+            db.with_immediate_transaction(|transaction| {
+                transaction
+                    .execute(
+                        "UPDATE ai_providers SET kind = 'reverse-image' WHERE id = 'storyboard'",
+                        [],
+                    )
+                    .map_err(|_| "TEST_DATABASE_ERROR".to_string())?;
+                Ok(())
+            })
+            .unwrap();
+            *callback_state.lock().unwrap() = Some(database_state(&db, "storyboard"));
+        }));
+
+        let mut attempted = input;
+        attempted.display_name = "New storyboard settings".into();
+        attempted.default_model = Some("new-model".into());
+        let candidate_key = "candidate-key-must-not-leak";
+        let error = context
+            .service
+            .save(attempted, Some(candidate_key))
+            .unwrap_err();
+
+        assert_eq!(error, PROVIDER_KIND_MISMATCH);
+        assert!(!error.contains(candidate_key));
+        assert!(!error.to_ascii_lowercase().contains("sqlite"));
+        let corrupted_state = corrupted_state.lock().unwrap().clone().unwrap();
+        assert_eq!(corrupted_state.kind, "reverse-image");
+        assert_eq!(database_state(&context.db, "storyboard"), corrupted_state);
+        assert_eq!(
+            active_credential_ref(&context.db, "storyboard"),
+            Some(old_ref.clone())
+        );
+        assert_eq!(
+            context.credentials.stored_secret(&old_ref),
+            Some("old-key".into())
+        );
+        let candidate_refs = context
+            .db
+            .with_connection(|connection| {
+                let mut statement = connection
+                    .prepare(
+                        "SELECT credential_ref FROM credential_cleanup WHERE reason = 'candidate'",
+                    )
+                    .map_err(|_| "TEST_DATABASE_ERROR".to_string())?;
+                let rows = statement
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .map_err(|_| "TEST_DATABASE_ERROR".to_string())?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| "TEST_DATABASE_ERROR".to_string())
+            })
+            .unwrap();
+
+        assert_eq!(candidate_refs.len(), 1);
+        assert_ne!(candidate_refs[0], old_ref);
+        assert_eq!(
+            context.credentials.stored_secret(&candidate_refs[0]),
+            Some(candidate_key.into())
+        );
+    }
+
+    #[test]
+    fn save_rejects_a_corrupt_seeded_kind_before_creating_a_candidate() {
+        let context = test_context();
+        let input = save_input(
+            "storyboard",
+            ProviderKind::Storyboard,
+            "https://story.example.test",
+        );
+        context.service.save(input, Some("old-key")).unwrap();
+        let old_ref = active_credential_ref(&context.db, "storyboard").unwrap();
+        context
+            .db
+            .with_immediate_transaction(|transaction| {
+                transaction
+                    .execute(
+                        "UPDATE ai_providers SET kind = 'reverse-image' WHERE id = 'storyboard'",
+                        [],
+                    )
+                    .map_err(|_| "TEST_DATABASE_ERROR".to_string())?;
+                Ok(())
+            })
+            .unwrap();
+        let corrupted_state = database_state(&context.db, "storyboard");
+        assert_eq!(corrupted_state.kind, "reverse-image");
+        let mutation_count = context.credentials.mutation_count();
+        let candidate_key = "candidate-key-must-not-leak";
+
+        let error = context
+            .service
+            .save(
+                save_input(
+                    "storyboard",
+                    ProviderKind::Storyboard,
+                    "https://story.example.test",
+                ),
+                Some(candidate_key),
+            )
+            .unwrap_err();
+
+        assert_eq!(error, PROVIDER_KIND_MISMATCH);
+        assert!(!error.contains(candidate_key));
+        assert!(!error.to_ascii_lowercase().contains("sqlite"));
+        assert_eq!(context.credentials.mutation_count(), mutation_count);
+        assert_eq!(database_state(&context.db, "storyboard"), corrupted_state);
+        assert_eq!(
+            active_credential_ref(&context.db, "storyboard"),
+            Some(old_ref.clone())
+        );
+        assert_eq!(
+            context.credentials.stored_secret(&old_ref),
+            Some("old-key".into())
+        );
+        let candidate_count: i64 = context
+            .db
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM credential_cleanup WHERE reason = 'candidate'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| "TEST_DATABASE_ERROR".to_string())
+            })
+            .unwrap();
+        assert_eq!(candidate_count, 0);
+    }
+
+    #[test]
+    fn corrupt_provider_kind_fails_closed_without_reading_the_credential() {
+        let context = test_context();
+        context
+            .service
+            .save(
+                save_input(
+                    "storyboard",
+                    ProviderKind::Storyboard,
+                    "https://story.example.test",
+                ),
+                Some("old-key"),
+            )
+            .unwrap();
+        context
+            .db
+            .with_immediate_transaction(|transaction| {
+                transaction
+                    .execute(
+                        "UPDATE ai_providers SET kind = 'reverse-image' WHERE id = 'storyboard'",
+                        [],
+                    )
+                    .map_err(|_| "TEST_DATABASE_ERROR".to_string())?;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            context.service.get("storyboard").unwrap().kind,
+            ProviderKind::ReverseImage
+        );
+
+        assert_invalid_provider_blocks_credential_reads(&context);
+    }
+
+    #[test]
+    fn tampered_endpoint_origin_cannot_reuse_an_old_credential() {
+        let context = test_context();
+        context
+            .service
+            .save(
+                save_input(
+                    "storyboard",
+                    ProviderKind::Storyboard,
+                    "https://story.example.test",
+                ),
+                Some("old-key"),
+            )
+            .unwrap();
+        context
+            .db
+            .with_immediate_transaction(|transaction| {
+                transaction
+                    .execute(
+                        "UPDATE ai_providers SET
+                            base_url = 'https://other.example.test/v1',
+                            models_url = 'https://other.example.test/v1/models',
+                            chat_completions_url = 'https://other.example.test/v1/chat/completions',
+                            bound_host = 'https://other.example.test'
+                         WHERE id = 'storyboard'",
+                        [],
+                    )
+                    .map_err(|_| "TEST_DATABASE_ERROR".to_string())?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert_invalid_provider_blocks_credential_reads(&context);
+    }
+
+    #[test]
+    fn malformed_or_inconsistent_credential_binding_fails_closed_without_reading() {
+        let context = test_context();
+        context
+            .service
+            .save(
+                save_input(
+                    "storyboard",
+                    ProviderKind::Storyboard,
+                    "https://story.example.test",
+                ),
+                Some("old-key"),
+            )
+            .unwrap();
+        let valid_ref = active_credential_ref(&context.db, "storyboard").unwrap();
+        let malformed_ref = format!("{}/not-a-uuid", valid_ref.rsplit_once('/').unwrap().0);
+
+        context
+            .db
+            .with_immediate_transaction(|transaction| {
+                transaction
+                    .execute(
+                        "UPDATE ai_providers SET credential_ref = ?1
+                         WHERE id = 'storyboard'",
+                        [malformed_ref.as_str()],
+                    )
+                    .map_err(|_| "TEST_DATABASE_ERROR".to_string())?;
+                Ok(())
+            })
+            .unwrap();
+        assert_invalid_provider_blocks_credential_reads(&context);
+
+        context
+            .db
+            .with_immediate_transaction(|transaction| {
+                transaction
+                    .execute(
+                        "UPDATE ai_providers SET credential_ref = ?1, needs_credentials = 1
+                         WHERE id = 'storyboard'",
+                        [valid_ref.as_str()],
+                    )
+                    .map_err(|_| "TEST_DATABASE_ERROR".to_string())?;
+                Ok(())
+            })
+            .unwrap();
+        assert_invalid_provider_blocks_credential_reads(&context);
+
+        context
+            .db
+            .with_immediate_transaction(|transaction| {
+                transaction
+                    .execute(
+                        "UPDATE ai_providers SET credential_ref = NULL, needs_credentials = 0
+                         WHERE id = 'storyboard'",
+                        [],
+                    )
+                    .map_err(|_| "TEST_DATABASE_ERROR".to_string())?;
+                Ok(())
+            })
+            .unwrap();
+        assert_invalid_provider_blocks_credential_reads(&context);
     }
 
     #[test]
