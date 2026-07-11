@@ -2,12 +2,24 @@
 
 pub mod schema;
 
-use rusqlite::{backup::Backup, Connection, Transaction, TransactionBehavior};
+use rusqlite::{
+    backup::{Backup, StepResult},
+    Connection, ErrorCode, Transaction, TransactionBehavior,
+};
 use std::{
     path::{Path, PathBuf},
     sync::Mutex,
-    time::Duration,
+    thread,
+    time::{Duration, Instant},
 };
+
+const DATABASE_FOREIGN_KEYS_REQUIRED: &str = "DATABASE_FOREIGN_KEYS_REQUIRED";
+const DATABASE_WAL_REQUIRED: &str = "DATABASE_WAL_REQUIRED";
+const ONLINE_BACKUP_TIMEOUT: &str = "ONLINE_BACKUP_TIMEOUT";
+const DATABASE_OPEN_RETRY_DEADLINE: Duration = Duration::from_secs(5);
+const DATABASE_OPEN_RETRY_PAUSE: Duration = Duration::from_millis(25);
+const ONLINE_BACKUP_DEADLINE: Duration = Duration::from_secs(30);
+const ONLINE_BACKUP_RETRY_PAUSE: Duration = Duration::from_millis(25);
 
 pub struct Database {
     path: PathBuf,
@@ -24,9 +36,18 @@ impl Database {
         connection
             .pragma_update(None, "foreign_keys", true)
             .map_err(|error| error.to_string())?;
-        connection
-            .pragma_update(None, "journal_mode", "WAL")
+        let foreign_keys: i64 = connection
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
             .map_err(|error| error.to_string())?;
+        if foreign_keys != 1 {
+            return Err(DATABASE_FOREIGN_KEYS_REQUIRED.into());
+        }
+        let journal_mode = configure_wal_mode(&connection)?;
+        if !journal_mode.eq_ignore_ascii_case("wal") {
+            return Err(format!(
+                "{DATABASE_WAL_REQUIRED}: journal_mode={journal_mode}"
+            ));
+        }
         schema::migrate(&mut connection)?;
         schema::validate(&connection)?;
         Ok(Self {
@@ -71,17 +92,75 @@ impl Database {
         let source = self.connection.lock().map_err(|error| error.to_string())?;
         let mut destination = Connection::open(destination).map_err(|error| error.to_string())?;
         let backup = Backup::new(&source, &mut destination).map_err(|error| error.to_string())?;
-        backup
-            .run_to_completion(64, Duration::from_millis(25), None)
-            .map_err(|error| error.to_string())
+        let started = Instant::now();
+        run_backup_step_loop(
+            || backup.step(64),
+            ONLINE_BACKUP_DEADLINE,
+            || started.elapsed(),
+            thread::sleep,
+        )
+    }
+}
+
+fn configure_wal_mode(connection: &Connection) -> Result<String, String> {
+    let started = Instant::now();
+    loop {
+        match connection.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0)) {
+            Ok(journal_mode) => return Ok(journal_mode),
+            Err(error)
+                if matches!(
+                    error.sqlite_error_code(),
+                    Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
+                ) && started.elapsed() < DATABASE_OPEN_RETRY_DEADLINE =>
+            {
+                thread::sleep(DATABASE_OPEN_RETRY_PAUSE);
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+}
+
+fn run_backup_step_loop<Step, Elapsed, Pause>(
+    mut step: Step,
+    deadline: Duration,
+    mut elapsed: Elapsed,
+    mut pause: Pause,
+) -> Result<(), String>
+where
+    Step: FnMut() -> rusqlite::Result<StepResult>,
+    Elapsed: FnMut() -> Duration,
+    Pause: FnMut(Duration),
+{
+    loop {
+        if elapsed() >= deadline {
+            return Err(ONLINE_BACKUP_TIMEOUT.into());
+        }
+
+        let result = step().map_err(|error| error.to_string())?;
+        if elapsed() >= deadline {
+            return Err(ONLINE_BACKUP_TIMEOUT.into());
+        }
+
+        match result {
+            StepResult::Done => return Ok(()),
+            StepResult::More | StepResult::Busy | StepResult::Locked => {
+                pause(ONLINE_BACKUP_RETRY_PAUSE);
+            }
+            _ => return Err("ONLINE_BACKUP_UNEXPECTED_STEP_RESULT".into()),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Database;
-    use std::sync::{Arc, Barrier};
-    use std::thread;
+    use super::{run_backup_step_loop, Database};
+    use rusqlite::{backup::StepResult, Connection};
+    use std::{
+        cell::Cell,
+        sync::{Arc, Barrier},
+        thread,
+        time::Duration,
+    };
 
     #[test]
     fn open_creates_schema_and_enforces_constraints() {
@@ -117,59 +196,143 @@ mod tests {
     }
 
     #[test]
-    fn immediate_transactions_allow_only_one_pending_reminder_claim() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(Database::open(dir.path().join("banana.db")).unwrap());
-        db.with_connection(|connection| {
-            connection
-                .execute(
-                    "INSERT INTO reminder_log (id, kind, local_date, phase, state, delivery_id)
-                     VALUES ('r1', 'daily-task', '2026-07-11', 'initial', 'pending', 'delivery-1')",
-                    [],
-                )
-                .map_err(|error| error.to_string())?;
-            Ok(())
-        })
-        .unwrap();
+    fn open_rejects_memory_databases_when_wal_is_unavailable() {
+        let first = Database::open(":memory:")
+            .err()
+            .expect("in-memory SQLite cannot enable WAL");
+        let second = Database::open(":memory:")
+            .err()
+            .expect("in-memory SQLite cannot enable WAL");
 
+        assert!(first.starts_with("DATABASE_WAL_REQUIRED"));
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn immediate_transaction_excludes_another_database_instance() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("banana.db");
+        let first = Database::open(&path).unwrap();
+        let second = Database::open(&path).unwrap();
+
+        first
+            .with_immediate_transaction(|_| {
+                second.with_connection(|connection| {
+                    connection
+                        .busy_timeout(Duration::ZERO)
+                        .map_err(|error| error.to_string())
+                })?;
+
+                let attempt: Result<(), String> = second.with_immediate_transaction(|_| Ok(()));
+                assert!(attempt.is_err());
+                Ok(())
+            })
+            .unwrap();
+
+        second
+            .with_connection(|connection| {
+                connection
+                    .busy_timeout(Duration::from_secs(5))
+                    .map_err(|error| error.to_string())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn simultaneous_fresh_opens_apply_the_migration_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("banana.db");
         let start = Arc::new(Barrier::new(3));
         let workers = (0..2)
             .map(|_| {
-                let db = Arc::clone(&db);
+                let path = path.clone();
                 let start = Arc::clone(&start);
                 thread::spawn(move || {
                     start.wait();
-                    db.with_immediate_transaction(|transaction| {
-                        transaction
-                            .execute(
-                                "UPDATE reminder_log SET state = 'shown'
-                                 WHERE id = 'r1' AND state = 'pending'",
-                                [],
-                            )
-                            .map_err(|error| error.to_string())
-                    })
-                    .unwrap()
+                    Database::open(path)
                 })
             })
             .collect::<Vec<_>>();
 
         start.wait();
-        let claimed = workers
+        let databases = workers
             .into_iter()
             .map(|worker| worker.join().unwrap())
-            .sum::<usize>();
-        assert_eq!(claimed, 1);
-        db.with_connection(|connection| {
-            let state: String = connection
-                .query_row(
-                    "SELECT state FROM reminder_log WHERE id = 'r1'",
-                    [],
-                    |row| row.get(0),
-                )
-                .map_err(|error| error.to_string())?;
-            assert_eq!(state, "shown");
-            Ok(())
-        })
-        .unwrap();
+            .collect::<Result<Vec<_>, _>>()
+            .expect("both opens should succeed");
+        drop(databases);
+
+        let connection = Connection::open(&path).unwrap();
+        let migration_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+    }
+
+    #[test]
+    fn backup_step_loop_times_out_when_every_step_is_busy() {
+        let clock = Cell::new(Duration::ZERO);
+        let error = run_backup_step_loop(
+            || Ok::<_, rusqlite::Error>(StepResult::Busy),
+            Duration::from_millis(50),
+            || clock.get(),
+            |pause| clock.set(clock.get() + pause),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "ONLINE_BACKUP_TIMEOUT");
+    }
+
+    #[test]
+    fn backup_step_loop_counts_step_time_against_the_deadline() {
+        let clock = Cell::new(Duration::ZERO);
+        let error = run_backup_step_loop(
+            || {
+                clock.set(Duration::from_millis(50));
+                Ok::<_, rusqlite::Error>(StepResult::Done)
+            },
+            Duration::from_millis(50),
+            || clock.get(),
+            |_| {},
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "ONLINE_BACKUP_TIMEOUT");
+    }
+
+    #[test]
+    fn online_backup_wal_snapshot_is_readable_from_the_destination_main_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path().join("source.db");
+        let destination_path = dir.path().join("snapshot.db");
+        let source = Database::open(&source_path).unwrap();
+
+        source
+            .with_connection(|connection| {
+                connection
+                    .execute(
+                        "INSERT INTO reminder_log (id, kind, local_date, phase, state, delivery_id)
+                         VALUES ('r1', 'daily-task', '2026-07-11', 'initial', 'pending', 'delivery-1')",
+                        [],
+                    )
+                    .map_err(|error| error.to_string())?;
+                Ok(())
+            })
+            .unwrap();
+        source.online_backup(&destination_path).unwrap();
+
+        let destination = Connection::open(&destination_path).unwrap();
+        let row_count: i64 = destination
+            .query_row(
+                "SELECT COUNT(*) FROM reminder_log WHERE id = 'r1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(row_count, 1);
     }
 }
