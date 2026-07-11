@@ -34,9 +34,22 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-autostart = "2.5.1"
+rusqlite = { version = "0.40.1", features = ["bundled", "backup"] }
+keyring = "4.1.4"
+fs2 = "0.4.3"
+sha2 = "0.10.9"
+url = "2.5.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "gzip", "brotli", "deflate"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+futures-util = "0.3"
+walkdir = "2.5.0"
+tempfile = "3"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
 
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
-tempfile = "3"
