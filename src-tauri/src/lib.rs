@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod fs_atomic;
 mod library;
+mod secrets;
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
