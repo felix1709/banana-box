@@ -8,6 +8,8 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+pub const LIBRARY_VERSION: i32 = 2;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Category {
@@ -26,6 +28,10 @@ pub struct Prompt {
     pub category_id: Option<String>,
     pub tags: Vec<String>,
     pub image: Option<String>,
+    #[serde(default)]
+    pub favorite: bool,
+    #[serde(default)]
+    pub order: i32,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -78,7 +84,7 @@ pub struct Library {
 impl Default for Library {
     fn default() -> Self {
         Library {
-            version: 1,
+            version: LIBRARY_VERSION,
             categories: vec![],
             prompts: vec![],
             settings: Settings {
@@ -98,11 +104,14 @@ pub fn library_path(dir: &Path) -> PathBuf {
 }
 
 pub fn load_library(dir: &Path) -> Library {
+    load_library_strict(dir).unwrap_or_else(|_| Library::default())
+}
+
+pub fn load_library_strict(dir: &Path) -> Result<Library, String> {
     let path = library_path(dir);
-    match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| Library::default()),
-        Err(_) => Library::default(),
-    }
+    let content = fs::read_to_string(&path)
+        .map_err(|error| format!("读取 {} 失败：{error}", path.display()))?;
+    serde_json::from_str(&content).map_err(|error| format!("解析 {} 失败：{error}", path.display()))
 }
 
 pub fn save_library(dir: &Path, lib: &Library) -> std::io::Result<()> {
@@ -186,7 +195,7 @@ mod tests {
     fn load_missing_returns_default() {
         let dir = tempdir().unwrap();
         let lib = load_library(dir.path());
-        assert_eq!(lib.version, 1);
+        assert_eq!(lib.version, LIBRARY_VERSION);
         assert!(lib.prompts.is_empty());
         assert_eq!(lib.settings.hotkey, "Ctrl+Shift+B");
     }
@@ -208,12 +217,38 @@ mod tests {
             category_id: Some("c1".into()),
             tags: vec!["中文".into()],
             image: None,
+            favorite: false,
+            order: 0,
             created_at: 1,
             updated_at: 1,
         });
         save_library(dir.path(), &lib).unwrap();
         let loaded = load_library(dir.path());
         assert_eq!(loaded, lib);
+    }
+
+    #[test]
+    fn prompt_favorite_and_order_round_trip() {
+        let dir = tempdir().unwrap();
+        let mut library = Library::default();
+        library.prompts.push(Prompt {
+            id: "p1".into(),
+            title: "镜头".into(),
+            content: "内容".into(),
+            category_id: None,
+            tags: vec![],
+            image: None,
+            favorite: true,
+            order: 7,
+            created_at: 1,
+            updated_at: 2,
+        });
+
+        save_library(dir.path(), &library).unwrap();
+        let loaded = load_library_strict(dir.path()).unwrap();
+
+        assert!(loaded.prompts[0].favorite);
+        assert_eq!(loaded.prompts[0].order, 7);
     }
 
     #[test]
@@ -227,6 +262,8 @@ mod tests {
             category_id: None,
             tags: vec![],
             image: Some("images/a.png".into()),
+            favorite: false,
+            order: 0,
             created_at: 1,
             updated_at: 1,
         });
