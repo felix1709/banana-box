@@ -16,6 +16,7 @@ use std::{
 const DATABASE_FOREIGN_KEYS_REQUIRED: &str = "DATABASE_FOREIGN_KEYS_REQUIRED";
 const DATABASE_WAL_REQUIRED: &str = "DATABASE_WAL_REQUIRED";
 const ONLINE_BACKUP_TIMEOUT: &str = "ONLINE_BACKUP_TIMEOUT";
+const DATABASE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const DATABASE_OPEN_RETRY_DEADLINE: Duration = Duration::from_secs(5);
 const DATABASE_OPEN_RETRY_PAUSE: Duration = Duration::from_millis(25);
 const ONLINE_BACKUP_DEADLINE: Duration = Duration::from_secs(30);
@@ -31,7 +32,7 @@ impl Database {
         let path = path.as_ref().to_path_buf();
         let mut connection = Connection::open(&path).map_err(|error| error.to_string())?;
         connection
-            .busy_timeout(Duration::from_secs(5))
+            .busy_timeout(DATABASE_BUSY_TIMEOUT)
             .map_err(|error| error.to_string())?;
         connection
             .pragma_update(None, "foreign_keys", true)
@@ -103,19 +104,52 @@ impl Database {
 }
 
 fn configure_wal_mode(connection: &Connection) -> Result<String, String> {
+    connection
+        .busy_timeout(Duration::ZERO)
+        .map_err(|error| format!("{DATABASE_WAL_REQUIRED}: {error}"))?;
     let started = Instant::now();
+    let result = run_wal_mode_retry_loop(
+        || connection.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0)),
+        DATABASE_OPEN_RETRY_DEADLINE,
+        || started.elapsed(),
+        thread::sleep,
+    );
+    connection
+        .busy_timeout(DATABASE_BUSY_TIMEOUT)
+        .map_err(|error| {
+            format!("{DATABASE_WAL_REQUIRED}: failed to restore busy timeout: {error}")
+        })?;
+
+    result
+}
+
+fn run_wal_mode_retry_loop<Attempt, Elapsed, Pause>(
+    mut attempt: Attempt,
+    deadline: Duration,
+    mut elapsed: Elapsed,
+    mut pause: Pause,
+) -> Result<String, String>
+where
+    Attempt: FnMut() -> rusqlite::Result<String>,
+    Elapsed: FnMut() -> Duration,
+    Pause: FnMut(Duration),
+{
     loop {
-        match connection.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0)) {
+        if elapsed() >= deadline {
+            return Err(format!("{DATABASE_WAL_REQUIRED}: timed out enabling WAL"));
+        }
+
+        match attempt() {
             Ok(journal_mode) => return Ok(journal_mode),
             Err(error)
                 if matches!(
                     error.sqlite_error_code(),
                     Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
-                ) && started.elapsed() < DATABASE_OPEN_RETRY_DEADLINE =>
+                ) =>
             {
-                thread::sleep(DATABASE_OPEN_RETRY_PAUSE);
+                pause(DATABASE_OPEN_RETRY_PAUSE);
             }
-            Err(error) => return Err(error.to_string()),
+            Err(error) => return Err(format!("{DATABASE_WAL_REQUIRED}: {error}")),
         }
     }
 }
@@ -143,7 +177,8 @@ where
 
         match result {
             StepResult::Done => return Ok(()),
-            StepResult::More | StepResult::Busy | StepResult::Locked => {
+            StepResult::More => {}
+            StepResult::Busy | StepResult::Locked => {
                 pause(ONLINE_BACKUP_RETRY_PAUSE);
             }
             _ => return Err("ONLINE_BACKUP_UNEXPECTED_STEP_RESULT".into()),
@@ -153,8 +188,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{run_backup_step_loop, Database};
-    use rusqlite::{backup::StepResult, Connection};
+    use super::{configure_wal_mode, run_backup_step_loop, run_wal_mode_retry_loop, Database};
+    use rusqlite::{backup::StepResult, ffi, Connection, Error};
     use std::{
         cell::Cell,
         sync::{Arc, Barrier},
@@ -302,6 +337,74 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, "ONLINE_BACKUP_TIMEOUT");
+    }
+
+    #[test]
+    fn wal_mode_retry_loop_returns_a_stable_error_after_the_busy_deadline() {
+        let clock = Cell::new(Duration::ZERO);
+        let pause_count = Cell::new(0);
+        let error = run_wal_mode_retry_loop(
+            || {
+                Err::<String, _>(Error::SqliteFailure(
+                    ffi::Error::new(ffi::SQLITE_BUSY),
+                    None,
+                ))
+            },
+            Duration::from_millis(50),
+            || clock.get(),
+            |pause| {
+                pause_count.set(pause_count.get() + 1);
+                clock.set(clock.get() + pause);
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "DATABASE_WAL_REQUIRED: timed out enabling WAL");
+        assert_eq!(pause_count.get(), 2);
+    }
+
+    #[test]
+    fn configure_wal_mode_restores_the_standard_busy_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let connection = Connection::open(dir.path().join("banana.db")).unwrap();
+        connection.busy_timeout(Duration::from_millis(1)).unwrap();
+
+        assert_eq!(
+            configure_wal_mode(&connection)
+                .unwrap()
+                .to_ascii_lowercase(),
+            "wal"
+        );
+        let busy_timeout: i64 = connection
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(busy_timeout, 5_000);
+    }
+
+    #[test]
+    fn backup_step_loop_continues_after_more_without_pausing() {
+        let step_count = Cell::new(0);
+        let pause_count = Cell::new(0);
+
+        run_backup_step_loop(
+            || {
+                let next_step = step_count.get() + 1;
+                step_count.set(next_step);
+                Ok::<_, rusqlite::Error>(if next_step < 4 {
+                    StepResult::More
+                } else {
+                    StepResult::Done
+                })
+            },
+            Duration::from_secs(1),
+            || Duration::ZERO,
+            |_| pause_count.set(pause_count.get() + 1),
+        )
+        .unwrap();
+
+        assert_eq!(step_count.get(), 4);
+        assert_eq!(pause_count.get(), 0);
     }
 
     #[test]

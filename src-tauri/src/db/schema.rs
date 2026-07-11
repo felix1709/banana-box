@@ -1,8 +1,11 @@
 use rusqlite::{Connection, TransactionBehavior};
+use sha2::{Digest, Sha256};
 
 pub const SCHEMA_VERSION: i64 = 1;
 pub const DATABASE_SCHEMA_INVALID: &str = "DATABASE_SCHEMA_INVALID";
 const MIGRATION_V1: &str = include_str!("../../migrations/0001_v1.sql");
+const V1_SCHEMA_FINGERPRINT: &str =
+    "9efed7e5f33c46abefdd4cfe98a19a7374c2f08c81ed7f55f7eac1ced5bba1e4";
 const REQUIRED_TABLES: [&str; 15] = [
     "schema_migrations",
     "ai_providers",
@@ -19,6 +22,15 @@ const REQUIRED_TABLES: [&str; 15] = [
     "storyboard_messages",
     "storyboard_message_blocks",
     "reminder_log",
+];
+const REQUIRED_INDEXES: [&str; 7] = [
+    "idx_projects_main_stage",
+    "idx_projects_release_date",
+    "idx_project_stages_project",
+    "idx_daily_groups_day_position",
+    "idx_daily_tasks_group_position",
+    "idx_daily_tasks_carry_source",
+    "one_active_agent_request_per_thread",
 ];
 
 pub fn migrate(connection: &mut Connection) -> Result<(), String> {
@@ -88,6 +100,11 @@ pub fn validate(connection: &Connection) -> Result<(), String> {
         return Err(schema_invalid("missing schema_migrations version 1"));
     }
 
+    let fingerprint = schema_fingerprint(connection).map_err(schema_invalid)?;
+    if fingerprint != V1_SCHEMA_FINGERPRINT {
+        return Err(schema_invalid("schema fingerprint mismatch"));
+    }
+
     let integrity: String = connection
         .query_row("PRAGMA integrity_check", [], |row| row.get(0))
         .map_err(|error| schema_invalid(error))?;
@@ -111,9 +128,60 @@ fn schema_invalid(message: impl std::fmt::Display) -> String {
     format!("{DATABASE_SCHEMA_INVALID}: {message}")
 }
 
+fn schema_fingerprint(connection: &Connection) -> Result<String, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        "
+        SELECT type, name, tbl_name, sql
+        FROM sqlite_master
+        WHERE type IN ('table', 'index') AND name NOT GLOB 'sqlite_*'
+        ORDER BY type, name, tbl_name, sql
+        ",
+    )?;
+    let mut rows = statement.query([])?;
+    let mut hasher = Sha256::new();
+
+    while let Some(row) = rows.next()? {
+        let object_type: String = row.get(0)?;
+        let name: String = row.get(1)?;
+        if !is_migration_schema_object(&object_type, &name) {
+            continue;
+        }
+
+        let table_name: String = row.get(2)?;
+        let sql: Option<String> = row.get(3)?;
+        let normalized_sql = normalize_schema_sql(sql.as_deref().unwrap_or_default());
+        for field in [object_type.as_str(), name.as_str(), table_name.as_str()] {
+            update_schema_fingerprint_field(&mut hasher, field);
+        }
+        update_schema_fingerprint_field(&mut hasher, &normalized_sql);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn is_migration_schema_object(object_type: &str, name: &str) -> bool {
+    match object_type {
+        "table" => REQUIRED_TABLES.contains(&name),
+        "index" => REQUIRED_INDEXES.contains(&name),
+        _ => false,
+    }
+}
+
+fn update_schema_fingerprint_field(hasher: &mut Sha256, value: &str) {
+    hasher.update((value.len() as u64).to_be_bytes());
+    hasher.update(value.as_bytes());
+}
+
+fn normalize_schema_sql(sql: &str) -> String {
+    sql.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{migrate, validate, SCHEMA_VERSION};
+    use super::{
+        migrate, schema_fingerprint, validate, DATABASE_SCHEMA_INVALID, MIGRATION_V1,
+        SCHEMA_VERSION, V1_SCHEMA_FINGERPRINT,
+    };
     use rusqlite::Connection;
 
     #[test]
@@ -138,5 +206,44 @@ mod tests {
         let error = validate(&connection).unwrap_err();
 
         assert!(error.starts_with("DATABASE_SCHEMA_INVALID"));
+    }
+
+    #[test]
+    fn validate_rejects_a_v1_database_with_a_replaced_projects_table() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        migrate(&mut connection).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", false)
+            .unwrap();
+        connection
+            .execute_batch(
+                "
+                DROP TABLE projects;
+                CREATE TABLE projects (id TEXT PRIMARY KEY);
+                ",
+            )
+            .unwrap();
+
+        let error = validate(&connection).unwrap_err();
+
+        assert_eq!(
+            error,
+            format!("{DATABASE_SCHEMA_INVALID}: schema fingerprint mismatch")
+        );
+    }
+
+    #[test]
+    fn schema_fingerprint_normalizes_lf_and_crlf_v1_migrations() {
+        let lf = schema_fingerprint_after_applying(MIGRATION_V1);
+        let crlf = schema_fingerprint_after_applying(&MIGRATION_V1.replace('\n', "\r\n"));
+
+        assert_eq!(lf, crlf);
+        assert_eq!(lf, V1_SCHEMA_FINGERPRINT);
+    }
+
+    fn schema_fingerprint_after_applying(migration: &str) -> String {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(migration).unwrap();
+        schema_fingerprint(&connection).unwrap()
     }
 }
