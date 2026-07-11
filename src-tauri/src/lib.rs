@@ -1,4 +1,6 @@
 mod commands;
+mod db;
+mod fs_atomic;
 mod library;
 
 use std::sync::Mutex;
