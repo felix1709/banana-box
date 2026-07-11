@@ -6,6 +6,7 @@ mod library;
 mod provider_http;
 mod providers;
 mod secrets;
+mod startup;
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
