@@ -80,7 +80,7 @@ impl CredentialStore for MemoryCredentialStore {
 mod tests {
     use super::{CredentialMutationCoordinator, CredentialStore, MemoryCredentialStore};
     use std::{
-        sync::{mpsc, Arc},
+        sync::{mpsc, Arc, TryLockError},
         thread,
         time::Duration,
     };
@@ -140,7 +140,10 @@ mod tests {
         });
 
         waiting_rx.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert!(acquired_rx.recv_timeout(Duration::from_millis(50)).is_err());
+        assert!(matches!(
+            coordinator.0.try_lock(),
+            Err(TryLockError::WouldBlock)
+        ));
 
         drop(held_guard);
 
