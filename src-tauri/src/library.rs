@@ -245,6 +245,13 @@ mod tests {
         });
 
         save_library(dir.path(), &library).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(library_path(dir.path())).unwrap()).unwrap();
+        assert_eq!(
+            saved["prompts"][0]["favorite"],
+            serde_json::Value::Bool(true)
+        );
+        assert_eq!(saved["prompts"][0]["order"], serde_json::Value::from(7));
         let loaded = load_library_strict(dir.path()).unwrap();
 
         assert!(loaded.prompts[0].favorite);
