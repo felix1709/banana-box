@@ -252,6 +252,54 @@ mod tests {
     }
 
     #[test]
+    fn strict_load_v1_prompt_defaults_favorite_and_order() {
+        let dir = tempdir().unwrap();
+        let json = r#"{
+          "version": 1,
+          "categories": [],
+          "prompts": [
+            {
+              "id": "p1",
+              "title": "旧提示词",
+              "content": "兼容旧数据",
+              "categoryId": null,
+              "tags": [],
+              "image": null,
+              "createdAt": 1,
+              "updatedAt": 2
+            }
+          ],
+          "settings": {
+            "hotkey": "Ctrl+Shift+B",
+            "theme": "auto"
+          }
+        }"#;
+        fs::write(library_path(dir.path()), json).unwrap();
+
+        let loaded = load_library_strict(dir.path()).unwrap();
+
+        assert!(!loaded.prompts[0].favorite);
+        assert_eq!(loaded.prompts[0].order, 0);
+    }
+
+    #[test]
+    fn missing_library_is_strict_error_and_lenient_default() {
+        let dir = tempdir().unwrap();
+
+        assert!(load_library_strict(dir.path()).is_err());
+        assert_eq!(load_library(dir.path()), Library::default());
+    }
+
+    #[test]
+    fn corrupt_library_json_is_strict_error_and_lenient_default() {
+        let dir = tempdir().unwrap();
+        fs::write(library_path(dir.path()), "{not valid JSON").unwrap();
+
+        assert!(load_library_strict(dir.path()).is_err());
+        assert_eq!(load_library(dir.path()), Library::default());
+    }
+
+    #[test]
     fn export_import_roundtrip() {
         let data_dir = tempdir().unwrap();
         let mut lib = Library::default();
