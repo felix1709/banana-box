@@ -39,7 +39,7 @@ pub struct AiProvider {
     pub capability_revision: i64,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SaveProviderInput {
     pub id: String,
@@ -67,20 +67,28 @@ pub(crate) fn validated_host_fingerprint(input: &SaveProviderInput) -> Result<St
         validate_provider_url(endpoint)?;
     }
 
+    let origins = canonical_origins([&base, &models, &chat]);
+
     if (base.origin() != models.origin() || base.origin() != chat.origin())
         && !input.confirm_cross_origin
     {
-        return Err(CROSS_ORIGIN_CONFIRMATION_REQUIRED.into());
+        return Err(format!(
+            "{CROSS_ORIGIN_CONFIRMATION_REQUIRED}: {}",
+            origins.join("|")
+        ));
     }
 
-    let mut origins = [&base, &models, &chat]
+    Ok(origins.join("|"))
+}
+
+fn canonical_origins(endpoints: [&Url; 3]) -> Vec<String> {
+    let mut origins = endpoints
         .into_iter()
         .map(|endpoint| endpoint.origin().ascii_serialization().to_ascii_lowercase())
         .collect::<Vec<_>>();
     origins.sort();
     origins.dedup();
-
-    Ok(origins.join("|"))
+    origins
 }
 
 fn parse_provider_url(value: &str) -> Result<Url, String> {
@@ -138,12 +146,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unconfirmed_cross_origin_without_echoing_the_url() {
+    fn rejects_unconfirmed_cross_origin_with_sanitized_canonical_origins() {
         let mut input = provider_input();
-        input.models_url = format!("https://{SENTINEL}.models.example.net/v1/models");
+        input.base_url = format!("https://api.example.com/{SENTINEL}");
+        input.models_url = "https://models.example.net/v1/models".into();
 
         let error = validated_host_fingerprint(&input).unwrap_err();
 
+        assert_eq!(
+            error,
+            "CROSS_ORIGIN_CONFIRMATION_REQUIRED: https://api.example.com|https://models.example.net"
+        );
         assert!(!error.contains(SENTINEL));
     }
 
@@ -194,7 +207,23 @@ mod tests {
         let mut input = provider_input();
         input.base_url = "http://api.example.com/v1".into();
 
-        assert!(validated_host_fingerprint(&input).is_err());
+        assert_eq!(
+            validated_host_fingerprint(&input).unwrap_err(),
+            INSECURE_PROVIDER_URL
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_and_hostless_urls_with_a_stable_error_code() {
+        for invalid_url in ["not a url", "https://", "mailto:api@example.com"] {
+            let mut input = provider_input();
+            input.base_url = invalid_url.into();
+
+            assert_eq!(
+                validated_host_fingerprint(&input).unwrap_err(),
+                INVALID_PROVIDER_URL
+            );
+        }
     }
 
     #[test]
