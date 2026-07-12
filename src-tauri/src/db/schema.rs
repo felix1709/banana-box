@@ -244,6 +244,90 @@ mod tests {
         assert_eq!(lf, V1_SCHEMA_FINGERPRINT);
     }
 
+    #[test]
+    fn production_management_schema_creates_all_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::Database::open(dir.path().join("banana.db")).unwrap();
+        let names = db
+            .with_connection(|connection| {
+                let mut statement = connection
+                    .prepare(
+                        "SELECT name FROM sqlite_master
+                         WHERE type = 'table'
+                         ORDER BY name",
+                    )
+                    .map_err(|error| error.to_string())?;
+                let rows = statement
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .map_err(|error| error.to_string())?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| error.to_string())
+            })
+            .unwrap();
+
+        for required in [
+            "projects",
+            "project_stages",
+            "daily_task_days",
+            "daily_task_groups",
+            "daily_tasks",
+        ] {
+            assert!(
+                names.iter().any(|name| name == required),
+                "missing {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn production_schema_allows_overlapping_stages_but_enforces_local_constraints() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        migrate(&mut connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO projects (id, code, version, name, file_path, release_date, main_stage_key, archived, created_at, updated_at)
+                 VALUES ('project-1', 'L36', 'v1', 'Test', 'C:/work/L36', '2026-07-31', 'storyboard', 0, '2026-07-12T00:00:00Z', '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        assert!(connection
+            .execute(
+                "INSERT INTO projects (id, code, version, name, file_path, release_date, main_stage_key, archived, created_at, updated_at)
+                 VALUES ('project-2', 'l36', 'v1', 'Duplicate', 'C:/work/L36b', '2026-07-31', 'storyboard', 0, '2026-07-12T00:00:00Z', '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO project_stages (id, project_id, stage_key, position, start_date, end_date, progress, updated_at)
+                 VALUES ('stage-1', 'project-1', 'storyboard', 0, '2026-07-01', '2026-07-10', 100, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .is_ok());
+        assert!(connection
+            .execute(
+                "INSERT INTO project_stages (id, project_id, stage_key, position, start_date, end_date, progress, updated_at)
+                 VALUES ('stage-2', 'project-1', 'first_cut', 1, '2026-07-05', '2026-07-15', 0, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .is_ok());
+        assert!(connection
+            .execute(
+                "INSERT INTO project_stages (id, project_id, stage_key, position, start_date, end_date, progress, updated_at)
+                 VALUES ('stage-3', 'project-1', 'refinement', 2, '2026-07-15', '2026-07-16', 101, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO project_stages (id, project_id, stage_key, position, start_date, end_date, progress, updated_at)
+                 VALUES ('stage-4', 'project-1', 'refinement', 2, '2026-07-16', '2026-07-15', 0, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .is_err());
+    }
+
     fn schema_fingerprint_after_applying(migration: &str) -> String {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(migration).unwrap();
