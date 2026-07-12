@@ -100,6 +100,24 @@ export interface DailyTask {
   updatedAt: string
 }
 
+export interface CreateDailyTaskInput {
+  localDate: string
+  code: string
+  projectId: string | null
+  title: string
+  progress: number
+  note: string
+  investedMinutes: number
+}
+
+export interface UpdateDailyTaskInput {
+  taskId: string
+  title: string
+  progress: number
+  note: string
+  investedMinutes: number
+}
+
 export interface DailyTaskGroup {
   id: string
   code: string
