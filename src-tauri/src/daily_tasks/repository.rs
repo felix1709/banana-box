@@ -1,6 +1,6 @@
 use super::model::{
-    validate_create, validate_local_date, CreateDailyTaskInput, DailyTaskDayDto, DailyTaskDto,
-    DailyTaskGroupDto,
+    validate_create, validate_local_date, validate_update, CreateDailyTaskInput, DailyTaskDayDto,
+    DailyTaskDto, DailyTaskGroupDto, UpdateDailyTaskInput,
 };
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -72,17 +72,9 @@ pub fn reorder_groups(
         };
         reject_settled(transaction, &day_id)?;
         let actual = group_ids(transaction, &day_id)?;
-        let requested = codes
-            .iter()
-            .map(|code| super::model::normalize_group_code(code))
-            .collect::<Result<Vec<_>, _>>()?;
-        let expected_codes = group_codes(transaction, &day_id)?;
-        if requested.len() != actual.len()
-            || requested.iter().collect::<std::collections::HashSet<_>>().len() != requested.len()
-            || requested != expected_codes.iter().map(|code| code.as_str()).collect::<Vec<_>>()
-                && requested.iter().collect::<std::collections::HashSet<_>>()
-                    != expected_codes.iter().collect::<std::collections::HashSet<_>>()
-        {
+        let requested = codes.iter().collect::<std::collections::HashSet<_>>();
+        let expected = actual.iter().collect::<std::collections::HashSet<_>>();
+        if codes.len() != actual.len() || requested.len() != codes.len() || requested != expected {
             return Err("DAILY_GROUP_ORDER_INVALID".into());
         }
         transaction
@@ -91,16 +83,130 @@ pub fn reorder_groups(
                 [&day_id],
             )
             .map_err(|error| error.to_string())?;
-        for (position, code) in requested.iter().enumerate() {
+        for (position, group_id) in codes.iter().enumerate() {
             transaction
                 .execute(
-                    "UPDATE daily_task_groups SET position = ?1, updated_at = ?2 WHERE day_id = ?3 AND code = ?4",
-                    params![position as i64, timestamp(), day_id, code],
+                    "UPDATE daily_task_groups SET position = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![position as i64, timestamp(), group_id],
                 )
                 .map_err(|error| error.to_string())?;
         }
         load_day_from_connection(transaction, local_date)
     })
+}
+
+pub fn update_task(
+    db: &crate::db::Database,
+    input: UpdateDailyTaskInput,
+) -> Result<DailyTaskDayDto, String> {
+    validate_update(&input)?;
+    db.with_immediate_transaction(|transaction| {
+        let (local_date, day_id, _group_id) = find_task_day(transaction, &input.task_id)?;
+        reject_settled(transaction, &day_id)?;
+        transaction
+            .execute(
+                "UPDATE daily_tasks SET title = ?1, progress = ?2, note = ?3, invested_minutes = ?4, updated_at = ?5 WHERE id = ?6",
+                params![input.title.trim(), input.progress, input.note, input.invested_minutes, timestamp(), input.task_id],
+            )
+            .map_err(|error| error.to_string())?;
+        load_day_from_connection(transaction, &local_date)
+    })
+}
+
+pub fn delete_task(
+    db: &crate::db::Database,
+    local_date: &str,
+    task_id: &str,
+) -> Result<DailyTaskDayDto, String> {
+    validate_local_date(local_date)?;
+    uuid::Uuid::parse_str(task_id).map_err(|_| "DAILY_TASK_ID_INVALID")?;
+    db.with_immediate_transaction(|transaction| {
+        let (task_date, day_id, group_id) = find_task_day(transaction, task_id)?;
+        if task_date != local_date {
+            return Err("DAILY_TASK_DATE_MISMATCH".into());
+        }
+        reject_settled(transaction, &day_id)?;
+        transaction
+            .execute("DELETE FROM daily_tasks WHERE id = ?1", [task_id])
+            .map_err(|error| error.to_string())?;
+        let remaining: i64 = transaction
+            .query_row(
+                "SELECT COUNT(*) FROM daily_tasks WHERE group_id = ?1",
+                [&group_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if remaining == 0 {
+            transaction
+                .execute("DELETE FROM daily_task_groups WHERE id = ?1", [&group_id])
+                .map_err(|error| error.to_string())?;
+        }
+        load_day_from_connection(transaction, local_date)
+    })
+}
+
+pub fn reorder_tasks(
+    db: &crate::db::Database,
+    local_date: &str,
+    group_id: &str,
+    task_ids: Vec<String>,
+) -> Result<DailyTaskDayDto, String> {
+    validate_local_date(local_date)?;
+    db.with_immediate_transaction(|transaction| {
+        let day_id: String = transaction
+            .query_row(
+                "SELECT id FROM daily_task_days WHERE local_date = ?1",
+                [local_date],
+                |row| row.get(0),
+            )
+            .map_err(|_| "DAILY_DATE_NOT_FOUND".to_string())?;
+        reject_settled(transaction, &day_id)?;
+        let belongs: Option<String> = transaction
+            .query_row(
+                "SELECT id FROM daily_task_groups WHERE id = ?1 AND day_id = ?2",
+                params![group_id, day_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if belongs.is_none() {
+            return Err("DAILY_GROUP_NOT_FOUND".into());
+        }
+        let actual = task_ids_for_group(transaction, group_id)?;
+        let requested = task_ids.iter().collect::<std::collections::HashSet<_>>();
+        let expected = actual.iter().collect::<std::collections::HashSet<_>>();
+        if task_ids.len() != actual.len()
+            || requested.len() != task_ids.len()
+            || requested != expected
+        {
+            return Err("DAILY_TASK_ORDER_INVALID".into());
+        }
+        transaction
+            .execute(
+                "UPDATE daily_tasks SET position = position + 1000000 WHERE group_id = ?1",
+                [group_id],
+            )
+            .map_err(|error| error.to_string())?;
+        for (position, task_id) in task_ids.iter().enumerate() {
+            transaction
+                .execute(
+                    "UPDATE daily_tasks SET position = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![position as i64, timestamp(), task_id],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        load_day_from_connection(transaction, local_date)
+    })
+}
+
+fn find_task_day(
+    connection: &Connection,
+    task_id: &str,
+) -> Result<(String, String, String), String> {
+    connection.query_row(
+        "SELECT days.local_date, days.id, groups.id FROM daily_tasks tasks JOIN daily_task_groups groups ON groups.id = tasks.group_id JOIN daily_task_days days ON days.id = groups.day_id WHERE tasks.id = ?1",
+        [task_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).map_err(|_| "DAILY_TASK_NOT_FOUND".to_string())
 }
 
 fn ensure_day(connection: &Connection, local_date: &str, now: &str) -> Result<String, String> {
@@ -272,16 +378,16 @@ fn group_ids(connection: &Connection, day_id: &str) -> Result<Vec<String>, Strin
     Ok(ids)
 }
 
-fn group_codes(connection: &Connection, day_id: &str) -> Result<Vec<String>, String> {
+fn task_ids_for_group(connection: &Connection, group_id: &str) -> Result<Vec<String>, String> {
     let mut statement = connection
-        .prepare("SELECT code FROM daily_task_groups WHERE day_id = ?1")
+        .prepare("SELECT id FROM daily_tasks WHERE group_id = ?1")
         .map_err(|error| error.to_string())?;
-    let codes = statement
-        .query_map([day_id], |row| row.get(0))
+    let ids = statement
+        .query_map([group_id], |row| row.get(0))
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
-    Ok(codes)
+    Ok(ids)
 }
 
 fn timestamp() -> String {

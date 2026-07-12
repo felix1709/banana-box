@@ -1,6 +1,9 @@
 use super::model::{normalize_group_code, validate_task_fields};
 use super::report::{format_full_report, format_group_report, ReportGroup, ReportTask};
-use super::{model::CreateDailyTaskInput, repository};
+use super::{
+    model::{CreateDailyTaskInput, UpdateDailyTaskInput},
+    repository,
+};
 
 fn group(code: &str, tasks: &[(&str, i64)]) -> ReportGroup {
     ReportGroup {
@@ -52,7 +55,16 @@ fn daily_groups_keep_explicit_order_and_tasks_keep_work_metadata() {
     let db = test_database();
     repository::create_task(&db, input("2026-07-11", "L50", "录像带", 50, 95)).unwrap();
     repository::create_task(&db, input("2026-07-11", "L36", "三丽鸥", 100, 40)).unwrap();
-    repository::reorder_groups(&db, "2026-07-11", vec!["L36".into(), "L50".into()]).unwrap();
+    let unordered = repository::load_day(&db, "2026-07-11").unwrap();
+    repository::reorder_groups(
+        &db,
+        "2026-07-11",
+        vec![
+            unordered.groups[1].id.clone(),
+            unordered.groups[0].id.clone(),
+        ],
+    )
+    .unwrap();
 
     let day = repository::load_day(&db, "2026-07-11").unwrap();
     assert_eq!(day.groups[0].code, "L36");
@@ -68,6 +80,43 @@ fn loading_a_history_date_never_merges_tasks_from_another_day() {
 
     let history = repository::load_day(&db, "2026-07-10").unwrap();
     assert_eq!(history.groups[0].tasks[0].title, "昨天");
+}
+
+#[test]
+fn tasks_can_update_reorder_and_delete_without_leaving_stale_rows() {
+    let db = test_database();
+    let initial = repository::create_task(&db, input("2026-07-11", "L36", "任务一", 0, 0)).unwrap();
+    let first = initial.groups[0].tasks[0].id.clone();
+    let second_day =
+        repository::create_task(&db, input("2026-07-11", "L36", "任务二", 50, 10)).unwrap();
+    let group = &second_day.groups[0];
+    let second = group.tasks[1].id.clone();
+
+    let changed = repository::update_task(
+        &db,
+        UpdateDailyTaskInput {
+            task_id: first.clone(),
+            title: "任务一已更新".into(),
+            progress: 80,
+            note: "备注".into(),
+            invested_minutes: 35,
+        },
+    )
+    .unwrap();
+    assert_eq!(changed.groups[0].tasks[0].progress, 80);
+
+    let reordered = repository::reorder_tasks(
+        &db,
+        "2026-07-11",
+        &group.id,
+        vec![second.clone(), first.clone()],
+    )
+    .unwrap();
+    assert_eq!(reordered.groups[0].tasks[0].id, second);
+
+    let deleted = repository::delete_task(&db, "2026-07-11", &first).unwrap();
+    assert_eq!(deleted.groups[0].tasks.len(), 1);
+    assert_eq!(deleted.groups[0].tasks[0].id, second);
 }
 
 fn test_database() -> crate::db::Database {
