@@ -399,8 +399,9 @@ mod tests {
 
     #[test]
     fn schema_fingerprint_normalizes_lf_and_crlf_v1_migrations() {
-        let lf = schema_fingerprint_after_applying(MIGRATION_V1);
-        let crlf = schema_fingerprint_after_applying(&MIGRATION_V1.replace('\n', "\r\n"));
+        let lf_migration = MIGRATION_V1.replace("\r\n", "\n");
+        let lf = schema_fingerprint_after_applying(&lf_migration);
+        let crlf = schema_fingerprint_after_applying(&lf_migration.replace('\n', "\r\n"));
 
         assert_eq!(lf, crlf);
         assert_eq!(lf, V1_SCHEMA_FINGERPRINT);
