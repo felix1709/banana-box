@@ -180,6 +180,7 @@ pub fn run() {
             daily_tasks::delete_daily_task,
             daily_tasks::reorder_daily_groups,
             daily_tasks::reorder_daily_tasks,
+            daily_tasks::get_daily_report,
             begin_main_window_drag,
             begin_main_window_resize,
             set_main_window_pinned,

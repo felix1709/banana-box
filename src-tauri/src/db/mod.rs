@@ -213,7 +213,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .map_err(|error| error.to_string())?;
-            assert_eq!(version, 1);
+            assert_eq!(version, 3);
             assert_eq!(table_count, 1);
             assert!(connection.execute(
                 "INSERT INTO projects (id, code, version, name, file_path, release_date, main_stage_key, archived, created_at, updated_at)
@@ -224,7 +224,7 @@ mod tests {
                 "INSERT INTO projects (id, code, version, name, file_path, release_date, main_stage_key, archived, created_at, updated_at)
                  VALUES ('p2', 'l36', '1', 'B', 'C:/work/l36', '2026-08-01', 'storyboard', 0, '2026-07-11T00:00:00Z', '2026-07-11T00:00:00Z')",
                 [],
-            ).is_err());
+            ).is_ok());
             Ok(())
         })
         .unwrap();

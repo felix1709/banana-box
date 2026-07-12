@@ -72,6 +72,26 @@ const reverseImageProvider = {
   capabilityRevision: 1,
 }
 
+const storyboardProvider = {
+  id: 'storyboard' as const,
+  kind: 'storyboard' as const,
+  displayName: '故事板 Agent',
+  baseUrl: 'https://story.example.com',
+  modelsUrl: 'https://story.example.com/v1/models',
+  chatCompletionsUrl: 'https://story.example.com/v1/chat/completions',
+  defaultModel: 'glm-5.2',
+  availableModels: ['glm-5.2', 'glm-4.7'],
+  probedModel: null,
+  structuredMode: null,
+  interactiveCompatible: null,
+  boundHost: 'https://story.example.com',
+  needsCredentials: true,
+  configRevision: 1,
+  capabilityRevision: 1,
+  temperature: 0.7,
+  contextWindowTokens: 16000,
+}
+
 const legacyImportPreview = {
   token: '2dd6bcf1-262f-4cf1-a507-2d375750759c',
   promptCount: 2,
@@ -183,6 +203,25 @@ describe('SettingsModal', () => {
     expect((wrapper.find('.api-model-select').element as HTMLSelectElement).value).toBe(
       'doubao-seed-1-6-vision-250815',
     )
+  })
+
+  it('switches API settings to the independent storyboard provider', async () => {
+    vi.mocked(listAiProviders).mockResolvedValue([reverseImageProvider, storyboardProvider])
+    const wrapper = mount(SettingsModal)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await openSettingsTab(wrapper, 1)
+
+    const selector = wrapper.get('[data-field="api-provider"]')
+    expect((selector.element as HTMLSelectElement).value).toBe('reverse-image')
+
+    await selector.setValue('storyboard')
+
+    expect((wrapper.find('.api-base-url-input').element as HTMLInputElement).value).toBe(
+      'https://story.example.com',
+    )
+    expect((wrapper.get('[data-field="api-temperature"]').element as HTMLInputElement).value).toBe('0.7')
+    expect((wrapper.get('[data-field="api-context-window"]').element as HTMLInputElement).value).toBe('16000')
+    expect((wrapper.find('.api-model-select').element as HTMLSelectElement).value).toBe('glm-5.2')
   })
 
   it('keeps settings content scrollable inside the visible app area', () => {

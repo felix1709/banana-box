@@ -7,8 +7,8 @@ use crate::{
     command_auth::MainArgs,
 };
 use model::{
-    CreateDailyTaskInput, DailyTaskDayDto, ReorderDailyGroupsInput, ReorderDailyTasksInput,
-    UpdateDailyTaskInput,
+    CreateDailyTaskInput, DailyReportResult, DailyTaskDayDto, ReorderDailyGroupsInput,
+    ReorderDailyTasksInput, UpdateDailyTaskInput,
 };
 use std::sync::Arc;
 use tauri::Manager;
@@ -51,6 +51,13 @@ pub struct ReorderDailyGroupsCommandArgs {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReorderDailyTasksCommandArgs {
     input: ReorderDailyTasksInput,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetDailyReportCommandArgs {
+    local_date: String,
+    group_id: Option<String>,
 }
 
 async fn run_db<T, F>(db: Arc<crate::db::Database>, operation: F) -> Result<T, String>
@@ -150,6 +157,23 @@ pub async fn reorder_daily_tasks(
     let (db, _permit) = ready_services(&window, &gate)?;
     run_db(db, move |db| {
         repository::reorder_tasks(db, &input.local_date, &input.group_id, input.task_ids)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn get_daily_report(
+    window: tauri::WebviewWindow,
+    gate: tauri::State<'_, StartupGate>,
+    args: MainArgs<GetDailyReportCommandArgs>,
+) -> Result<DailyReportResult, String> {
+    let GetDailyReportCommandArgs {
+        local_date,
+        group_id,
+    } = args.0;
+    let (db, _permit) = ready_services(&window, &gate)?;
+    run_db(db, move |db| {
+        repository::report_for_day(db, &local_date, group_id.as_deref())
     })
     .await
 }

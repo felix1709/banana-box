@@ -103,7 +103,6 @@ pub struct CreateProjectInput {
     pub name: String,
     pub file_path: String,
     pub release_date: String,
-    pub main_stage_key: StageKey,
     pub stages: Vec<SaveProjectStageInput>,
 }
 
@@ -116,7 +115,6 @@ pub struct UpdateProjectInput {
     pub name: String,
     pub file_path: String,
     pub release_date: String,
-    pub main_stage_key: StageKey,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -147,7 +145,6 @@ pub struct SaveProjectWithStagesInput {
     pub name: String,
     pub file_path: String,
     pub release_date: String,
-    pub main_stage_key: StageKey,
     pub archived: bool,
     pub stages: Vec<SaveProjectStageInput>,
 }
@@ -220,6 +217,111 @@ pub fn validate_and_sort_stages(
     }
     stages.sort_by_key(|stage| stage.stage_key.position());
     Ok(stages)
+}
+
+pub fn progress_for_schedule(
+    start_date: &str,
+    end_date: &str,
+    current_date: NaiveDate,
+) -> Result<i64, String> {
+    let start = parse_date(start_date, "STAGE_START_DATE_INVALID")?;
+    let end = parse_date(end_date, "STAGE_END_DATE_INVALID")?;
+    if current_date < start {
+        return Ok(0);
+    }
+    if current_date >= end {
+        return Ok(100);
+    }
+
+    let total_days = (end - start).num_days();
+    let elapsed_days = (current_date - start).num_days();
+    Ok((elapsed_days * 100) / total_days)
+}
+
+pub fn main_stage_for_schedule(
+    stages: &[SaveProjectStageInput],
+    current_date: NaiveDate,
+) -> Result<StageKey, String> {
+    main_stage_from_dates(
+        stages.iter().map(|stage| {
+            (
+                stage.stage_key,
+                stage.start_date.as_str(),
+                stage.end_date.as_str(),
+            )
+        }),
+        current_date,
+    )
+}
+
+pub fn main_stage_for_project_stages(
+    stages: &[ProjectStageDto],
+    current_date: NaiveDate,
+) -> Result<StageKey, String> {
+    main_stage_from_dates(
+        stages.iter().map(|stage| {
+            (
+                stage.stage_key,
+                stage.start_date.as_str(),
+                stage.end_date.as_str(),
+            )
+        }),
+        current_date,
+    )
+}
+
+pub fn apply_schedule_progress(
+    stages: &[SaveProjectStageInput],
+    current_date: NaiveDate,
+) -> Result<Vec<SaveProjectStageInput>, String> {
+    stages
+        .iter()
+        .map(|stage| {
+            let mut calculated = stage.clone();
+            calculated.progress =
+                progress_for_schedule(&stage.start_date, &stage.end_date, current_date)?;
+            Ok(calculated)
+        })
+        .collect()
+}
+
+fn main_stage_from_dates<'a>(
+    stages: impl IntoIterator<Item = (StageKey, &'a str, &'a str)>,
+    current_date: NaiveDate,
+) -> Result<StageKey, String> {
+    let mut active = Vec::new();
+    let mut future = Vec::new();
+    let mut completed = Vec::new();
+
+    for (stage_key, start_date, end_date) in stages {
+        let start = parse_date(start_date, "STAGE_START_DATE_INVALID")?;
+        let end = parse_date(end_date, "STAGE_END_DATE_INVALID")?;
+        if current_date < start {
+            future.push((stage_key, start));
+        } else if current_date >= end {
+            completed.push((stage_key, end));
+        } else {
+            active.push((stage_key, start));
+        }
+    }
+
+    if let Some((stage_key, _)) = active
+        .into_iter()
+        .max_by_key(|(stage_key, start)| (stage_key.position(), *start))
+    {
+        return Ok(stage_key);
+    }
+    if let Some((stage_key, _)) = future
+        .into_iter()
+        .min_by_key(|(stage_key, start)| (*start, stage_key.position()))
+    {
+        return Ok(stage_key);
+    }
+    completed
+        .into_iter()
+        .max_by_key(|(stage_key, end)| (*end, stage_key.position()))
+        .map(|(stage_key, _)| stage_key)
+        .ok_or_else(|| "PROJECT_STAGES_INCOMPLETE".into())
 }
 
 fn validate_code(code: &str) -> Result<(), String> {

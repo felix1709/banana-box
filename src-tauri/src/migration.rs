@@ -591,6 +591,8 @@ fn legacy_reverse_provider_input(secrets: &LegacySecrets) -> Result<SaveProvider
         models_url: format!("{version_base}/models"),
         chat_completions_url: format!("{version_base}/chat/completions"),
         default_model: Some(secrets.reverse_model.clone()),
+        temperature: None,
+        context_window_tokens: None,
         confirm_cross_origin: false,
     })
 }

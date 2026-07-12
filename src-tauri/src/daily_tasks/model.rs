@@ -17,6 +17,13 @@ pub struct DailyTaskDayDto {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DailyReportResult {
+    pub text: String,
+    pub task_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DailyTaskGroupDto {
     pub id: String,
     pub code: String,

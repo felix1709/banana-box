@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Plus } from '@lucide/vue'
 import { useUiStore, type ActiveTool } from '@/stores/ui'
 import CategoryTree from '@/components/CategoryTree.vue'
 
@@ -10,6 +11,7 @@ const tools: { id: ActiveTool; label: string }[] = [
   { id: 'compression', label: '快速压缩' },
   { id: 'projects', label: '项目管理' },
   { id: 'daily-tasks', label: '当日任务' },
+  { id: 'storyboard', label: '故事板' },
 ]
 </script>
 
@@ -38,11 +40,14 @@ const tools: { id: ActiveTool; label: string }[] = [
           type="button"
           class="create-prompt-button"
           data-action="create-prompt"
-          aria-label="Create prompt"
-          title="Create prompt"
+          aria-label="新增提示词"
+          title="新增提示词"
           @click.stop="ui.openEditor(null)"
         >
-          +
+          <Plus
+            :size="14"
+            aria-hidden="true"
+          />
         </button>
       </div>
       <button
@@ -103,23 +108,25 @@ const tools: { id: ActiveTool; label: string }[] = [
 }
 
 .create-prompt-button {
-  width: 32px;
-  min-height: 32px;
-  flex: 0 0 32px;
-  border: 1px solid rgba(102, 247, 211, 0.55);
+  display: grid;
+  width: 28px;
+  min-height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(102, 247, 211, 0.36);
   border-radius: var(--bb-radius-md);
-  background: linear-gradient(180deg, var(--bb-primary-strong), var(--bb-primary));
-  color: #041017;
+  background: transparent;
+  color: var(--bb-text-muted);
   cursor: pointer;
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1;
-  box-shadow: 0 0 22px rgba(102, 247, 211, 0.2);
+  box-shadow: none;
 }
 
-.create-prompt-button:hover {
+.create-prompt-button:hover,
+.create-prompt-button:focus-visible {
   border-color: var(--bb-primary-strong);
-  background: linear-gradient(180deg, #c2fff2, #78ffdf);
+  background: var(--bb-primary-soft);
+  color: var(--bb-primary-strong);
 }
 
 .create-prompt-button:focus-visible {

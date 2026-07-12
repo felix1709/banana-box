@@ -22,7 +22,7 @@ describe('ProjectEditor', () => {
     createProject.mockReset()
   })
 
-  it('creates all eight independently editable stages in one project request', async () => {
+  it('creates all eight scheduled stages without manual main-stage or progress inputs', async () => {
     const store = useProjectsStore()
     store.openEditor(null)
     createProject.mockImplementation(async (input) => ({
@@ -46,20 +46,21 @@ describe('ProjectEditor', () => {
     await wrapper.get('[data-field="name"]').setValue('三丽鸥短片')
     await wrapper.get('[data-field="file-path"]').setValue('C:\\work\\L36')
     await wrapper.get('[data-field="release-date"]').setValue('2026-07-31')
-    await wrapper.get('[data-stage-progress="storyboard"]').setValue('65')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
+    expect(wrapper.find('.project-fields select').exists()).toBe(false)
+    expect(wrapper.find('[data-stage-progress]').exists()).toBe(false)
     expect(createProject).toHaveBeenCalledWith(
       expect.objectContaining({
         code: 'L36',
-        mainStageKey: 'storyboard',
         stages: expect.arrayContaining([
-          expect.objectContaining({ stageKey: 'storyboard', progress: 65 }),
+          expect.objectContaining({ stageKey: 'storyboard', progress: 0 }),
           expect.objectContaining({ stageKey: 'final_composite' }),
         ]),
       }),
     )
+    expect(createProject.mock.calls[0][0]).not.toHaveProperty('mainStageKey')
     expect(createProject.mock.calls[0][0].stages).toHaveLength(8)
     expect(store.projects).toHaveLength(1)
     expect(store.projectEditorOpen).toBe(false)

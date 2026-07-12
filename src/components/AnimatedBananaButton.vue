@@ -92,8 +92,15 @@ onBeforeUnmount(() => {
     :style="{ '--banana-frame': frame }"
     aria-label="打开或收起 Banana Box"
   >
-    <span class="banana-sprite" aria-hidden="true" />
-    <span v-if="unread" class="unread-dot" aria-label="有未读提醒" />
+    <span
+      class="banana-sprite"
+      aria-hidden="true"
+    />
+    <span
+      v-if="unread"
+      class="unread-dot"
+      aria-label="有未读提醒"
+    />
   </button>
 </template>
 
@@ -109,6 +116,12 @@ onBeforeUnmount(() => {
   place-items: center;
   flex: 0 0 64px;
   cursor: pointer;
+}
+
+.animated-banana:hover:not(:disabled) {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .banana-sprite {

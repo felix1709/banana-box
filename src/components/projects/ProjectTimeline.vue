@@ -20,7 +20,7 @@ const stages = computed(() =>
   STAGE_DEFINITIONS.map((definition) => ({
     definition,
     stage: props.project.stages.find((stage) => stage.stageKey === definition.key),
-  })),
+  })).filter(({ stage }) => stage && stage.progress < 100),
 )
 
 const timelineRange = computed(() => {
@@ -69,7 +69,7 @@ const todayStyle = computed(() => ({
 <template>
   <section
     class="project-timeline"
-    data-project-timeline
+    :data-project-timeline="project.id"
   >
     <div class="timeline-heading">
       <div>

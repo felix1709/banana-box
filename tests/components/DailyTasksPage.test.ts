@@ -1,13 +1,26 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import DailyTasksPage from '@/components/daily/DailyTasksPage.vue'
 import type { DailyTaskDay } from '@/domain/production'
 import { useDailyTasksStore } from '@/stores/dailyTasks'
+import { useUiStore } from '@/stores/ui'
+
+const getDailyReport = vi.hoisted(() => vi.fn())
+const copyToClipboard = vi.hoisted(() => vi.fn())
+
+vi.mock('@/lib/productionIpc', () => ({ getDailyReport }))
+vi.mock('@/lib/ipc', () => ({ copyToClipboard }))
 
 describe('DailyTasksPage', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    getDailyReport.mockReset()
+    copyToClipboard.mockReset()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('loads the selected date and lets the user move one day at a time', async () => {
@@ -26,7 +39,7 @@ describe('DailyTasksPage', () => {
     expect(selectDate).toHaveBeenLastCalledWith('2026-07-13')
   })
 
-  it('creates a task with the entered code, title, progress, note, and effort', async () => {
+  it('creates a task with the entered code, title, progress, and note without an effort input', async () => {
     const store = useDailyTasksStore()
     vi.spyOn(store, 'selectDate').mockResolvedValue()
     const create = vi.spyOn(store, 'create').mockResolvedValue()
@@ -36,7 +49,6 @@ describe('DailyTasksPage', () => {
     await wrapper.get('[data-field="new-task-title"]').setValue('Shot refinement')
     await wrapper.get('[data-field="new-task-progress"]').setValue(45)
     await wrapper.get('[data-field="new-task-note"]').setValue('Transition pass')
-    await wrapper.get('[data-field="new-task-minutes"]').setValue(90)
     await wrapper.get('[data-action="create-daily-task"]').trigger('click')
 
     expect(create).toHaveBeenCalledWith({
@@ -44,11 +56,12 @@ describe('DailyTasksPage', () => {
       title: 'Shot refinement',
       progress: 45,
       note: 'Transition pass',
-      investedMinutes: 90,
+      investedMinutes: 0,
     })
+    expect(wrapper.find('[data-field="new-task-minutes"]').exists()).toBe(false)
   })
 
-  it('renders groups and saves or deletes an edited task with explicit controls', async () => {
+  it('renders a task card with a draggable progress control and compact actions', async () => {
     const store = useDailyTasksStore()
     store.day = day()
     vi.spyOn(store, 'selectDate').mockResolvedValue()
@@ -59,7 +72,12 @@ describe('DailyTasksPage', () => {
     expect(wrapper.get('[data-task-group="L36"]').text()).toContain('L36')
     expect((wrapper.get('[data-task-id="t1"] [data-field="task-title"]').element as HTMLInputElement).value).toBe('Shot refinement')
 
-    await wrapper.get('[data-task-id="t1"] [data-field="task-progress"]').setValue(80)
+    const progress = wrapper.get('[data-task-id="t1"] [data-field="task-progress"]')
+    expect(progress.attributes('type')).toBe('range')
+    expect(wrapper.get('[data-task-id="t1"] .task-card-actions').exists()).toBe(true)
+
+    await progress.setValue(80)
+    expect(wrapper.get('[data-task-id="t1"] [data-progress-value]').text()).toBe('80%')
     await wrapper.get('[data-task-id="t1"] [data-action="save-task"]').trigger('click')
     expect(update).toHaveBeenCalledWith({
       taskId: 't1',
@@ -82,6 +100,56 @@ describe('DailyTasksPage', () => {
     expect(wrapper.get('[data-settled-notice]').exists()).toBe(true)
     expect(wrapper.find('[data-action="create-daily-task"]').exists()).toBe(false)
     expect(wrapper.find('[data-action="save-task"]').exists()).toBe(false)
+  })
+
+  it('copies the complete Markdown daily report for the selected date', async () => {
+    const store = useDailyTasksStore()
+    store.selectedDate = '2026-07-12'
+    vi.spyOn(store, 'selectDate').mockResolvedValue()
+    getDailyReport.mockResolvedValue({
+      text: '@日报\n#L36\n1.【L36】【Shot refinement】【45%】',
+      taskCount: 1,
+    })
+    copyToClipboard.mockResolvedValue(undefined)
+    const wrapper = mount(DailyTasksPage)
+
+    await wrapper.get('[data-action="copy-daily-report"]').trigger('click')
+
+    expect(getDailyReport).toHaveBeenCalledWith('2026-07-12')
+    expect(copyToClipboard).toHaveBeenCalledWith(
+      '@日报\n#L36\n1.【L36】【Shot refinement】【45%】',
+    )
+  })
+
+  it('restores the report copy icon after 1.2 seconds', async () => {
+    vi.useFakeTimers()
+    const store = useDailyTasksStore()
+    vi.spyOn(store, 'selectDate').mockResolvedValue()
+    getDailyReport.mockResolvedValue({ text: '@日报', taskCount: 0 })
+    copyToClipboard.mockResolvedValue(undefined)
+    const wrapper = mount(DailyTasksPage)
+
+    await wrapper.get('[data-action="copy-daily-report"]').trigger('click')
+    await Promise.resolve()
+    expect(wrapper.get('[data-action="copy-daily-report"]').attributes('data-copy-state')).toBe('copied')
+
+    await vi.advanceTimersByTimeAsync(1200)
+    expect(wrapper.get('[data-action="copy-daily-report"]').attributes('data-copy-state')).toBe('ready')
+  })
+
+  it('keeps the report copy icon and shows a toast when copying fails', async () => {
+    const store = useDailyTasksStore()
+    const ui = useUiStore()
+    vi.spyOn(store, 'selectDate').mockResolvedValue()
+    getDailyReport.mockResolvedValue({ text: '@日报', taskCount: 0 })
+    copyToClipboard.mockRejectedValue(new Error('clipboard unavailable'))
+    const wrapper = mount(DailyTasksPage)
+
+    await wrapper.get('[data-action="copy-daily-report"]').trigger('click')
+    await Promise.resolve()
+
+    expect(wrapper.get('[data-action="copy-daily-report"]').attributes('data-copy-state')).toBe('ready')
+    expect(ui.toast).toBe('复制日报失败')
   })
 })
 

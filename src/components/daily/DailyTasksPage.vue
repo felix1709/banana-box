@@ -1,10 +1,17 @@
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue'
-import { ChevronLeft, ChevronRight, Plus, Save, Trash2 } from '@lucide/vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { Check, ChevronLeft, ChevronRight, Copy, Plus, Save, Trash2 } from '@lucide/vue'
 import { useDailyTasksStore } from '@/stores/dailyTasks'
+import { useUiStore } from '@/stores/ui'
+import { getDailyReport } from '@/lib/productionIpc'
+import { copyToClipboard } from '@/lib/ipc'
 
 const daily = useDailyTasksStore()
-const draft = reactive({ code: '', title: '', progress: 0, note: '', investedMinutes: 0 })
+const ui = useUiStore()
+const draft = reactive({ code: '', title: '', progress: 0, note: '' })
+const copyingReport = ref(false)
+const reportCopied = ref(false)
+let reportCopyResetTimer: ReturnType<typeof window.setTimeout> | null = null
 
 function moveDate(days: number) {
   const [year, month, day] = daily.selectedDate.split('-').map(Number)
@@ -14,11 +21,41 @@ function moveDate(days: number) {
 
 async function createTask() {
   if (!draft.code.trim() || !draft.title.trim()) return
-  await daily.create({ ...draft, code: draft.code.trim(), title: draft.title.trim() })
-  Object.assign(draft, { code: '', title: '', progress: 0, note: '', investedMinutes: 0 })
+  await daily.create({ ...draft, code: draft.code.trim(), title: draft.title.trim(), investedMinutes: 0 })
+  Object.assign(draft, { code: '', title: '', progress: 0, note: '' })
 }
 
+async function copyDailyReport() {
+  if (copyingReport.value) return
+  copyingReport.value = true
+  resetReportCopied()
+  try {
+    const report = await getDailyReport(daily.selectedDate)
+    await copyToClipboard(report.text)
+    showReportCopied()
+  } catch {
+    resetReportCopied()
+    ui.showToast('复制日报失败')
+  } finally {
+    copyingReport.value = false
+  }
+}
+
+function resetReportCopied() {
+  if (reportCopyResetTimer !== null) window.clearTimeout(reportCopyResetTimer)
+  reportCopyResetTimer = null
+  reportCopied.value = false
+}
+
+function showReportCopied() {
+  resetReportCopied()
+  reportCopied.value = true
+  reportCopyResetTimer = window.setTimeout(resetReportCopied, 1200)
+}
+
+watch(() => daily.selectedDate, resetReportCopied)
 onMounted(() => { void daily.selectDate(daily.selectedDate) })
+onBeforeUnmount(resetReportCopied)
 </script>
 
 <template>
@@ -53,6 +90,24 @@ onMounted(() => { void daily.selectDate(daily.selectedDate) })
         >
           <ChevronRight :size="16" />
         </button>
+        <button
+          data-action="copy-daily-report"
+          :data-copy-state="reportCopied ? 'copied' : 'ready'"
+          type="button"
+          :disabled="copyingReport"
+          :title="reportCopied ? '已复制日报' : '复制日报'"
+          :aria-label="reportCopied ? '已复制日报' : '复制日报'"
+          @click="copyDailyReport"
+        >
+          <Check
+            v-if="reportCopied"
+            :size="16"
+          />
+          <Copy
+            v-else
+            :size="16"
+          />
+        </button>
       </div>
     </header>
 
@@ -85,21 +140,19 @@ onMounted(() => { void daily.selectDate(daily.selectedDate) })
         data-field="new-task-title"
         placeholder="任务名称"
       >
-      <input
-        v-model.number="draft.progress"
-        data-field="new-task-progress"
-        min="0"
-        max="100"
-        type="number"
-        title="进度百分比"
-      >
-      <input
-        v-model.number="draft.investedMinutes"
-        data-field="new-task-minutes"
-        min="0"
-        type="number"
-        title="投入分钟"
-      >
+      <label class="progress-control">
+        <input
+          v-model.number="draft.progress"
+          class="task-progress-range"
+          data-field="new-task-progress"
+          min="0"
+          max="100"
+          type="range"
+          :style="{ '--task-progress': `${draft.progress}%` }"
+          title="进度百分比"
+        >
+        <output>{{ draft.progress }}%</output>
+      </label>
       <textarea
         v-model="draft.note"
         data-field="new-task-note"
@@ -128,29 +181,32 @@ onMounted(() => { void daily.selectDate(daily.selectedDate) })
         <div
           v-for="task in group.tasks"
           :key="task.id"
-          class="daily-task"
+          class="daily-task task-card"
           :data-task-id="task.id"
         >
-          <input
-            v-model="task.title"
-            class="task-title"
-            data-field="task-title"
-            :disabled="Boolean(daily.day?.settledAt)"
-          >
-          <label><span>进度</span><input
-            v-model.number="task.progress"
-            data-field="task-progress"
-            min="0"
-            max="100"
-            type="number"
-            :disabled="Boolean(daily.day?.settledAt)"
-          ></label>
-          <label><span>分钟</span><input
-            v-model.number="task.investedMinutes"
-            min="0"
-            type="number"
-            :disabled="Boolean(daily.day?.settledAt)"
-          ></label>
+          <div class="task-card-main">
+            <span class="task-code">#{{ group.code }}</span>
+            <input
+              v-model="task.title"
+              class="task-title"
+              data-field="task-title"
+              :disabled="Boolean(daily.day?.settledAt)"
+            >
+            <label class="progress-control task-progress-control">
+              <input
+                v-model.number="task.progress"
+                class="task-progress-range"
+                data-field="task-progress"
+                min="0"
+                max="100"
+                type="range"
+                :style="{ '--task-progress': `${task.progress}%` }"
+                :disabled="Boolean(daily.day?.settledAt)"
+              >
+              <output data-progress-value>{{ task.progress }}%</output>
+            </label>
+            <span class="progress-hint">拖动调整完成进度百分比</span>
+          </div>
           <textarea
             v-model="task.note"
             class="task-note"
@@ -160,7 +216,7 @@ onMounted(() => { void daily.selectDate(daily.selectedDate) })
           />
           <div
             v-if="!daily.day?.settledAt"
-            class="task-actions"
+            class="task-card-actions"
           >
             <button
               data-action="save-task"
@@ -195,7 +251,7 @@ onMounted(() => { void daily.selectDate(daily.selectedDate) })
 
 <style scoped>
 .daily-page { min-height: 100%; padding: 20px 22px; background: var(--bb-bg); }
-.daily-toolbar,.date-nav,.daily-create,.daily-group header,.daily-task,.task-actions { display:flex; align-items:center; gap:8px; }
+.daily-toolbar,.date-nav,.daily-group header,.task-card-actions { display:flex; align-items:center; gap:8px; }
 .daily-toolbar { justify-content:space-between; padding-bottom:16px; border-bottom:1px solid var(--bb-border); }
 .daily-toolbar p,.daily-toolbar h2 { margin:0; }
 .daily-toolbar p { color:var(--bb-primary); font:11px var(--bb-mono); letter-spacing:.08em; text-transform:uppercase; }
@@ -204,17 +260,29 @@ onMounted(() => { void daily.selectDate(daily.selectedDate) })
 .date-nav input { min-height:30px; padding:4px 8px; }
 .daily-error,.daily-settled { margin-top:12px; padding:9px 11px; border:1px solid var(--bb-border); border-radius:var(--bb-radius-sm); color:var(--bb-text-muted); background:var(--bb-surface-soft); }
 .daily-error { border-color:var(--bb-danger-border); color:#ffb6c0; background:var(--bb-danger-soft); }
-.daily-create { display:grid; grid-template-columns:90px minmax(160px,1fr) 72px 72px minmax(140px,1fr) 30px; margin:16px 0; }
+.daily-create { display:grid; grid-template-columns:90px minmax(160px,1fr) minmax(170px,.9fr) minmax(140px,1fr) 30px; align-items:center; gap:8px; margin:16px 0; }
 .daily-create input,.daily-create textarea,.daily-task input,.daily-task textarea { min-width:0; min-height:30px; padding:5px 8px; }
 .daily-create textarea,.task-note { resize:vertical; }
-.daily-groups { display:grid; gap:12px; }
-.daily-group { border:1px solid var(--bb-border); border-radius:var(--bb-radius-sm); background:rgba(12,23,33,.7); overflow:hidden; }
-.daily-group header { justify-content:space-between; padding:9px 12px; background:rgba(102,247,211,.08); color:var(--bb-primary-strong); }
+.daily-groups { display:grid; gap:16px; }
+.daily-group { display:grid; gap:6px; }
+.daily-group header { justify-content:space-between; padding:0 2px; color:var(--bb-primary-strong); }
 .daily-group header span { color:var(--bb-text-soft); font:11px var(--bb-mono); }
-.daily-task { display:grid; grid-template-columns:minmax(140px,1.5fr) 70px 70px minmax(140px,1fr) 68px; padding:8px 10px; border-top:1px solid var(--bb-border); }
-.daily-task label { display:grid; grid-template-columns:auto 1fr; align-items:center; gap:4px; color:var(--bb-text-soft); font-size:10px; }
-.task-actions { justify-content:end; }
-.task-actions button:last-child { color:#ff9aa8; }
+.daily-task { position:relative; display:grid; gap:6px; padding:10px; border:1px solid var(--bb-border); border-radius:var(--bb-radius-sm); background:rgba(12,23,33,.66); box-shadow:0 4px 14px rgba(0,0,0,.12); }
+.task-card-main { display:grid; grid-template-columns:auto minmax(120px,1.35fr) minmax(120px,.85fr) minmax(0,.7fr); align-items:center; gap:8px; min-width:0; padding-right:42px; }
+.task-code { color:var(--bb-primary-strong); font:11px var(--bb-mono); white-space:nowrap; }
+.task-title { width:100%; }
+.progress-control { display:flex; align-items:center; min-width:0; gap:6px; color:var(--bb-text-soft); font:11px var(--bb-mono); }
+.task-progress-range { --task-progress:0%; width:100%; min-width:70px; min-height:20px !important; padding:0 !important; appearance:none; background:linear-gradient(90deg, var(--bb-primary) 0 var(--task-progress), rgba(148,163,184,.2) var(--task-progress) 100%); border-radius:999px; cursor:pointer; }
+.task-progress-range::-webkit-slider-runnable-track { height:4px; border-radius:999px; background:transparent; }
+.task-progress-range::-webkit-slider-thumb { width:10px; height:10px; margin-top:-3px; appearance:none; border:2px solid var(--bb-bg); border-radius:50%; background:var(--bb-primary-strong); box-shadow:0 1px 4px rgba(0,0,0,.28); }
+.task-progress-range:disabled { cursor:default; opacity:.6; }
+.progress-control output { min-width:32px; color:var(--bb-text); text-align:right; }
+.progress-hint { overflow:hidden; color:var(--bb-text-soft); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.task-note { width:100%; color:var(--bb-text-soft); font-size:11px; }
+.task-card-actions { position:absolute; top:7px; right:7px; opacity:.45; transition:opacity 150ms ease; }
+.daily-task:hover .task-card-actions,.daily-task:focus-within .task-card-actions { opacity:1; }
+.task-card-actions button { display:grid; width:26px; min-height:26px; place-items:center; padding:0; }
+.task-card-actions button:last-child { color:#ff9aa8; }
 .daily-empty { margin:32px 0; color:var(--bb-text-soft); text-align:center; }
-@media (max-width:760px) { .daily-page { padding:14px 12px; } .daily-create,.daily-task { grid-template-columns:1fr 1fr; } .daily-create textarea,.daily-create button,.task-note,.task-actions { grid-column:span 2; } .daily-toolbar { align-items:start; } }
+@media (max-width:760px) { .daily-page { padding:14px 12px; } .daily-create { grid-template-columns:1fr 1fr; } .daily-create textarea,.daily-create button { grid-column:span 2; } .task-card-main { grid-template-columns:auto minmax(0,1fr); padding-right:38px; } .task-progress-control,.progress-hint { grid-column:span 2; } .daily-toolbar { align-items:start; } }
 </style>

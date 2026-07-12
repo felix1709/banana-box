@@ -37,6 +37,30 @@ describe('ProjectBoardPage', () => {
     expect(store.projectEditorOpen).toBe(true)
     expect(store.editorProjectId).toBe('p1')
   })
+
+  it('orders unfinished project timelines by final release date and hides completed stage bars', () => {
+    const store = useProjectsStore()
+    const early = project()
+    Object.assign(early, { id: 'p-early', code: 'L12', releaseDate: '2026-07-20' })
+    early.stages[0].progress = 100
+    early.stages[1].progress = 35
+    const late = project()
+    Object.assign(late, { id: 'p-late', code: 'L36', releaseDate: '2026-08-02' })
+    const complete = project()
+    Object.assign(complete, { id: 'p-complete', code: 'L50', releaseDate: '2026-07-15' })
+    complete.stages.forEach((stage) => { stage.progress = 100 })
+    store.hydrate([late, complete, early])
+
+    const wrapper = mount(ProjectBoardPage)
+    const timelines = wrapper.findAll('[data-project-timeline]')
+
+    expect(timelines.map((timeline) => timeline.attributes('data-project-timeline'))).toEqual([
+      'p-early',
+      'p-late',
+    ])
+    expect(timelines[0].find('[data-stage-bar="storyboard"]').exists()).toBe(false)
+    expect(timelines[0].find('[data-stage-bar="first_cut"]').exists()).toBe(true)
+  })
 })
 
 function project(): Project {

@@ -19,7 +19,7 @@ import {
 } from '@/lib/backup-ipc'
 import { checkAppUpdate, installAppUpdate } from '@/lib/updater'
 import { parseFile } from '@/lib/parse'
-import type { AiProvider, CheckAiProviderConnectionResult, Prompt } from '@/types'
+import type { AiProvider, CheckAiProviderConnectionResult, Prompt, ProviderKind } from '@/types'
 import type { AppUpdateResult } from '@/lib/updater'
 import type { LegacyImportPreview } from '@/lib/backup-ipc'
 
@@ -41,8 +41,11 @@ const apiBaseUrl = ref('')
 const apiModelsUrl = ref('')
 const apiChatCompletionsUrl = ref('')
 const apiKey = ref('')
-const reverseModel = ref('')
-const availableReverseModels = ref<string[]>([])
+const apiProviderId = ref<ProviderKind>('reverse-image')
+const apiModel = ref('')
+const availableModels = ref<string[]>([])
+const apiTemperature = ref(0.7)
+const apiContextWindowTokens = ref(16000)
 const checkingApi = ref(false)
 const apiStatus = ref('')
 const importing = ref(false)
@@ -61,7 +64,7 @@ const savingAutostart = ref(false)
 const autostartError = ref('')
 
 onMounted(async () => {
-  await Promise.all([refreshAutostart(), loadReverseImageProvider()])
+  await Promise.all([refreshAutostart(), loadApiProviders()])
 })
 
 function saveHotkey() {
@@ -71,7 +74,8 @@ function saveHotkey() {
 }
 
 function pickPreferredModel(models: string[]) {
-  if (models.includes(reverseModel.value)) return reverseModel.value
+  if (models.includes(apiModel.value)) return apiModel.value
+  if (apiProviderId.value === 'storyboard' && models.includes('glm-5.2')) return 'glm-5.2'
   return models[0] ?? ''
 }
 
@@ -88,29 +92,39 @@ function connectionStatusMessage(result: CheckAiProviderConnectionResult) {
   )
 }
 
-function applyReverseImageProvider(provider: AiProvider) {
+function applyProvider(provider: AiProvider) {
+  apiProviderId.value = provider.kind
   apiBaseUrl.value = provider.baseUrl
   apiModelsUrl.value = provider.modelsUrl
   apiChatCompletionsUrl.value = provider.chatCompletionsUrl
-  availableReverseModels.value = [...provider.availableModels]
-  reverseModel.value = provider.defaultModel ?? provider.probedModel ?? pickPreferredModel(provider.availableModels)
+  availableModels.value = [...provider.availableModels]
+  apiModel.value = provider.defaultModel ?? provider.probedModel ?? pickPreferredModel(provider.availableModels)
+  apiTemperature.value = provider.temperature ?? 0.7
+  apiContextWindowTokens.value = provider.contextWindowTokens ?? 16000
 }
 
-async function loadReverseImageProvider() {
+async function loadApiProviders() {
   try {
-    await providers.load('reverse-image')
+    await Promise.all([providers.load('reverse-image'), providers.load('storyboard')])
     const provider = providers.byId('reverse-image')
-    if (provider) applyReverseImageProvider(provider)
+    if (provider) applyProvider(provider)
   } catch {
     apiStatus.value = '读取 API 设置失败'
   }
 }
 
+function selectApiProvider() {
+  apiKey.value = ''
+  apiStatus.value = ''
+  const provider = providers.byId(apiProviderId.value)
+  if (provider) applyProvider(provider)
+}
+
 async function saveApiSettings() {
   try {
-    const existing = providers.byId('reverse-image')
+    const existing = providers.byId(apiProviderId.value)
     if (!existing) {
-      apiStatus.value = '未找到图片反推服务'
+      apiStatus.value = '未找到 API 服务'
       return
     }
 
@@ -122,12 +136,14 @@ async function saveApiSettings() {
         baseUrl: apiBaseUrl.value.trim(),
         modelsUrl: apiModelsUrl.value.trim(),
         chatCompletionsUrl: apiChatCompletionsUrl.value.trim(),
-        defaultModel: reverseModel.value || null,
+        defaultModel: apiModel.value || null,
+        temperature: existing.kind === 'storyboard' ? Number(apiTemperature.value) : undefined,
+        contextWindowTokens: existing.kind === 'storyboard' ? Number(apiContextWindowTokens.value) : undefined,
         confirmCrossOrigin: false,
       },
       apiKey: apiKey.value,
     })
-    applyReverseImageProvider(saved)
+    applyProvider(saved)
     apiStatus.value = '已保存'
   } catch {
     apiStatus.value = '保存失败，请检查地址和权限'
@@ -173,10 +189,10 @@ async function onCheckApiConnection() {
   checkingApi.value = true
   apiStatus.value = ''
   try {
-    const result = await checkAiProviderConnection('reverse-image')
+    const result = await checkAiProviderConnection(apiProviderId.value)
     if (result.models.length) {
-      availableReverseModels.value = result.models
-      reverseModel.value = pickPreferredModel(result.models)
+      availableModels.value = result.models
+      apiModel.value = pickPreferredModel(result.models)
     }
     apiStatus.value = connectionStatusMessage(result)
   } catch {
@@ -236,7 +252,7 @@ async function onCommitLegacyImport() {
     const committed = await commitLegacyImport(preview.token, overwriteLegacyCredential.value)
     lib.hydrate(committed.library)
     try {
-      await providers.load('reverse-image')
+      await loadApiProviders()
     } catch {
       // The library import itself has already committed at this point.
     }
@@ -458,8 +474,19 @@ async function onDownloadUpdate() {
           >
             <div class="api-header">
               <strong>API 调用</strong>
-              <p>用于反推图片提示词。</p>
+              <p>{{ apiProviderId === 'storyboard' ? '用于故事板 Agent 对话。' : '用于反推图片提示词。' }}</p>
             </div>
+            <label>
+              服务
+              <select
+                v-model="apiProviderId"
+                data-field="api-provider"
+                @change="selectApiProvider"
+              >
+                <option value="reverse-image">反推图片</option>
+                <option value="storyboard">故事板 Agent</option>
+              </select>
+            </label>
             <label>
               Base URL
               <input
@@ -493,6 +520,30 @@ async function onDownloadUpdate() {
                 placeholder="留空表示不修改"
               >
             </label>
+            <template v-if="apiProviderId === 'storyboard'">
+              <label>
+                温度
+                <input
+                  v-model.number="apiTemperature"
+                  data-field="api-temperature"
+                  max="2"
+                  min="0"
+                  step="0.1"
+                  type="number"
+                >
+              </label>
+              <label>
+                上下文长度
+                <input
+                  v-model.number="apiContextWindowTokens"
+                  data-field="api-context-window"
+                  max="128000"
+                  min="512"
+                  step="1"
+                  type="number"
+                >
+              </label>
+            </template>
             <div class="api-check-row">
               <button
                 class="api-check-button"
@@ -507,14 +558,14 @@ async function onDownloadUpdate() {
               >{{ apiStatus }}</span>
             </div>
             <label>
-              反推模型
+              {{ apiProviderId === 'storyboard' ? '故事板模型' : '反推模型' }}
               <select
-                v-model="reverseModel"
+                v-model="apiModel"
                 class="api-model-select"
                 @change="saveApiSettings"
               >
                 <option
-                  v-for="model in availableReverseModels"
+                  v-for="model in availableModels"
                   :key="model"
                   :value="model"
                 >

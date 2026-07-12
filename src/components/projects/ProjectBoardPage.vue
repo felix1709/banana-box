@@ -15,6 +15,10 @@ const selectedProject = computed(
     null,
 )
 
+const timelineProjects = computed(() =>
+  projects.filteredProjects.filter((project) => project.stages.some((stage) => stage.progress < 100)),
+)
+
 watch(
   () => projects.filteredProjects.map((project) => project.id),
   (projectIds) => {
@@ -154,12 +158,14 @@ function openSelectedProject() {
           </div>
         </section>
       </section>
+      <section class="project-timeline-list">
+        <ProjectTimeline
+          v-for="project in timelineProjects"
+          :key="project.id"
+          :project="project"
+        />
+      </section>
     </div>
-
-    <ProjectTimeline
-      v-if="selectedProject"
-      :project="selectedProject"
-    />
   </main>
 </template>
 
@@ -253,6 +259,10 @@ function openSelectedProject() {
   min-height: 0;
   flex: 1;
   overflow: auto;
+}
+
+.project-timeline-list {
+  border-top: 1px solid var(--bb-border);
 }
 
 .project-board {

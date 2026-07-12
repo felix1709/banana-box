@@ -22,9 +22,9 @@ export interface StartupRecoveryStatus {
 export type StartupStatus = StartupReadyStatus | StartupRecoveryStatus
 
 export async function getStartupStatus(): Promise<StartupStatus> {
-  return await invoke<StartupStatus>('get_startup_status')
+  return await invoke<StartupStatus>('get_startup_status', {})
 }
 
 export async function acknowledgeMigrationSummary(): Promise<void> {
-  await invoke('acknowledge_migration_summary')
+  await invoke('acknowledge_migration_summary', {})
 }

@@ -1,9 +1,61 @@
 use super::{
     model::{
-        CreateProjectInput, SaveProjectStageInput, SetProjectStageInput, StageKey, STAGE_KEYS,
+        main_stage_for_schedule, progress_for_schedule, CreateProjectInput, SaveProjectStageInput,
+        SetProjectStageInput, StageKey, STAGE_KEYS,
     },
     repository,
 };
+use chrono::NaiveDate;
+
+#[test]
+fn schedule_dates_derive_stage_progress_and_current_main_stage() {
+    assert_eq!(
+        progress_for_schedule(
+            "2026-07-01",
+            "2026-07-10",
+            NaiveDate::from_ymd_opt(2026, 6, 30).unwrap(),
+        )
+        .unwrap(),
+        0,
+    );
+    assert_eq!(
+        progress_for_schedule(
+            "2026-07-01",
+            "2026-07-10",
+            NaiveDate::from_ymd_opt(2026, 7, 5).unwrap(),
+        )
+        .unwrap(),
+        44,
+    );
+    assert_eq!(
+        progress_for_schedule(
+            "2026-07-01",
+            "2026-07-10",
+            NaiveDate::from_ymd_opt(2026, 7, 10).unwrap(),
+        )
+        .unwrap(),
+        100,
+    );
+
+    let stages = vec![
+        SaveProjectStageInput {
+            stage_key: StageKey::Storyboard,
+            start_date: "2026-07-01".to_string(),
+            end_date: "2026-07-10".to_string(),
+            progress: 0,
+        },
+        SaveProjectStageInput {
+            stage_key: StageKey::FirstCut,
+            start_date: "2026-07-05".to_string(),
+            end_date: "2026-07-20".to_string(),
+            progress: 0,
+        },
+    ];
+    assert_eq!(
+        main_stage_for_schedule(&stages, NaiveDate::from_ymd_opt(2026, 7, 8).unwrap()).unwrap(),
+        StageKey::FirstCut,
+    );
+}
 
 #[test]
 fn creating_project_seeds_fixed_eight_stages_in_order() {
@@ -14,17 +66,16 @@ fn creating_project_seeds_fixed_eight_stages_in_order() {
     assert_eq!(project.stages[0].stage_key, StageKey::Storyboard);
     assert_eq!(project.stages[3].stage_key, StageKey::MiddleCut);
     assert_eq!(project.stages[7].stage_key, StageKey::FinalComposite);
-    assert!(project.stages.iter().all(|stage| stage.progress == 0));
 }
 
 #[test]
-fn project_codes_are_unique_ignoring_ascii_case() {
+fn project_codes_may_repeat_ignoring_ascii_case() {
     let db = test_database();
-    repository::create_project(&db, create_input("L36")).unwrap();
+    let first = repository::create_project(&db, create_input("L36")).unwrap();
+    let second = repository::create_project(&db, create_input("l36")).unwrap();
 
-    let error = repository::create_project(&db, create_input("l36")).unwrap_err();
-
-    assert_eq!(error, "项目编号已存在");
+    assert_ne!(first.id, second.id);
+    assert_eq!(second.code, "l36");
 }
 
 #[test]
@@ -76,7 +127,6 @@ fn create_input(code: &str) -> CreateProjectInput {
         name: "Project".to_string(),
         file_path: r"C:\work\L36".to_string(),
         release_date: "2026-07-31".to_string(),
-        main_stage_key: StageKey::Storyboard,
         stages: STAGE_KEYS
             .iter()
             .enumerate()

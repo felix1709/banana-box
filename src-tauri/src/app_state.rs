@@ -203,7 +203,11 @@ pub struct AppServices {
 }
 
 #[derive(Clone, serde::Serialize)]
-#[serde(tag = "state", rename_all = "camelCase")]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum StartupStatus {
     Ready {
         migration_summary: Option<MigrationSummary>,
@@ -459,5 +463,22 @@ mod tests {
             gate.status().unwrap(),
             StartupStatus::Recovery { .. }
         ));
+    }
+
+    #[test]
+    fn recovery_status_serializes_backup_paths_for_the_frontend_contract() {
+        let status = StartupStatus::Recovery {
+            message: "Recovery in progress".into(),
+            backup_paths: vec!["C:\\temp\\library-v0.json".into()],
+        };
+
+        assert_eq!(
+            serde_json::to_value(status).unwrap(),
+            serde_json::json!({
+                "state": "recovery",
+                "message": "Recovery in progress",
+                "backupPaths": ["C:\\temp\\library-v0.json"],
+            })
+        );
     }
 }

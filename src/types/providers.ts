@@ -17,6 +17,8 @@ export interface AiProvider {
   needsCredentials: boolean
   configRevision: number
   capabilityRevision: number
+  temperature?: number
+  contextWindowTokens?: number
 }
 
 export interface SaveAiProviderInput {

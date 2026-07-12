@@ -51,6 +51,8 @@ pub struct AiProvider {
     pub needs_credentials: bool,
     pub config_revision: i64,
     pub capability_revision: i64,
+    pub temperature: f64,
+    pub context_window_tokens: i64,
 }
 
 #[derive(Clone, Deserialize)]
@@ -63,6 +65,10 @@ pub struct SaveProviderInput {
     pub models_url: String,
     pub chat_completions_url: String,
     pub default_model: Option<String>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub context_window_tokens: Option<i64>,
     #[serde(default)]
     pub confirm_cross_origin: bool,
 }
@@ -114,6 +120,8 @@ struct RawProvider {
     credential_ref: Option<String>,
     config_revision: i64,
     capability_revision: i64,
+    temperature: f64,
+    context_window_tokens: i64,
 }
 
 struct StoredProvider {
@@ -129,6 +137,22 @@ pub(crate) fn validated_host_fingerprint(input: &SaveProviderInput) -> Result<St
         input.confirm_cross_origin,
     )
     .map(|endpoints| endpoints.origin_fingerprint)
+}
+
+fn generation_config(input: &SaveProviderInput) -> Result<(f64, i64), String> {
+    if input.kind != ProviderKind::Storyboard {
+        return Ok((0.7, 16_000));
+    }
+
+    let temperature = input.temperature.unwrap_or(0.7);
+    if !temperature.is_finite() || !(0.0..=2.0).contains(&temperature) {
+        return Err("PROVIDER_TEMPERATURE_INVALID".into());
+    }
+    let context_window_tokens = input.context_window_tokens.unwrap_or(16_000);
+    if !(512..=128_000).contains(&context_window_tokens) {
+        return Err("PROVIDER_CONTEXT_WINDOW_INVALID".into());
+    }
+    Ok((temperature, context_window_tokens))
 }
 
 impl ProviderService {
@@ -162,7 +186,7 @@ impl ProviderService {
                         id, kind, display_name, base_url, models_url, chat_completions_url,
                         default_model, available_models_json, probed_model, structured_mode,
                         interactive_compatible, bound_host, needs_credentials, credential_ref,
-                        config_revision, capability_revision
+                        config_revision, capability_revision, temperature, context_window_tokens
                      FROM ai_providers WHERE kind = ?1 ORDER BY id",
                 )
                 .map_err(|_| PROVIDER_STORAGE_UNAVAILABLE.to_string())?;
@@ -204,6 +228,7 @@ impl ProviderService {
         if input.kind != expected_kind {
             return Err(PROVIDER_KIND_MISMATCH.into());
         }
+        let (temperature, context_window_tokens) = generation_config(&input)?;
         let _mutation_guard = self
             .credential_mutations
             .acquire()
@@ -261,6 +286,8 @@ impl ProviderService {
                         credential_ref = ?8,
                         config_revision = ?9,
                         capability_revision = ?10,
+                        temperature = ?11,
+                        context_window_tokens = ?12,
                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                      WHERE id = ?1",
                     params![
@@ -274,6 +301,8 @@ impl ProviderService {
                         next_credential_ref,
                         live.provider.config_revision + 1,
                         live.provider.capability_revision + 1,
+                        temperature,
+                        context_window_tokens,
                     ],
                 )
             } else {
@@ -287,6 +316,8 @@ impl ProviderService {
                         bound_host = ?7,
                         needs_credentials = ?8,
                         credential_ref = ?9,
+                        temperature = ?10,
+                        context_window_tokens = ?11,
                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                      WHERE id = ?1",
                     params![
@@ -299,6 +330,8 @@ impl ProviderService {
                         endpoints.origin_fingerprint,
                         i64::from(next_credential_ref.is_none()),
                         next_credential_ref,
+                        temperature,
+                        context_window_tokens,
                     ],
                 )
             }
@@ -458,7 +491,7 @@ impl ProviderService {
                         id, kind, display_name, base_url, models_url, chat_completions_url,
                         default_model, available_models_json, probed_model, structured_mode,
                         interactive_compatible, bound_host, needs_credentials, credential_ref,
-                        config_revision, capability_revision
+                        config_revision, capability_revision, temperature, context_window_tokens
                      FROM ai_providers WHERE id = ?1",
                     [id],
                     raw_provider_from_row,
@@ -564,6 +597,8 @@ fn raw_provider_from_row(row: &Row<'_>) -> rusqlite::Result<RawProvider> {
         credential_ref: row.get(13)?,
         config_revision: row.get(14)?,
         capability_revision: row.get(15)?,
+        temperature: row.get(16)?,
+        context_window_tokens: row.get(17)?,
     })
 }
 
@@ -577,7 +612,7 @@ fn load_stored_provider_from_transaction(
                 id, kind, display_name, base_url, models_url, chat_completions_url,
                 default_model, available_models_json, probed_model, structured_mode,
                 interactive_compatible, bound_host, needs_credentials, credential_ref,
-                config_revision, capability_revision
+                config_revision, capability_revision, temperature, context_window_tokens
              FROM ai_providers WHERE id = ?1",
             [id],
             raw_provider_from_row,
@@ -629,6 +664,8 @@ fn stored_provider_from_raw(raw: RawProvider) -> Result<StoredProvider, String> 
             needs_credentials: raw.needs_credentials == 1,
             config_revision: raw.config_revision,
             capability_revision: raw.capability_revision,
+            temperature: raw.temperature,
+            context_window_tokens: raw.context_window_tokens,
         },
         credential_ref: raw.credential_ref,
     })
@@ -952,6 +989,8 @@ mod tests {
             models_url: format!("{origin}/v1/models"),
             chat_completions_url: format!("{origin}/v1/chat/completions"),
             default_model: Some("saved-model".into()),
+            temperature: None,
+            context_window_tokens: None,
             confirm_cross_origin: false,
         }
     }
@@ -1962,6 +2001,8 @@ mod tests {
             models_url: "https://api.example.com/v1/models".into(),
             chat_completions_url: "https://api.example.com/v1/chat/completions".into(),
             default_model: Some("glm-5.2".into()),
+            temperature: None,
+            context_window_tokens: None,
             confirm_cross_origin: false,
         }
     }

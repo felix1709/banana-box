@@ -561,6 +561,8 @@ fn legacy_reverse_provider_input(secrets: &LegacySecrets) -> SaveProviderInput {
         models_url: format!("{api_root}/models"),
         chat_completions_url: format!("{api_root}/chat/completions"),
         default_model: Some(secrets.reverse_model.clone()),
+        temperature: None,
+        context_window_tokens: None,
         confirm_cross_origin: false,
     }
 }

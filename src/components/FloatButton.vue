@@ -175,6 +175,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  background: transparent !important;
 }
 
 .float-btn {
@@ -189,7 +190,7 @@ onUnmounted(() => {
 }
 
 .float-btn:hover {
-  filter: drop-shadow(0 4px 10px rgba(15, 23, 42, 0.24));
+  filter: drop-shadow(0 4px 10px rgba(244, 196, 48, 0.28));
 }
 
 .float-btn:active {

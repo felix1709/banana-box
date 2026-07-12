@@ -2,12 +2,61 @@ use super::model::{
     validate_create, validate_local_date, validate_update, CreateDailyTaskInput, DailyTaskDayDto,
     DailyTaskDto, DailyTaskGroupDto, UpdateDailyTaskInput,
 };
+use super::report::{format_full_report, format_group_report, ReportGroup, ReportTask};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 
 pub fn load_day(db: &crate::db::Database, local_date: &str) -> Result<DailyTaskDayDto, String> {
     validate_local_date(local_date)?;
     db.with_connection(|connection| load_day_from_connection(connection, local_date))
+}
+
+pub fn report_for_day(
+    db: &crate::db::Database,
+    local_date: &str,
+    group_id: Option<&str>,
+) -> Result<super::model::DailyReportResult, String> {
+    let day = load_day(db, local_date)?;
+    let groups = day
+        .groups
+        .iter()
+        .map(|group| ReportGroup {
+            code: group.code.clone(),
+            tasks: group
+                .tasks
+                .iter()
+                .map(|task| ReportTask {
+                    title: task.title.clone(),
+                    progress: task.progress,
+                })
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    let text = match group_id {
+        Some(id) => {
+            let group = day
+                .groups
+                .iter()
+                .find(|group| group.id == id)
+                .ok_or_else(|| "DAILY_GROUP_NOT_FOUND".to_string())?;
+            format_group_report(&ReportGroup {
+                code: group.code.clone(),
+                tasks: group
+                    .tasks
+                    .iter()
+                    .map(|task| ReportTask {
+                        title: task.title.clone(),
+                        progress: task.progress,
+                    })
+                    .collect(),
+            })
+        }
+        None => format_full_report(&groups),
+    };
+    Ok(super::model::DailyReportResult {
+        task_count: groups.iter().map(|group| group.tasks.len()).sum(),
+        text,
+    })
 }
 
 pub fn create_task(

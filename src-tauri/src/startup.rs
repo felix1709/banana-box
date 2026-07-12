@@ -444,6 +444,8 @@ fn seeded_reverse_provider_input() -> SaveProviderInput {
         models_url: REVERSE_MODELS_URL.into(),
         chat_completions_url: REVERSE_CHAT_URL.into(),
         default_model: Some(REVERSE_MODEL.into()),
+        temperature: None,
+        context_window_tokens: None,
         confirm_cross_origin: false,
     }
 }
@@ -615,7 +617,7 @@ fn verify_seeded_connection(connection: &Connection, error_code: &str) -> Result
 }
 
 fn verify_ready_connection(connection: &Connection, error_code: &str) -> Result<(), String> {
-    schema::validate(connection).map_err(|_| error_code.to_string())?;
+    schema::validate_migratable(connection).map_err(|_| error_code.to_string())?;
     let reverse_count: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM ai_providers WHERE id = 'reverse-image' AND kind = 'reverse-image'",
@@ -752,6 +754,7 @@ mod tests {
         providers::{ProviderKind, ProviderService, SaveProviderInput},
         secrets::{CredentialMutationCoordinator, MemoryCredentialStore},
     };
+    use rusqlite::Connection;
     use std::{fs, sync::Arc};
     use tempfile::tempdir;
 
@@ -840,6 +843,50 @@ mod tests {
             classify(conflicting_sidecars.path()).unwrap(),
             StartupPath::RecoveryRequired
         );
+    }
+
+    #[test]
+    fn valid_v1_database_remains_eligible_for_schema_migration() {
+        let directory = tempdir().unwrap();
+        fs::write(
+            library_path(directory.path()),
+            serde_json::to_vec(&Library::default()).unwrap(),
+        )
+        .unwrap();
+
+        let database_path = directory.path().join(DATABASE_FILE);
+        let connection = Connection::open(&database_path).unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/0001_v1.sql"))
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (1, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "user_version", 1_i64)
+            .unwrap();
+        for (id, kind) in [
+            ("reverse-image", "reverse-image"),
+            ("storyboard", "storyboard"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO ai_providers
+                     (id, kind, display_name, base_url, models_url, chat_completions_url,
+                      available_models_json, created_at, updated_at)
+                     VALUES (?1, ?2, 'Provider', 'https://example.test', 'https://example.test/models',
+                             'https://example.test/chat', '[]', '2026-07-12T00:00:00Z', '2026-07-12T00:00:00Z')",
+                    [id, kind],
+                )
+                .unwrap();
+        }
+        drop(connection);
+
+        assert_eq!(classify(directory.path()).unwrap(), StartupPath::ReadyV1);
+        Database::open(&database_path).unwrap();
     }
 
     #[test]
@@ -1253,6 +1300,8 @@ mod tests {
             models_url: REVERSE_MODELS_URL.into(),
             chat_completions_url: REVERSE_CHAT_URL.into(),
             default_model: Some(REVERSE_MODEL.into()),
+            temperature: None,
+            context_window_tokens: None,
             confirm_cross_origin: false,
         }
     }

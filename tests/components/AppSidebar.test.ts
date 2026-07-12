@@ -60,7 +60,16 @@ describe('AppSidebar', () => {
     expect(ui.activeTool).toBe('daily-tasks')
   })
 
-  it('puts a red plus new prompt action next to the prompt library tool', async () => {
+  it('switches to the storyboard tool', async () => {
+    const wrapper = mount(AppSidebar)
+    const ui = useUiStore()
+
+    await wrapper.get('[data-tool="storyboard"]').trigger('click')
+
+    expect(ui.activeTool).toBe('storyboard')
+  })
+
+  it('puts a compact icon-only prompt action next to the prompt library tool', async () => {
     const wrapper = mount(AppSidebar)
     const ui = useUiStore()
 
@@ -68,7 +77,10 @@ describe('AppSidebar', () => {
 
     expect(createButton.exists()).toBe(true)
     expect(createButton.classes()).toContain('create-prompt-button')
-    expect(createButton.text()).toBe('+')
+    expect(createButton.attributes('title')).toBe('新增提示词')
+    expect(createButton.attributes('aria-label')).toBe('新增提示词')
+    expect(createButton.find('svg.lucide-plus').exists()).toBe(true)
+    expect(createButton.text()).toBe('')
 
     await createButton.trigger('click')
 

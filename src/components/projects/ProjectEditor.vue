@@ -6,7 +6,6 @@ import {
   type Project,
   type ProjectStageInput,
   type SaveProjectWithStagesInput,
-  type StageKey,
 } from '@/domain/production'
 import { useProjectsStore } from '@/stores/projects'
 
@@ -22,7 +21,6 @@ interface EditorForm {
   name: string
   filePath: string
   releaseDate: string
-  mainStageKey: StageKey
   archived: boolean
   stages: EditorStage[]
 }
@@ -50,7 +48,6 @@ function formFromProject(project: Project | null): EditorForm {
     name: project?.name ?? '',
     filePath: project?.filePath ?? '',
     releaseDate: project?.releaseDate ?? today(),
-    mainStageKey: project?.mainStageKey ?? 'storyboard',
     archived: project?.archived ?? false,
     stages: initialStages(project),
   }
@@ -80,9 +77,13 @@ async function save() {
         name: form.name.trim(),
         filePath: form.filePath.trim(),
         releaseDate: form.releaseDate,
-        mainStageKey: form.mainStageKey,
         archived: form.archived,
-        stages: form.stages.map((stage) => ({ ...stage, progress: Number(stage.progress) })),
+        stages: form.stages.map(({ stageKey, startDate, endDate }) => ({
+          stageKey,
+          startDate,
+          endDate,
+          progress: 0,
+        })),
       }
       await projects.saveEditor(input)
     } else {
@@ -92,8 +93,12 @@ async function save() {
         name: form.name.trim(),
         filePath: form.filePath.trim(),
         releaseDate: form.releaseDate,
-        mainStageKey: form.mainStageKey,
-        stages: form.stages.map((stage) => ({ ...stage, progress: Number(stage.progress) })),
+        stages: form.stages.map(({ stageKey, startDate, endDate }) => ({
+          stageKey,
+          startDate,
+          endDate,
+          progress: 0,
+        })),
       })
     }
     projects.closeEditor()
@@ -197,18 +202,6 @@ async function save() {
               type="date"
             >
           </label>
-          <label>
-            <span>当前主阶段</span>
-            <select v-model="form.mainStageKey">
-              <option
-                v-for="stage in STAGE_DEFINITIONS"
-                :key="stage.key"
-                :value="stage.key"
-              >
-                {{ stage.label }}
-              </option>
-            </select>
-          </label>
           <label
             v-if="projects.editingProject"
             class="project-archive-toggle"
@@ -263,19 +256,6 @@ async function save() {
                   required
                   type="date"
                 >
-              </label>
-              <label class="stage-progress-field">
-                <span>进度</span>
-                <input
-                  v-model.number="stage.progress"
-                  :data-stage-progress="stage.stageKey"
-                  required
-                  min="0"
-                  max="100"
-                  step="1"
-                  type="number"
-                >
-                <i>%</i>
               </label>
             </div>
           </div>
@@ -400,7 +380,6 @@ async function save() {
 }
 
 .project-fields input,
-.project-fields select,
 .project-stage-row input {
   width: 100%;
   min-height: 31px;
@@ -455,7 +434,7 @@ async function save() {
 
 .project-stage-row {
   display: grid;
-  grid-template-columns: 72px minmax(132px, 1fr) minmax(132px, 1fr) 82px;
+  grid-template-columns: 72px minmax(132px, 1fr) minmax(132px, 1fr);
   gap: 10px;
   align-items: end;
   padding: 10px 0;
@@ -471,25 +450,6 @@ async function save() {
   font-size: 11px;
   font-weight: 700;
   text-align: center;
-}
-
-.stage-progress-field {
-  position: relative;
-}
-
-.stage-progress-field input {
-  padding-right: 20px;
-  font-family: var(--bb-mono);
-}
-
-.stage-progress-field i {
-  position: absolute;
-  right: 7px;
-  bottom: 8px;
-  color: var(--bb-text-soft);
-  font-family: var(--bb-mono);
-  font-size: 11px;
-  font-style: normal;
 }
 
 .project-editor > footer {
@@ -535,10 +495,6 @@ async function save() {
 
   .project-stage-row {
     grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .stage-progress-field {
-    grid-column: 2 / -1;
   }
 }
 </style>

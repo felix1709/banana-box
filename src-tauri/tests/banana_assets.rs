@@ -9,15 +9,20 @@ const FRAME_COUNT: u32 = 12;
 fn banana_sprite_has_twelve_square_frames_and_transparent_edges() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let sprite_path = root.join("src/assets/banana/banana-peel-sprite.webp");
-    let open_path = root.join("src/assets/banana/banana-open-approved.png");
-    let hash_path = root.join("docs/design/banana-open-approved.sha256");
+    let closed_path = root.join("src/assets/banana/banana-closed-mirrored-approved.png");
+    let open_path = root.join("src/assets/banana/banana-open-mirrored-approved.png");
+    let hash_path = root.join("docs/design/banana-open-mirrored-approved.sha256");
 
     let sprite = image::open(&sprite_path).expect("banana sprite must exist");
     let approved_open = image::open(&open_path)
         .expect("approved open endpoint must exist")
         .to_rgba8();
+    let approved_closed = image::open(&closed_path)
+        .expect("approved mirrored closed endpoint must exist")
+        .to_rgba8();
 
     assert_eq!(sprite.dimensions(), (FRAME_SIZE * FRAME_COUNT, FRAME_SIZE));
+    assert_eq!(approved_closed.dimensions(), (FRAME_SIZE, FRAME_SIZE));
     assert_eq!(approved_open.dimensions(), (FRAME_SIZE, FRAME_SIZE));
     assert!(sprite.color().has_alpha(), "sprite must preserve alpha");
 
@@ -58,10 +63,25 @@ fn banana_sprite_has_twelve_square_frames_and_transparent_edges() {
         );
     }
 
-    assert_eq!(
-        frames[11], approved_open,
-        "frame 11 must equal the approved endpoint"
+    assert_visible_pixels_equal(
+        &frames[0],
+        &approved_closed,
+        "frame 0 must equal the approved mirrored closed endpoint",
     );
+    assert_visible_pixels_equal(
+        &frames[11],
+        &approved_open,
+        "frame 11 must equal the approved endpoint",
+    );
+}
+
+fn assert_visible_pixels_equal(actual: &RgbaImage, expected: &RgbaImage, message: &str) {
+    for (actual, expected) in actual.pixels().zip(expected.pixels()) {
+        assert_eq!(actual[3], expected[3], "{message}: alpha must match");
+        if actual[3] != 0 {
+            assert_eq!(actual, expected, "{message}: visible pixels must match");
+        }
+    }
 }
 
 fn alpha_bbox(image: &RgbaImage) -> Option<(u32, u32, u32, u32)> {
@@ -121,7 +141,7 @@ fn changed_pixel_ratio(left: &RgbaImage, right: &RgbaImage) -> f64 {
     let changed = left
         .pixels()
         .zip(right.pixels())
-        .filter(|(left, right)| left != right)
+        .filter(|(left, right)| left != right && (left[3] != 0 || right[3] != 0))
         .count();
 
     changed as f64 / f64::from(FRAME_SIZE * FRAME_SIZE)

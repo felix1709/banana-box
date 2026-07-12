@@ -62,7 +62,6 @@ export interface CreateProjectInput {
   name: string
   filePath: string
   releaseDate: string
-  mainStageKey: StageKey
   stages: ProjectStageInput[]
 }
 

@@ -1,10 +1,11 @@
 use super::model::{
-    validate_and_sort_stages, validate_project_fields, validate_project_id, validate_stage_values,
-    CreateProjectInput, ProjectDto, ProjectStageDto, SaveProjectStageInput,
+    apply_schedule_progress, main_stage_for_project_stages, main_stage_for_schedule,
+    progress_for_schedule, validate_and_sort_stages, validate_project_fields, validate_project_id,
+    validate_stage_values, CreateProjectInput, ProjectDto, ProjectStageDto, SaveProjectStageInput,
     SaveProjectWithStagesInput, SetProjectStageInput, StageKey, UpdateProjectInput,
 };
 use crate::db::Database;
-use chrono::Utc;
+use chrono::{Local, Utc};
 use rusqlite::{params, Connection};
 use std::path::Path;
 
@@ -35,7 +36,9 @@ pub fn create_project(db: &Database, input: CreateProjectInput) -> Result<Projec
         &input.file_path,
         &input.release_date,
     )?;
-    let stages = validate_and_sort_stages(&input.stages)?;
+    let today = schedule_date();
+    let stages = apply_schedule_progress(&validate_and_sort_stages(&input.stages)?, today)?;
+    let main_stage_key = main_stage_for_schedule(&stages, today)?;
     let project_id = uuid::Uuid::new_v4().to_string();
     let now = timestamp();
 
@@ -52,7 +55,7 @@ pub fn create_project(db: &Database, input: CreateProjectInput) -> Result<Projec
                     input.name.trim(),
                     input.file_path.trim(),
                     input.release_date,
-                    input.main_stage_key.as_str(),
+                    main_stage_key.as_str(),
                     now,
                 ],
             )
@@ -74,6 +77,7 @@ pub fn update_project(db: &Database, input: UpdateProjectInput) -> Result<Projec
     let now = timestamp();
 
     db.with_transaction(|transaction| {
+        let main_stage_key = read_project(transaction, &input.project_id)?.main_stage_key;
         let changed = transaction
             .execute(
                 "UPDATE projects
@@ -86,7 +90,7 @@ pub fn update_project(db: &Database, input: UpdateProjectInput) -> Result<Projec
                     input.name.trim(),
                     input.file_path.trim(),
                     input.release_date,
-                    input.main_stage_key.as_str(),
+                    main_stage_key.as_str(),
                     now,
                     input.project_id,
                 ],
@@ -111,7 +115,9 @@ pub fn save_project_with_stages(
         &input.file_path,
         &input.release_date,
     )?;
-    let stages = validate_and_sort_stages(&input.stages)?;
+    let today = schedule_date();
+    let stages = apply_schedule_progress(&validate_and_sort_stages(&input.stages)?, today)?;
+    let main_stage_key = main_stage_for_schedule(&stages, today)?;
     let now = timestamp();
 
     db.with_immediate_transaction(|transaction| {
@@ -136,7 +142,7 @@ pub fn save_project_with_stages(
                     input.name.trim(),
                     input.file_path.trim(),
                     input.release_date,
-                    input.main_stage_key.as_str(),
+                    main_stage_key.as_str(),
                     i64::from(input.archived),
                     now,
                 ],
@@ -150,6 +156,7 @@ pub fn save_project_with_stages(
 pub fn set_project_stage(db: &Database, input: SetProjectStageInput) -> Result<ProjectDto, String> {
     validate_project_id(&input.project_id)?;
     validate_stage_values(&input.start_date, &input.end_date, input.progress)?;
+    let progress = progress_for_schedule(&input.start_date, &input.end_date, schedule_date())?;
     let now = timestamp();
 
     db.with_transaction(|transaction| {
@@ -161,7 +168,7 @@ pub fn set_project_stage(db: &Database, input: SetProjectStageInput) -> Result<P
                 params![
                     input.start_date,
                     input.end_date,
-                    input.progress,
+                    progress,
                     now,
                     input.project_id,
                     input.stage_key.as_str(),
@@ -327,7 +334,7 @@ fn read_project(connection: &Connection, project_id: &str) -> Result<ProjectDto,
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
-    let stages = raw_stages
+    let mut stages = raw_stages
         .into_iter()
         .map(
             |(id, stage_key, position, start_date, end_date, progress, updated_at)| {
@@ -343,6 +350,12 @@ fn read_project(connection: &Connection, project_id: &str) -> Result<ProjectDto,
             },
         )
         .collect::<Result<Vec<_>, String>>()?;
+    StageKey::from_db(&main_stage_key)?;
+    let today = schedule_date();
+    for stage in &mut stages {
+        stage.progress = progress_for_schedule(&stage.start_date, &stage.end_date, today)?;
+    }
+    let main_stage_key = main_stage_for_project_stages(&stages, today)?;
 
     Ok(ProjectDto {
         id,
@@ -352,7 +365,7 @@ fn read_project(connection: &Connection, project_id: &str) -> Result<ProjectDto,
         file_exists: Path::new(&file_path).exists(),
         file_path,
         release_date,
-        main_stage_key: StageKey::from_db(&main_stage_key)?,
+        main_stage_key,
         archived: archived != 0,
         created_at,
         updated_at,
@@ -374,4 +387,8 @@ fn map_sql_error(error: rusqlite::Error) -> String {
 
 fn timestamp() -> String {
     Utc::now().to_rfc3339()
+}
+
+fn schedule_date() -> chrono::NaiveDate {
+    Local::now().date_naive()
 }

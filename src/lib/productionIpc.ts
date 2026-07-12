@@ -3,6 +3,7 @@ import type {
   CreateProjectInput,
   CreateDailyTaskInput,
   DailyTaskDay,
+  DailyReportResult,
   Project,
   SaveProjectWithStagesInput,
   SetProjectStageInput,
@@ -47,3 +48,6 @@ export const reorderDailyGroups = (localDate: string, groupIds: string[]) =>
 
 export const reorderDailyTasks = (localDate: string, groupId: string, taskIds: string[]) =>
   invoke<DailyTaskDay>('reorder_daily_tasks', { input: { localDate, groupId, taskIds } })
+
+export const getDailyReport = (localDate: string, groupId?: string) =>
+  invoke<DailyReportResult>('get_daily_report', { localDate, groupId: groupId ?? null })

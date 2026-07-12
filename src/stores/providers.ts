@@ -19,6 +19,8 @@ function copyPublicProvider(provider: AiProvider): AiProvider {
     needsCredentials: provider.needsCredentials,
     configRevision: provider.configRevision,
     capabilityRevision: provider.capabilityRevision,
+    temperature: provider.temperature,
+    contextWindowTokens: provider.contextWindowTokens,
   }
 }
 
@@ -31,7 +33,9 @@ export const useProviderStore = defineStore('providers', {
   },
   actions: {
     async load(kind: ProviderKind) {
-      const loaded = (await providerIpc.listAiProviders(kind)).map(copyPublicProvider)
+      const loaded = (await providerIpc.listAiProviders(kind))
+        .filter((provider) => provider.kind === kind)
+        .map(copyPublicProvider)
       this.providers = [...this.providers.filter((provider) => provider.kind !== kind), ...loaded]
     },
     async save(input: SaveAiProviderInput): Promise<AiProvider> {
