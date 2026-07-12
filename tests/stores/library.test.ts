@@ -133,17 +133,21 @@ describe('library store', () => {
     expect(s.library.prompts[0].categoryId).toBeNull()
   })
 
-  it('hydrates old libraries with default reverse API settings', () => {
+  it('does not retain legacy API settings when hydrating data', () => {
     const s = useLibraryStore()
+    s.hydrate({
+      ...seed(),
+      settings: {
+        hotkey: 'Ctrl+Shift+B',
+        theme: 'auto',
+        apiBaseUrl: 'https://legacy.example.test',
+        apiKey: 'legacy-key',
+        reverseModel: 'legacy-model',
+        availableReverseModels: ['legacy-model'],
+      } as Library['settings'],
+    })
 
-    expect((s.library.settings as any).apiBaseUrl).toBe('https://ai.leihuo.netease.com')
-    expect((s.library.settings as any).apiKey).toBe('')
-    expect((s.library.settings as any).reverseModel).toBe('doubao-seed-1-6-vision-250815')
-    expect((s.library.settings as any).availableReverseModels).toEqual([
-      'doubao-seed-1-6-vision-250815',
-      'gpt-5.4-mini',
-      'qwen3.5-omni-plus',
-      'qwen3-vl-plus',
-    ])
+    expect(s.library.settings).toEqual({ hotkey: 'Ctrl+Shift+B', theme: 'auto' })
+    expect(JSON.stringify(s.library.settings)).not.toContain('apiKey')
   })
 })

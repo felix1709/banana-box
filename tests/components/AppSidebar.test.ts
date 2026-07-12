@@ -34,10 +34,6 @@ describe('AppSidebar', () => {
       settings: {
         hotkey: 'Ctrl+Shift+B',
         theme: 'auto',
-        apiBaseUrl: 'https://ai.leihuo.netease.com',
-        apiKey: '',
-        reverseModel: 'doubao-seed-1-6-vision-250815',
-        availableReverseModels: ['doubao-seed-1-6-vision-250815'],
       },
     })
     const wrapper = mount(AppSidebar)
@@ -88,10 +84,6 @@ describe('AppSidebar', () => {
       settings: {
         hotkey: 'Ctrl+Shift+B',
         theme: 'auto',
-        apiBaseUrl: 'https://ai.leihuo.netease.com',
-        apiKey: '',
-        reverseModel: 'doubao-seed-1-6-vision-250815',
-        availableReverseModels: ['doubao-seed-1-6-vision-250815'],
       },
     })
 

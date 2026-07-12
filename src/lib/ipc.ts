@@ -19,28 +19,6 @@ export interface UpdateCheckResult {
   downloadUrl: string
 }
 
-export interface CheckApiConnectionInput {
-  baseUrl: string
-  apiKey: string
-}
-
-export interface CheckApiConnectionResult {
-  ok: boolean
-  message: string
-  models: string[]
-}
-
-export interface ReverseImagePromptInput {
-  baseUrl: string
-  apiKey: string
-  model: string
-  imagePath: string
-}
-
-export interface ReverseImagePromptResult {
-  prompt: string
-}
-
 export interface ImportImageFromPathInput {
   sourcePath: string
 }
@@ -120,18 +98,6 @@ export async function downloadImage(url: string): Promise<string> {
 
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
   return await invoke<UpdateCheckResult>('check_for_update')
-}
-
-export async function checkApiConnection(
-  input: CheckApiConnectionInput,
-): Promise<CheckApiConnectionResult> {
-  return await invoke<CheckApiConnectionResult>('check_api_connection', { input })
-}
-
-export async function reverseImagePrompt(
-  input: ReverseImagePromptInput,
-): Promise<ReverseImagePromptResult> {
-  return await invoke<ReverseImagePromptResult>('reverse_image_prompt', { input })
 }
 
 export async function importImageFromPath(input: ImportImageFromPathInput): Promise<string> {

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { useLibraryStore } from '@/stores/library'
+import { onMounted, ref, watch } from 'vue'
+import { useProviderStore } from '@/stores/providers'
 import { useUiStore } from '@/stores/ui'
-import { importImageFromPath, readImageBytes, reverseImagePrompt, saveImage } from '@/lib/ipc'
+import { importImageFromPath, readImageBytes, saveImage } from '@/lib/ipc'
+import { reverseImagePrompt } from '@/lib/provider-ipc'
 
-const lib = useLibraryStore()
+const providers = useProviderStore()
 const ui = useUiStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const imagePath = ref<string | null>(null)
@@ -13,6 +14,15 @@ const previewUrl = ref('')
 const result = ref('')
 const loading = ref(false)
 const error = ref('')
+const reverseImageProviderId = 'reverse-image'
+
+onMounted(async () => {
+  try {
+    await providers.load('reverse-image')
+  } catch {
+    error.value = '读取图片反推服务失败，请打开设置后重试'
+  }
+})
 
 function basename(path: string) {
   return path.split(/[\\/]/).pop() ?? path
@@ -94,13 +104,19 @@ async function onPaste(e: ClipboardEvent) {
 
 async function onReverse() {
   if (!imagePath.value) return
+  const provider = providers.byId(reverseImageProviderId)
+  const model = provider?.defaultModel ?? provider?.probedModel ?? provider?.availableModels[0]
+  if (!model) {
+    error.value = '图片反推服务尚未就绪，请先在设置中完成配置'
+    return
+  }
+
   loading.value = true
   error.value = ''
   try {
     const response = await reverseImagePrompt({
-      baseUrl: lib.library.settings.apiBaseUrl,
-      apiKey: lib.library.settings.apiKey,
-      model: lib.library.settings.reverseModel,
+      providerId: reverseImageProviderId,
+      model,
       imagePath: imagePath.value,
     })
     result.value = response.prompt

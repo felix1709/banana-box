@@ -1,3 +1,4 @@
+pub(crate) mod provider_commands;
 pub(crate) mod startup_commands;
 
 // src-tauri/src/commands.rs
@@ -5,17 +6,22 @@ pub(crate) mod startup_commands;
 // 所有系统操作（文件、剪贴板）在此封装，前端不直接碰系统。
 
 use crate::{
-    app_state::StartupGate,
+    app_state::{AppServices, StartupGate},
     library::{self, Library},
 };
-use base64::Engine;
 use chrono::{DateTime, Datelike, Local, Timelike};
 use image::codecs::jpeg::JpegEncoder;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::Manager;
+use tokio_util::sync::CancellationToken;
+use url::Url;
 
-fn data_dir(app: &tauri::AppHandle) -> PathBuf {
+const MAX_DOWNLOADED_IMAGE_BYTES: usize = 15 * 1024 * 1024;
+const MAX_UPDATE_RESPONSE_BYTES: usize = 1024 * 1024;
+const APP_SERVICES_UNAVAILABLE: &str = "STARTUP_NOT_READY";
+
+pub(crate) fn data_dir(app: &tauri::AppHandle) -> PathBuf {
     app.path().app_data_dir().expect("no app data dir")
 }
 
@@ -149,36 +155,6 @@ struct GithubReleaseAsset {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CheckApiConnectionInput {
-    pub base_url: String,
-    pub api_key: String,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CheckApiConnectionResult {
-    pub ok: bool,
-    pub message: String,
-    pub models: Vec<String>,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReverseImagePromptInput {
-    pub base_url: String,
-    pub api_key: String,
-    pub model: String,
-    pub image_path: String,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReverseImagePromptResult {
-    pub prompt: String,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ImportImageFromPathInput {
     pub source_path: String,
 }
@@ -204,41 +180,21 @@ pub struct CompressMediaResult {
 }
 
 #[derive(serde::Deserialize)]
-struct OpenAiModelsResponse {
-    data: Vec<OpenAiModel>,
-}
-
-#[derive(serde::Deserialize)]
-struct OpenAiModel {
-    id: String,
-}
-
-#[derive(serde::Deserialize)]
-struct ChatCompletionResponse {
+pub(crate) struct ChatCompletionResponse {
     choices: Vec<ChatCompletionChoice>,
 }
 
 #[derive(serde::Deserialize)]
-struct ChatCompletionChoice {
+pub(crate) struct ChatCompletionChoice {
     message: ChatCompletionMessage,
 }
 
 #[derive(serde::Deserialize)]
-struct ChatCompletionMessage {
+pub(crate) struct ChatCompletionMessage {
     content: String,
 }
 
-fn openai_url(base_url: &str, path: &str) -> String {
-    let trimmed = base_url.trim().trim_end_matches('/');
-    let base = if trimmed.ends_with("/v1") {
-        trimmed.to_string()
-    } else {
-        format!("{}/v1", trimmed)
-    };
-    format!("{}/{}", base, path.trim_start_matches('/'))
-}
-
-fn reverse_image_prompt_instruction() -> &'static str {
+pub(crate) fn reverse_image_prompt_instruction() -> &'static str {
     r#"请根据这张图片反推出适合 AI 绘图或设计复现的中文提示词。请严格按下面十个维度输出结构化长模板，所有内容都围绕图片本身描述；无法从图片判断的项目写“未明显体现”。不要输出解释、寒暄、免责声明或模板外的额外内容。
 
 一、基础画面属性（生成的底层框架）
@@ -297,7 +253,7 @@ fn reverse_image_prompt_instruction() -> &'static str {
 - 需规避元素：文字、水印、logo、多余杂物、不符合场景的违和元素"#
 }
 
-fn mime_from_path(path: &str) -> &'static str {
+pub(crate) fn mime_from_path(path: &str) -> &'static str {
     match path
         .rsplit('.')
         .next()
@@ -312,7 +268,7 @@ fn mime_from_path(path: &str) -> &'static str {
     }
 }
 
-fn parse_chat_completion_prompt(body: &str) -> Result<String, String> {
+pub(crate) fn parse_chat_completion_prompt(body: &str) -> Result<String, String> {
     let parsed: ChatCompletionResponse = serde_json::from_str(body).map_err(|e| e.to_string())?;
     parsed
         .choices
@@ -500,24 +456,28 @@ pub fn read_import_dir(
 
 // 下载远程图片到 images/，返回相对路径
 #[tauri::command]
-pub fn download_image(
+pub async fn download_image(
     app: tauri::AppHandle,
-    gate: tauri::State<StartupGate>,
+    gate: tauri::State<'_, StartupGate>,
     url: String,
 ) -> Result<String, String> {
     require_startup_ready(&gate)?;
-    use std::io::Read;
-    let resp = ureq::get(&url).call().map_err(|e| e.to_string())?;
-    let mut bytes = Vec::new();
-    resp.into_reader()
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
+    let services = app
+        .try_state::<AppServices>()
+        .ok_or_else(|| APP_SERVICES_UNAVAILABLE.to_string())?;
+    let request_url = Url::parse(&url).map_err(|_| "INVALID_DOWNLOAD_URL")?;
+    let bytes = services
+        .provider_http
+        .get_public_bounded(
+            request_url.clone(),
+            MAX_DOWNLOADED_IMAGE_BYTES,
+            CancellationToken::new(),
+        )
+        .await?;
     let dir = data_dir(&app).join("images");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let ext = url
-        .split('?')
-        .next()
-        .unwrap_or(&url)
+    let ext = request_url
+        .path()
         .rsplit('.')
         .next()
         .filter(|s| ["png", "jpg", "jpeg", "webp", "gif"].contains(s))
@@ -530,14 +490,27 @@ pub fn download_image(
 }
 
 #[tauri::command]
-pub fn check_for_update(gate: tauri::State<StartupGate>) -> Result<UpdateCheckResult, String> {
+pub async fn check_for_update(
+    app: tauri::AppHandle,
+    gate: tauri::State<'_, StartupGate>,
+) -> Result<UpdateCheckResult, String> {
     require_startup_ready(&gate)?;
+    let services = app
+        .try_state::<AppServices>()
+        .ok_or_else(|| APP_SERVICES_UNAVAILABLE.to_string())?;
     let current_version = env!("CARGO_PKG_VERSION").to_string();
-    let resp = ureq::get("https://api.github.com/repos/felix1709/banana-box/releases/latest")
-        .set("User-Agent", "banana-box")
-        .call()
-        .map_err(|e| e.to_string())?;
-    let body = resp.into_string().map_err(|e| e.to_string())?;
+    let release_url =
+        Url::parse("https://api.github.com/repos/felix1709/banana-box/releases/latest")
+            .map_err(|_| "INVALID_UPDATE_URL")?;
+    let body = services
+        .provider_http
+        .get_public_bounded(
+            release_url,
+            MAX_UPDATE_RESPONSE_BYTES,
+            CancellationToken::new(),
+        )
+        .await?;
+    let body = String::from_utf8(body).map_err(|_| "INVALID_UPDATE_RESPONSE")?;
     let release: GithubRelease = serde_json::from_str(&body).map_err(|e| e.to_string())?;
     let latest_version = release
         .tag_name
@@ -552,115 +525,6 @@ pub fn check_for_update(gate: tauri::State<StartupGate>) -> Result<UpdateCheckRe
         update_available,
         download_url: release_download_url(&release),
         release_url: release.html_url,
-    })
-}
-
-#[tauri::command]
-pub fn check_api_connection(
-    gate: tauri::State<StartupGate>,
-    input: CheckApiConnectionInput,
-) -> Result<CheckApiConnectionResult, String> {
-    require_startup_ready(&gate)?;
-    if input.base_url.trim().is_empty() {
-        return Ok(CheckApiConnectionResult {
-            ok: false,
-            message: "Base URL 不能为空".to_string(),
-            models: vec![],
-        });
-    }
-    if input.api_key.trim().is_empty() {
-        return Ok(CheckApiConnectionResult {
-            ok: false,
-            message: "API Key 不能为空".to_string(),
-            models: vec![],
-        });
-    }
-
-    let url = openai_url(&input.base_url, "models");
-    let response = ureq::get(&url)
-        .set("Authorization", &format!("Bearer {}", input.api_key.trim()))
-        .set("User-Agent", "banana-box")
-        .call();
-
-    Ok(match response {
-        Ok(resp) => match resp.into_string() {
-            Ok(body) => {
-                let models = serde_json::from_str::<OpenAiModelsResponse>(&body)
-                    .map(|parsed| parsed.data.into_iter().map(|model| model.id).collect())
-                    .unwrap_or_else(|_| vec![]);
-                CheckApiConnectionResult {
-                    ok: true,
-                    message: "连接成功".to_string(),
-                    models,
-                }
-            }
-            Err(err) => CheckApiConnectionResult {
-                ok: false,
-                message: format!("读取响应失败：{}", err),
-                models: vec![],
-            },
-        },
-        Err(err) => CheckApiConnectionResult {
-            ok: false,
-            message: format!("连接失败：{}", err),
-            models: vec![],
-        },
-    })
-}
-
-#[tauri::command]
-pub fn reverse_image_prompt(
-    app: tauri::AppHandle,
-    gate: tauri::State<StartupGate>,
-    input: ReverseImagePromptInput,
-) -> Result<ReverseImagePromptResult, String> {
-    require_startup_ready(&gate)?;
-    if input.api_key.trim().is_empty() {
-        return Err("API Key 不能为空".to_string());
-    }
-    if input.model.trim().is_empty() {
-        return Err("反推模型不能为空".to_string());
-    }
-
-    let full = data_dir(&app).join(&input.image_path);
-    let bytes = std::fs::read(&full).map_err(|e| e.to_string())?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    let data_url = format!(
-        "data:{};base64,{}",
-        mime_from_path(&input.image_path),
-        encoded
-    );
-    let request = serde_json::json!({
-        "model": input.model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": reverse_image_prompt_instruction()
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": data_url
-                        }
-                    }
-                ]
-            }
-        ]
-    });
-
-    let url = openai_url(&input.base_url, "chat/completions");
-    let resp = ureq::post(&url)
-        .set("Authorization", &format!("Bearer {}", input.api_key.trim()))
-        .set("User-Agent", "banana-box")
-        .set("Content-Type", "application/json")
-        .send_string(&request.to_string())
-        .map_err(|e| e.to_string())?;
-    let body = resp.into_string().map_err(|e| e.to_string())?;
-    Ok(ReverseImagePromptResult {
-        prompt: parse_chat_completion_prompt(&body)?,
     })
 }
 
@@ -759,18 +623,6 @@ fn version_parts(version: &str) -> Vec<u32> {
 mod tests {
     use super::*;
     use chrono::TimeZone;
-
-    #[test]
-    fn openai_url_join_adds_v1_path_once() {
-        assert_eq!(
-            openai_url("https://ai.leihuo.netease.com", "models"),
-            "https://ai.leihuo.netease.com/v1/models"
-        );
-        assert_eq!(
-            openai_url("https://ai.leihuo.netease.com/v1/", "chat/completions"),
-            "https://ai.leihuo.netease.com/v1/chat/completions"
-        );
-    }
 
     #[test]
     fn parse_chat_completion_prompt_reads_first_text_content() {

@@ -2,7 +2,11 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SettingsModal from '@/components/SettingsModal.vue'
-import { checkApiConnection } from '@/lib/ipc'
+import {
+  checkAiProviderConnection,
+  listAiProviders,
+  saveAiProvider,
+} from '@/lib/provider-ipc'
 import { checkAppUpdate, installAppUpdate } from '@/lib/updater'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 
@@ -21,8 +25,13 @@ vi.mock('@/lib/ipc', () => ({
   importLibrary: vi.fn().mockResolvedValue(null),
   readImportDir: vi.fn().mockResolvedValue([]),
   downloadImage: vi.fn(),
-  checkApiConnection: vi.fn(),
   saveLibrary: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('@/lib/provider-ipc', () => ({
+  listAiProviders: vi.fn(),
+  saveAiProvider: vi.fn(),
+  checkAiProviderConnection: vi.fn(),
 }))
 
 vi.mock('@/lib/updater', () => ({
@@ -34,11 +43,30 @@ async function openSettingsTab(wrapper: ReturnType<typeof mount>, index: number)
   await wrapper.findAll('.settings-tab')[index].trigger('click')
 }
 
+const reverseImageProvider = {
+  id: 'reverse-image' as const,
+  kind: 'reverse-image' as const,
+  displayName: '图片反推',
+  baseUrl: 'https://ai.leihuo.netease.com',
+  modelsUrl: 'https://ai.leihuo.netease.com/v1/models',
+  chatCompletionsUrl: 'https://ai.leihuo.netease.com/v1/chat/completions',
+  defaultModel: 'doubao-seed-1-6-vision-250815',
+  availableModels: ['doubao-seed-1-6-vision-250815', 'gpt-5.4-mini'],
+  probedModel: null,
+  structuredMode: null,
+  interactiveCompatible: null,
+  boundHost: 'https://ai.leihuo.netease.com',
+  needsCredentials: true,
+  configRevision: 1,
+  capabilityRevision: 1,
+}
+
 describe('SettingsModal', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     vi.mocked(isEnabled).mockResolvedValue(false)
+    vi.mocked(listAiProviders).mockResolvedValue([reverseImageProvider])
   })
 
   it('groups settings into feature, API, hotkey, and import/export pages', async () => {
@@ -104,14 +132,20 @@ describe('SettingsModal', () => {
     expect(wrapper.find('.version-status').text()).toContain('0.1.2')
   })
 
-  it('shows compact reverse API settings with safe defaults', async () => {
+  it('loads public reverse-provider settings with a write-only password input', async () => {
     const wrapper = mount(SettingsModal)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
     await openSettingsTab(wrapper, 1)
 
     expect((wrapper.find('.api-base-url-input').element as HTMLInputElement).value).toBe(
       'https://ai.leihuo.netease.com',
     )
-    expect(wrapper.find('.api-key-input').exists()).toBe(true)
+    const keyInput = wrapper.find('.api-key-input').element as HTMLInputElement
+    expect(keyInput.value).toBe('')
+    expect(keyInput.getAttribute('placeholder')).toContain('留空表示不修改')
+    expect((wrapper.find('.api-models-url-input').element as HTMLInputElement).value).toContain(
+      '/v1/models',
+    )
     expect(wrapper.find('.api-check-button').text()).toContain('检测')
     expect((wrapper.find('.api-model-select').element as HTMLSelectElement).value).toBe(
       'doubao-seed-1-6-vision-250815',
@@ -125,29 +159,77 @@ describe('SettingsModal', () => {
     expect(dialog.classes()).toContain('scrollable-dialog')
   })
 
-  it('keeps default models when connection succeeds without a model list', async () => {
-    vi.mocked(checkApiConnection).mockResolvedValue({
+  it('checks the stored provider by ID and keeps its models when probing returns none', async () => {
+    vi.mocked(checkAiProviderConnection).mockResolvedValue({
       ok: true,
       message: '连接成功',
       models: [],
     })
     const wrapper = mount(SettingsModal)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
     await openSettingsTab(wrapper, 1)
 
     await wrapper.find('.api-check-button').trigger('click')
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
-    expect(checkApiConnection).toHaveBeenCalledWith({
-      baseUrl: 'https://ai.leihuo.netease.com',
-      apiKey: '',
-    })
+    expect(checkAiProviderConnection).toHaveBeenCalledWith('reverse-image')
     const options = wrapper.findAll('.api-model-select option').map((option) => option.text())
-    expect(options).toEqual([
-      'doubao-seed-1-6-vision-250815',
-      'gpt-5.4-mini',
-      'qwen3.5-omni-plus',
-      'qwen3-vl-plus',
-    ])
+    expect(options).toEqual(['doubao-seed-1-6-vision-250815', 'gpt-5.4-mini'])
     expect(wrapper.find('.api-status').text()).toContain('连接成功')
+  })
+
+  it('saves the password once and clears the local input after saving', async () => {
+    vi.mocked(saveAiProvider).mockResolvedValue({
+      ...reverseImageProvider,
+      needsCredentials: false,
+    })
+    const wrapper = mount(SettingsModal)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await openSettingsTab(wrapper, 1)
+
+    await wrapper.find('.api-key-input').setValue('TEST_ONLY_WRITE_ONCE')
+    await wrapper.find('.api-save-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(saveAiProvider).toHaveBeenCalledWith({
+      provider: {
+        id: 'reverse-image',
+        kind: 'reverse-image',
+        displayName: '图片反推',
+        baseUrl: 'https://ai.leihuo.netease.com',
+        modelsUrl: 'https://ai.leihuo.netease.com/v1/models',
+        chatCompletionsUrl: 'https://ai.leihuo.netease.com/v1/chat/completions',
+        defaultModel: 'doubao-seed-1-6-vision-250815',
+        confirmCrossOrigin: false,
+      },
+      apiKey: 'TEST_ONLY_WRITE_ONCE',
+    })
+    expect((wrapper.find('.api-key-input').element as HTMLInputElement).value).toBe('')
+  })
+
+  it('clears the password input when saving the provider fails', async () => {
+    vi.mocked(saveAiProvider).mockRejectedValue(new Error('network failure'))
+    const wrapper = mount(SettingsModal)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await openSettingsTab(wrapper, 1)
+
+    await wrapper.find('.api-key-input').setValue('TEST_ONLY_CLEAR_ON_FAILURE')
+    await wrapper.find('.api-save-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect((wrapper.find('.api-key-input').element as HTMLInputElement).value).toBe('')
+  })
+
+  it('clears the password input when the provider has not loaded', async () => {
+    vi.mocked(listAiProviders).mockResolvedValue([])
+    const wrapper = mount(SettingsModal)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await openSettingsTab(wrapper, 1)
+
+    await wrapper.find('.api-key-input').setValue('TEST_ONLY_CLEAR_WITHOUT_PROVIDER')
+    await wrapper.find('.api-save-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect((wrapper.find('.api-key-input').element as HTMLInputElement).value).toBe('')
   })
 })

@@ -2,45 +2,45 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ReverseImagePanel from '@/components/ReverseImagePanel.vue'
-import { useLibraryStore } from '@/stores/library'
 import { useUiStore } from '@/stores/ui'
-import type { Library } from '@/types'
-import { importImageFromPath, readImageBytes, reverseImagePrompt, saveImage } from '@/lib/ipc'
+import { importImageFromPath, readImageBytes, saveImage } from '@/lib/ipc'
+import { listAiProviders, reverseImagePrompt } from '@/lib/provider-ipc'
 
 vi.mock('@/lib/ipc', () => ({
-  reverseImagePrompt: vi.fn(),
   importImageFromPath: vi.fn(),
   saveImage: vi.fn(),
   saveLibrary: vi.fn().mockResolvedValue(undefined),
   readImageBytes: vi.fn().mockResolvedValue('blob:preview'),
 }))
 
-function seed(): Library {
-  return {
-    version: 1,
-    categories: [],
-    prompts: [],
-    settings: {
-      hotkey: 'Ctrl+Shift+B',
-      theme: 'auto',
-      apiBaseUrl: 'https://ai.leihuo.netease.com',
-      apiKey: 'sk-test',
-      reverseModel: 'doubao-seed-1-6-vision-250815',
-      availableReverseModels: [
-        'doubao-seed-1-6-vision-250815',
-        'gpt-5.4-mini',
-        'qwen3.5-omni-plus',
-        'qwen3-vl-plus',
-      ],
-    },
-  }
+vi.mock('@/lib/provider-ipc', () => ({
+  listAiProviders: vi.fn(),
+  reverseImagePrompt: vi.fn(),
+}))
+
+const reverseImageProvider = {
+  id: 'reverse-image' as const,
+  kind: 'reverse-image' as const,
+  displayName: 'Reverse Image',
+  baseUrl: 'https://ai.leihuo.netease.com',
+  modelsUrl: 'https://ai.leihuo.netease.com/v1/models',
+  chatCompletionsUrl: 'https://ai.leihuo.netease.com/v1/chat/completions',
+  defaultModel: 'doubao-seed-1-6-vision-250815',
+  availableModels: ['doubao-seed-1-6-vision-250815'],
+  probedModel: null,
+  structuredMode: null,
+  interactiveCompatible: null,
+  boundHost: 'https://ai.leihuo.netease.com',
+  needsCredentials: false,
+  configRevision: 1,
+  capabilityRevision: 1,
 }
 
 describe('ReverseImagePanel', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    useLibraryStore().hydrate(seed())
     vi.clearAllMocks()
+    vi.mocked(listAiProviders).mockResolvedValue([reverseImageProvider])
   })
 
   it('imports an image, reverses it, and opens the prompt editor with generated content', async () => {
@@ -62,8 +62,7 @@ describe('ReverseImagePanel', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
     expect(reverseImagePrompt).toHaveBeenCalledWith({
-      baseUrl: 'https://ai.leihuo.netease.com',
-      apiKey: 'sk-test',
+      providerId: 'reverse-image',
       model: 'doubao-seed-1-6-vision-250815',
       imagePath: 'images/reverse.png',
     })

@@ -40,10 +40,6 @@ pub(crate) fn default_api_base_url() -> String {
     "https://ai.leihuo.netease.com".to_string()
 }
 
-pub(crate) fn default_api_key() -> String {
-    String::new()
-}
-
 pub(crate) fn default_reverse_model() -> String {
     "doubao-seed-1-6-vision-250815".to_string()
 }
@@ -58,18 +54,10 @@ pub(crate) fn default_available_reverse_models() -> Vec<String> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
     pub hotkey: String,
     pub theme: String,
-    #[serde(default = "default_api_base_url")]
-    pub api_base_url: String,
-    #[serde(default = "default_api_key")]
-    pub api_key: String,
-    #[serde(default = "default_reverse_model")]
-    pub reverse_model: String,
-    #[serde(default = "default_available_reverse_models")]
-    pub available_reverse_models: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -90,10 +78,6 @@ impl Default for Library {
             settings: Settings {
                 hotkey: "Ctrl+Shift+B".to_string(),
                 theme: "auto".to_string(),
-                api_base_url: default_api_base_url(),
-                api_key: default_api_key(),
-                reverse_model: default_reverse_model(),
-                available_reverse_models: default_available_reverse_models(),
             },
         }
     }
@@ -500,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn load_old_settings_fills_reverse_api_defaults() {
+    fn load_legacy_settings_keeps_only_non_sensitive_fields() {
         let dir = tempdir().unwrap();
         let json = r##"{
           "version": 1,
@@ -516,17 +500,46 @@ mod tests {
 
         let lib = load_library(dir.path());
 
-        assert_eq!(lib.settings.api_base_url, "https://ai.leihuo.netease.com");
-        assert_eq!(lib.settings.api_key, "");
-        assert_eq!(lib.settings.reverse_model, "doubao-seed-1-6-vision-250815");
+        assert_eq!(lib.settings.hotkey, "Ctrl+Shift+B");
+        assert_eq!(lib.settings.theme, "auto");
+    }
+
+    #[test]
+    fn v2_settings_reject_each_reintroduced_legacy_api_field() {
+        for (field, value) in [
+            ("apiBaseUrl", "\"https://legacy.example.test\""),
+            ("apiKey", "\"legacy-key\""),
+            ("reverseModel", "\"legacy-model\""),
+            ("availableReverseModels", "[\"legacy-model\"]"),
+        ] {
+            let json = format!(
+                r#"{{
+                  "version": 2,
+                  "categories": [],
+                  "prompts": [],
+                  "settings": {{
+                    "hotkey": "Ctrl+Shift+B",
+                    "theme": "auto",
+                    "{field}": {value}
+                  }}
+                }}"#
+            );
+
+            let error = serde_json::from_str::<Library>(&json).unwrap_err();
+            assert!(error.to_string().contains(field));
+        }
+    }
+
+    #[test]
+    fn default_library_serializes_only_non_sensitive_settings() {
+        let serialized = serde_json::to_value(Library::default()).unwrap();
+
         assert_eq!(
-            lib.settings.available_reverse_models,
-            vec![
-                "doubao-seed-1-6-vision-250815".to_string(),
-                "gpt-5.4-mini".to_string(),
-                "qwen3.5-omni-plus".to_string(),
-                "qwen3-vl-plus".to_string(),
-            ]
+            serialized["settings"],
+            serde_json::json!({
+                "hotkey": "Ctrl+Shift+B",
+                "theme": "auto",
+            })
         );
     }
 }

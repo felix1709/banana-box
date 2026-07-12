@@ -77,6 +77,17 @@ impl ProviderHttpClient {
             .await
     }
 
+    pub async fn get_public_bounded(
+        &self,
+        url: Url,
+        decoded_limit: usize,
+        cancellation: CancellationToken,
+    ) -> Result<Vec<u8>, String> {
+        let request = self.client.get(url).header("User-Agent", "banana-box");
+        self.read_non_streaming(request, decoded_limit, cancellation)
+            .await
+    }
+
     pub async fn post_json_bounded(
         &self,
         url: Url,

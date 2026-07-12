@@ -3,22 +3,19 @@ import { onMounted, ref } from 'vue'
 import { v4 as uuid } from 'uuid'
 import { open } from '@tauri-apps/plugin-dialog'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
-import {
-  DEFAULT_REVERSE_MODEL,
-  DEFAULT_REVERSE_MODELS,
-  useLibraryStore,
-} from '@/stores/library'
+import { useLibraryStore } from '@/stores/library'
+import { useProviderStore } from '@/stores/providers'
 import { useUiStore } from '@/stores/ui'
 import {
-  checkApiConnection,
   exportLibrary,
   importLibrary,
   readImportDir,
   downloadImage,
 } from '@/lib/ipc'
+import { checkAiProviderConnection } from '@/lib/provider-ipc'
 import { checkAppUpdate, installAppUpdate } from '@/lib/updater'
 import { parseFile } from '@/lib/parse'
-import type { Prompt } from '@/types'
+import type { AiProvider, CheckAiProviderConnectionResult, Prompt } from '@/types'
 import type { AppUpdateResult } from '@/lib/updater'
 
 type SettingsTab = 'features' | 'api' | 'hotkeys' | 'import-export'
@@ -31,13 +28,16 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 ]
 
 const lib = useLibraryStore()
+const providers = useProviderStore()
 const ui = useUiStore()
 const activeTab = ref<SettingsTab>('features')
 const hotkey = ref(lib.library.settings.hotkey)
-const apiBaseUrl = ref(lib.library.settings.apiBaseUrl)
-const apiKey = ref(lib.library.settings.apiKey)
-const reverseModel = ref(lib.library.settings.reverseModel)
-const availableReverseModels = ref([...lib.library.settings.availableReverseModels])
+const apiBaseUrl = ref('')
+const apiModelsUrl = ref('')
+const apiChatCompletionsUrl = ref('')
+const apiKey = ref('')
+const reverseModel = ref('')
+const availableReverseModels = ref<string[]>([])
 const checkingApi = ref(false)
 const apiStatus = ref('')
 const importing = ref(false)
@@ -51,7 +51,7 @@ const savingAutostart = ref(false)
 const autostartError = ref('')
 
 onMounted(async () => {
-  await refreshAutostart()
+  await Promise.all([refreshAutostart(), loadReverseImageProvider()])
 })
 
 function saveHotkey() {
@@ -61,17 +61,69 @@ function saveHotkey() {
 }
 
 function pickPreferredModel(models: string[]) {
-  if (models.includes(DEFAULT_REVERSE_MODEL)) return DEFAULT_REVERSE_MODEL
   if (models.includes(reverseModel.value)) return reverseModel.value
-  return models[0] ?? DEFAULT_REVERSE_MODEL
+  return models[0] ?? ''
 }
 
-function saveApiSettings() {
-  lib.library.settings.apiBaseUrl = apiBaseUrl.value.trim()
-  lib.library.settings.apiKey = apiKey.value.trim()
-  lib.library.settings.reverseModel = reverseModel.value
-  lib.library.settings.availableReverseModels = [...availableReverseModels.value]
-  lib.persist()
+function connectionStatusMessage(result: CheckAiProviderConnectionResult) {
+  if (result.ok) return '连接成功'
+
+  return (
+    {
+      PROVIDER_CREDENTIALS_REQUIRED: '请先保存 API Key',
+      INVALID_PROVIDER_URL: 'Provider 地址无效',
+      PROVIDER_TIMEOUT: '连接超时，请稍后重试',
+      PROVIDER_HTTP_ERROR: '服务返回异常，请检查配置',
+    }[result.message] ?? '连接失败，请检查 Provider 设置'
+  )
+}
+
+function applyReverseImageProvider(provider: AiProvider) {
+  apiBaseUrl.value = provider.baseUrl
+  apiModelsUrl.value = provider.modelsUrl
+  apiChatCompletionsUrl.value = provider.chatCompletionsUrl
+  availableReverseModels.value = [...provider.availableModels]
+  reverseModel.value = provider.defaultModel ?? provider.probedModel ?? pickPreferredModel(provider.availableModels)
+}
+
+async function loadReverseImageProvider() {
+  try {
+    await providers.load('reverse-image')
+    const provider = providers.byId('reverse-image')
+    if (provider) applyReverseImageProvider(provider)
+  } catch {
+    apiStatus.value = '读取 API 设置失败'
+  }
+}
+
+async function saveApiSettings() {
+  try {
+    const existing = providers.byId('reverse-image')
+    if (!existing) {
+      apiStatus.value = '未找到图片反推服务'
+      return
+    }
+
+    const saved = await providers.save({
+      provider: {
+        id: existing.id,
+        kind: existing.kind,
+        displayName: existing.displayName,
+        baseUrl: apiBaseUrl.value.trim(),
+        modelsUrl: apiModelsUrl.value.trim(),
+        chatCompletionsUrl: apiChatCompletionsUrl.value.trim(),
+        defaultModel: reverseModel.value || null,
+        confirmCrossOrigin: false,
+      },
+      apiKey: apiKey.value,
+    })
+    applyReverseImageProvider(saved)
+    apiStatus.value = '已保存'
+  } catch {
+    apiStatus.value = '保存失败，请检查地址和权限'
+  } finally {
+    apiKey.value = ''
+  }
 }
 
 async function refreshAutostart() {
@@ -111,20 +163,14 @@ async function onCheckApiConnection() {
   checkingApi.value = true
   apiStatus.value = ''
   try {
-    const result = await checkApiConnection({
-      baseUrl: apiBaseUrl.value.trim(),
-      apiKey: apiKey.value.trim(),
-    })
-    const models = result.models.length ? result.models : DEFAULT_REVERSE_MODELS
-    availableReverseModels.value = models
-    reverseModel.value = pickPreferredModel(models)
-    apiStatus.value = result.message || (result.ok ? '连接成功' : '连接失败')
-    saveApiSettings()
+    const result = await checkAiProviderConnection('reverse-image')
+    if (result.models.length) {
+      availableReverseModels.value = result.models
+      reverseModel.value = pickPreferredModel(result.models)
+    }
+    apiStatus.value = connectionStatusMessage(result)
   } catch {
-    availableReverseModels.value = DEFAULT_REVERSE_MODELS
-    reverseModel.value = pickPreferredModel(DEFAULT_REVERSE_MODELS)
-    apiStatus.value = '连接失败，已保留默认模型'
-    saveApiSettings()
+    apiStatus.value = '连接失败，请检查 Provider 设置'
   } finally {
     checkingApi.value = false
   }
@@ -356,12 +402,28 @@ async function onDownloadUpdate() {
               >
             </label>
             <label>
+              Models URL
+              <input
+                v-model="apiModelsUrl"
+                class="api-models-url-input"
+                placeholder="https://ai.leihuo.netease.com/v1/models"
+              >
+            </label>
+            <label>
+              Chat Completions URL
+              <input
+                v-model="apiChatCompletionsUrl"
+                class="api-chat-completions-url-input"
+                placeholder="https://ai.leihuo.netease.com/v1/chat/completions"
+              >
+            </label>
+            <label>
               API Key
               <input
                 v-model="apiKey"
                 class="api-key-input"
                 type="password"
-                placeholder="请输入 API Key"
+                placeholder="留空表示不修改"
               >
             </label>
             <div class="api-check-row">
@@ -393,6 +455,13 @@ async function onDownloadUpdate() {
                 </option>
               </select>
             </label>
+            <button
+              class="api-save-button"
+              type="button"
+              @click="saveApiSettings"
+            >
+              保存 API 设置
+            </button>
           </section>
 
           <section

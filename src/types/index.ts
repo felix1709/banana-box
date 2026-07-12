@@ -1,6 +1,16 @@
 // src/types/index.ts
 // 核心数据类型，与 Rust 端 library.rs 的 struct 对齐（serde camelCase）
 
+export type {
+  AiProvider,
+  CheckAiProviderConnectionResult,
+  ProviderKind,
+  ReverseImagePromptInput,
+  ReverseImagePromptResult,
+  SaveAiProviderInput,
+  StructuredMode,
+} from './providers'
+
 export interface Category {
   id: string
   name: string
@@ -24,10 +34,6 @@ export interface Prompt {
 export interface Settings {
   hotkey: string
   theme: 'auto' | 'light' | 'dark'
-  apiBaseUrl: string
-  apiKey: string
-  reverseModel: string
-  availableReverseModels: string[]
 }
 
 export interface Library {
