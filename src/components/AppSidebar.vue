@@ -8,6 +8,7 @@ const tools: { id: ActiveTool; label: string }[] = [
   { id: 'prompts', label: '提示词库' },
   { id: 'reverse-image', label: '反推图片' },
   { id: 'compression', label: '快速压缩' },
+  { id: 'projects', label: '项目管理' },
 ]
 </script>
 

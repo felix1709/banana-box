@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useLibraryStore } from '@/stores/library'
+import { useProjectsStore } from '@/stores/projects'
 import { useUiStore } from '@/stores/ui'
 import { readImageBytes } from '@/lib/ipc'
 import SearchBar from '@/components/SearchBar.vue'
@@ -14,8 +15,11 @@ import SettingsModal from '@/components/SettingsModal.vue'
 import ReverseImagePanel from '@/components/ReverseImagePanel.vue'
 import FastCompressionPanel from '@/components/FastCompressionPanel.vue'
 import FloatingActionDialog from '@/components/FloatingActionDialog.vue'
+import ProjectBoardPage from '@/components/projects/ProjectBoardPage.vue'
+import ProjectEditor from '@/components/projects/ProjectEditor.vue'
 
 const lib = useLibraryStore()
+const projects = useProjectsStore()
 const ui = useUiStore()
 const previewUrl = ref('')
 const expandedPromptId = ref<string | null>(null)
@@ -112,7 +116,7 @@ function onSortEnd() {
 }
 
 onMounted(async () => {
-  await lib.load()
+  await Promise.all([lib.load(), projects.load()])
   ui.showPanel()
   window.addEventListener('mouseup', clearResizeActive)
   unlistenFloatingDrop = await listen('floating-file-dropped', (event) => {
@@ -271,10 +275,12 @@ watchEffect(async () => {
           </TransitionGroup>
         </section>
         <ReverseImagePanel v-else-if="ui.activeTool === 'reverse-image'" />
-        <FastCompressionPanel v-else />
+        <FastCompressionPanel v-else-if="ui.activeTool === 'compression'" />
+        <ProjectBoardPage v-else-if="ui.activeTool === 'projects'" />
       </main>
     </div>
     <PromptEditor v-if="ui.editorOpen" />
+    <ProjectEditor v-if="projects.projectEditorOpen" />
     <SettingsModal v-if="ui.settingsOpen" />
     <FloatingActionDialog />
     <div

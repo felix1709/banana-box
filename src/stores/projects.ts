@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import {
   STAGE_DEFINITIONS,
+  type CreateProjectInput,
   type Project,
   type ProjectFilter,
   type SaveProjectWithStagesInput,
@@ -9,6 +10,7 @@ import {
 } from '@/domain/production'
 import {
   archiveProject,
+  createProject,
   deleteProject,
   listProjects,
   saveProjectWithStages,
@@ -49,6 +51,7 @@ export const useProjectsStore = defineStore('projects', {
     loading: false,
     error: '' as string,
     editorProjectId: null as string | null,
+    projectEditorOpen: false,
   }),
 
   getters: {
@@ -108,6 +111,12 @@ export const useProjectsStore = defineStore('projects', {
       return project
     },
 
+    async create(input: CreateProjectInput) {
+      const project = await createProject(input)
+      this.replaceProject(project)
+      return project
+    },
+
     async setStage(input: SetProjectStageInput) {
       const project = await setProjectStage(input)
       this.replaceProject(project)
@@ -131,6 +140,16 @@ export const useProjectsStore = defineStore('projects', {
       if (index === -1) this.projects.push(project)
       else this.projects.splice(index, 1, project)
       this.projects = sortProjects(this.projects)
+    },
+
+    openEditor(projectId: string | null) {
+      this.editorProjectId = projectId
+      this.projectEditorOpen = true
+    },
+
+    closeEditor() {
+      this.projectEditorOpen = false
+      this.editorProjectId = null
     },
   },
 })

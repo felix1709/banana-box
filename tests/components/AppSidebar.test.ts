@@ -23,6 +23,9 @@ describe('AppSidebar', () => {
 
     await wrapper.find('[data-tool="compression"]').trigger('click')
     expect(ui.activeTool).toBe('compression')
+
+    await wrapper.find('[data-tool="projects"]').trigger('click')
+    expect(ui.activeTool).toBe('projects')
   })
 
   it('shows prompt categories under the prompt library tool only when prompts are active', async () => {
