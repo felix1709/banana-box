@@ -7,6 +7,7 @@ mod fs_atomic;
 mod legacy_import;
 mod library;
 mod migration;
+mod projects;
 mod provider_http;
 mod providers;
 mod safe_archive;
@@ -165,6 +166,13 @@ pub fn run() {
             commands::import_image_from_path,
             commands::compress_media,
             commands::suggest_compressed_output_path,
+            projects::list_projects,
+            projects::create_project,
+            projects::update_project,
+            projects::save_project_with_stages,
+            projects::set_project_stage,
+            projects::archive_project,
+            projects::delete_project,
             begin_main_window_drag,
             begin_main_window_resize,
             set_main_window_pinned,
