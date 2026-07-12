@@ -1,0 +1,6 @@
+{
+  "build": {
+    "beforeDevCommand": "pnpm exec vite --host 127.0.0.1 --port 1423",
+    "devUrl": "http://127.0.0.1:1423"
+  }
+}

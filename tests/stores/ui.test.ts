@@ -17,6 +17,9 @@ describe('ui store', () => {
 
     ui.setActiveTool('compression')
     expect(ui.activeTool).toBe('compression')
+
+    ui.setActiveTool('daily-tasks')
+    expect(ui.activeTool).toBe('daily-tasks')
   })
 
   it('opens the prompt editor with optional prefilled content', () => {

@@ -3,7 +3,10 @@ import { onMounted, onUnmounted, ref, watchEffect } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { LogicalSize } from '@tauri-apps/api/dpi'
+import { Maximize2, Minimize2, RotateCcw } from '@lucide/vue'
 import { useLibraryStore } from '@/stores/library'
+import { useProjectsStore } from '@/stores/projects'
 import { useUiStore } from '@/stores/ui'
 import { readImageBytes } from '@/lib/ipc'
 import SearchBar from '@/components/SearchBar.vue'
@@ -14,14 +17,20 @@ import SettingsModal from '@/components/SettingsModal.vue'
 import ReverseImagePanel from '@/components/ReverseImagePanel.vue'
 import FastCompressionPanel from '@/components/FastCompressionPanel.vue'
 import FloatingActionDialog from '@/components/FloatingActionDialog.vue'
+import ProjectBoardPage from '@/components/projects/ProjectBoardPage.vue'
+import ProjectEditor from '@/components/projects/ProjectEditor.vue'
+import DailyTasksPage from '@/components/daily/DailyTasksPage.vue'
+import StoryboardPage from '@/components/storyboard/StoryboardPage.vue'
 
 const lib = useLibraryStore()
+const projects = useProjectsStore()
 const ui = useUiStore()
 const previewUrl = ref('')
 const expandedPromptId = ref<string | null>(null)
 const sortingPromptId = ref<string | null>(null)
 const windowDragActive = ref(false)
 const mainWindowPinned = ref(false)
+const fullscreen = ref(false)
 let unlistenFloatingDrop: UnlistenFn | null = null
 
 type ResizeDirection =
@@ -97,6 +106,51 @@ async function toggleMainWindowPinned() {
   }
 }
 
+async function setBrowserFullscreen(enabled: boolean) {
+  if (enabled) {
+    await document.documentElement.requestFullscreen()
+    return
+  }
+
+  if (document.fullscreenElement) {
+    await document.exitFullscreen()
+  }
+}
+
+async function toggleFullscreen() {
+  const window = getCurrentWindow()
+  const nextFullscreen = !fullscreen.value
+  try {
+    await window.setFullscreen(nextFullscreen)
+    fullscreen.value = nextFullscreen
+  } catch {
+    try {
+      await setBrowserFullscreen(nextFullscreen)
+      fullscreen.value = nextFullscreen
+    } catch {
+      fullscreen.value = await window.isFullscreen().catch(() => false)
+      ui.showToast('无法切换全屏')
+    }
+  }
+}
+
+async function restoreWindowSize() {
+  const window = getCurrentWindow()
+  try {
+    await window.setFullscreen(false)
+    fullscreen.value = false
+    await window.setSize(new LogicalSize(720, 520))
+    await window.center()
+  } catch {
+    try {
+      await setBrowserFullscreen(false)
+      fullscreen.value = false
+    } catch {
+      ui.showToast('无法恢复窗口大小')
+    }
+  }
+}
+
 function onSortStart(id: string) {
   sortingPromptId.value = id
   expandedPromptId.value = null
@@ -112,7 +166,8 @@ function onSortEnd() {
 }
 
 onMounted(async () => {
-  await lib.load()
+  await Promise.all([lib.load(), projects.load()])
+  fullscreen.value = await getCurrentWindow().isFullscreen().catch(() => false)
   ui.showPanel()
   window.addEventListener('mouseup', clearResizeActive)
   unlistenFloatingDrop = await listen('floating-file-dropped', (event) => {
@@ -219,6 +274,31 @@ watchEffect(async () => {
         设置
       </button>
       <button
+        class="window-command"
+        type="button"
+        :title="fullscreen ? '退出全屏' : '全屏显示'"
+        :aria-label="fullscreen ? '退出全屏' : '全屏显示'"
+        @click="toggleFullscreen"
+      >
+        <Minimize2
+          v-if="fullscreen"
+          :size="16"
+        />
+        <Maximize2
+          v-else
+          :size="16"
+        />
+      </button>
+      <button
+        class="window-command"
+        type="button"
+        title="恢复默认窗口大小"
+        aria-label="恢复默认窗口大小"
+        @click="restoreWindowSize"
+      >
+        <RotateCcw :size="16" />
+      </button>
+      <button
         v-if="false"
         class="btn primary"
         @click="ui.openEditor(null)"
@@ -271,10 +351,14 @@ watchEffect(async () => {
           </TransitionGroup>
         </section>
         <ReverseImagePanel v-else-if="ui.activeTool === 'reverse-image'" />
-        <FastCompressionPanel v-else />
+        <FastCompressionPanel v-else-if="ui.activeTool === 'compression'" />
+        <ProjectBoardPage v-else-if="ui.activeTool === 'projects'" />
+        <DailyTasksPage v-else-if="ui.activeTool === 'daily-tasks'" />
+        <StoryboardPage v-else-if="ui.activeTool === 'storyboard'" />
       </main>
     </div>
     <PromptEditor v-if="ui.editorOpen" />
+    <ProjectEditor v-if="projects.projectEditorOpen" />
     <SettingsModal v-if="ui.settingsOpen" />
     <FloatingActionDialog />
     <div
@@ -588,6 +672,13 @@ watchEffect(async () => {
 }
 .btn.primary {
   font-weight: bold;
+}
+.window-command {
+  display: grid;
+  width: 28px;
+  min-height: 28px;
+  place-items: center;
+  padding: 0;
 }
 .toast {
   position: fixed;

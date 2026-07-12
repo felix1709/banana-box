@@ -3,7 +3,7 @@
 // 命令在 src-tauri/src/commands.rs 实现。
 
 import { invoke } from '@tauri-apps/api/core'
-import { save, open } from '@tauri-apps/plugin-dialog'
+import { save } from '@tauri-apps/plugin-dialog'
 import type { Library } from '@/types'
 
 export interface ImportFile {
@@ -17,28 +17,6 @@ export interface UpdateCheckResult {
   updateAvailable: boolean
   releaseUrl: string
   downloadUrl: string
-}
-
-export interface CheckApiConnectionInput {
-  baseUrl: string
-  apiKey: string
-}
-
-export interface CheckApiConnectionResult {
-  ok: boolean
-  message: string
-  models: string[]
-}
-
-export interface ReverseImagePromptInput {
-  baseUrl: string
-  apiKey: string
-  model: string
-  imagePath: string
-}
-
-export interface ReverseImagePromptResult {
-  prompt: string
 }
 
 export interface ImportImageFromPathInput {
@@ -99,15 +77,6 @@ export async function exportLibrary(): Promise<void> {
   await invoke('export_library', { dest })
 }
 
-export async function importLibrary(): Promise<Library | null> {
-  const picked = await open({
-    filters: [{ name: 'zip', extensions: ['zip'] }],
-    multiple: false,
-  })
-  if (!picked || Array.isArray(picked)) return null
-  return await invoke<Library>('import_library', { zipPath: picked })
-}
-
 // 批量导入：读目录下所有 .md/.txt
 export async function readImportDir(dir: string): Promise<ImportFile[]> {
   return await invoke<ImportFile[]>('read_import_dir', { dir })
@@ -120,18 +89,6 @@ export async function downloadImage(url: string): Promise<string> {
 
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
   return await invoke<UpdateCheckResult>('check_for_update')
-}
-
-export async function checkApiConnection(
-  input: CheckApiConnectionInput,
-): Promise<CheckApiConnectionResult> {
-  return await invoke<CheckApiConnectionResult>('check_api_connection', { input })
-}
-
-export async function reverseImagePrompt(
-  input: ReverseImagePromptInput,
-): Promise<ReverseImagePromptResult> {
-  return await invoke<ReverseImagePromptResult>('reverse_image_prompt', { input })
 }
 
 export async function importImageFromPath(input: ImportImageFromPathInput): Promise<string> {

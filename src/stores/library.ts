@@ -7,25 +7,11 @@ import type { Library, Prompt, Category } from '@/types'
 import * as ipc from '@/lib/ipc'
 
 export const FAVORITES_CATEGORY_ID = '__favorites__'
-export const DEFAULT_API_BASE_URL = 'https://ai.leihuo.netease.com'
-export const DEFAULT_REVERSE_MODEL = 'doubao-seed-1-6-vision-250815'
-export const DEFAULT_REVERSE_MODELS = [
-  'doubao-seed-1-6-vision-250815',
-  'gpt-5.4-mini',
-  'qwen3.5-omni-plus',
-  'qwen3-vl-plus',
-]
 
 function normalizeSettings(settings: Partial<Library['settings']>): Library['settings'] {
   return {
     hotkey: settings.hotkey ?? 'Ctrl+Shift+B',
     theme: settings.theme ?? 'auto',
-    apiBaseUrl: settings.apiBaseUrl ?? DEFAULT_API_BASE_URL,
-    apiKey: settings.apiKey ?? '',
-    reverseModel: settings.reverseModel ?? DEFAULT_REVERSE_MODEL,
-    availableReverseModels: settings.availableReverseModels?.length
-      ? settings.availableReverseModels
-      : DEFAULT_REVERSE_MODELS,
   }
 }
 

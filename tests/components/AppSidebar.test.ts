@@ -23,6 +23,9 @@ describe('AppSidebar', () => {
 
     await wrapper.find('[data-tool="compression"]').trigger('click')
     expect(ui.activeTool).toBe('compression')
+
+    await wrapper.find('[data-tool="projects"]').trigger('click')
+    expect(ui.activeTool).toBe('projects')
   })
 
   it('shows prompt categories under the prompt library tool only when prompts are active', async () => {
@@ -34,10 +37,6 @@ describe('AppSidebar', () => {
       settings: {
         hotkey: 'Ctrl+Shift+B',
         theme: 'auto',
-        apiBaseUrl: 'https://ai.leihuo.netease.com',
-        apiKey: '',
-        reverseModel: 'doubao-seed-1-6-vision-250815',
-        availableReverseModels: ['doubao-seed-1-6-vision-250815'],
       },
     })
     const wrapper = mount(AppSidebar)
@@ -51,7 +50,26 @@ describe('AppSidebar', () => {
     expect(wrapper.find('.sidebar-category-list').exists()).toBe(false)
   })
 
-  it('puts a red plus new prompt action next to the prompt library tool', async () => {
+  it('switches to the daily task tool', async () => {
+    const wrapper = mount(AppSidebar)
+    const ui = useUiStore()
+
+    const dailyTasksButton = wrapper.get('[data-tool="daily-tasks"]')
+    await dailyTasksButton.trigger('click')
+
+    expect(ui.activeTool).toBe('daily-tasks')
+  })
+
+  it('switches to the storyboard tool', async () => {
+    const wrapper = mount(AppSidebar)
+    const ui = useUiStore()
+
+    await wrapper.get('[data-tool="storyboard"]').trigger('click')
+
+    expect(ui.activeTool).toBe('storyboard')
+  })
+
+  it('puts a compact icon-only prompt action next to the prompt library tool', async () => {
     const wrapper = mount(AppSidebar)
     const ui = useUiStore()
 
@@ -59,7 +77,10 @@ describe('AppSidebar', () => {
 
     expect(createButton.exists()).toBe(true)
     expect(createButton.classes()).toContain('create-prompt-button')
-    expect(createButton.text()).toBe('+')
+    expect(createButton.attributes('title')).toBe('新增提示词')
+    expect(createButton.attributes('aria-label')).toBe('新增提示词')
+    expect(createButton.find('svg.lucide-plus').exists()).toBe(true)
+    expect(createButton.text()).toBe('')
 
     await createButton.trigger('click')
 
@@ -88,10 +109,6 @@ describe('AppSidebar', () => {
       settings: {
         hotkey: 'Ctrl+Shift+B',
         theme: 'auto',
-        apiBaseUrl: 'https://ai.leihuo.netease.com',
-        apiKey: '',
-        reverseModel: 'doubao-seed-1-6-vision-250815',
-        availableReverseModels: ['doubao-seed-1-6-vision-250815'],
       },
     })
 

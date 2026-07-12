@@ -3,23 +3,25 @@ import { onMounted, ref } from 'vue'
 import { v4 as uuid } from 'uuid'
 import { open } from '@tauri-apps/plugin-dialog'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
-import {
-  DEFAULT_REVERSE_MODEL,
-  DEFAULT_REVERSE_MODELS,
-  useLibraryStore,
-} from '@/stores/library'
+import { useLibraryStore } from '@/stores/library'
+import { useProviderStore } from '@/stores/providers'
 import { useUiStore } from '@/stores/ui'
 import {
-  checkApiConnection,
   exportLibrary,
-  importLibrary,
   readImportDir,
   downloadImage,
 } from '@/lib/ipc'
+import { checkAiProviderConnection } from '@/lib/provider-ipc'
+import {
+  commitLegacyImport,
+  discardLegacyImportPreview,
+  inspectLegacyImport,
+} from '@/lib/backup-ipc'
 import { checkAppUpdate, installAppUpdate } from '@/lib/updater'
 import { parseFile } from '@/lib/parse'
-import type { Prompt } from '@/types'
+import type { AiProvider, CheckAiProviderConnectionResult, Prompt, ProviderKind } from '@/types'
 import type { AppUpdateResult } from '@/lib/updater'
+import type { LegacyImportPreview } from '@/lib/backup-ipc'
 
 type SettingsTab = 'features' | 'api' | 'hotkeys' | 'import-export'
 
@@ -31,16 +33,27 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 ]
 
 const lib = useLibraryStore()
+const providers = useProviderStore()
 const ui = useUiStore()
 const activeTab = ref<SettingsTab>('features')
 const hotkey = ref(lib.library.settings.hotkey)
-const apiBaseUrl = ref(lib.library.settings.apiBaseUrl)
-const apiKey = ref(lib.library.settings.apiKey)
-const reverseModel = ref(lib.library.settings.reverseModel)
-const availableReverseModels = ref([...lib.library.settings.availableReverseModels])
+const apiBaseUrl = ref('')
+const apiModelsUrl = ref('')
+const apiChatCompletionsUrl = ref('')
+const apiKey = ref('')
+const apiProviderId = ref<ProviderKind>('reverse-image')
+const apiModel = ref('')
+const availableModels = ref<string[]>([])
+const apiTemperature = ref(0.7)
+const apiContextWindowTokens = ref(16000)
 const checkingApi = ref(false)
 const apiStatus = ref('')
 const importing = ref(false)
+const inspectingLegacyImport = ref(false)
+const committingLegacyImport = ref(false)
+const legacyImportPreview = ref<LegacyImportPreview | null>(null)
+const overwriteLegacyCredential = ref(false)
+const legacyImportError = ref('')
 const checkingVersion = ref(false)
 const installingUpdate = ref(false)
 const updateResult = ref<AppUpdateResult | null>(null)
@@ -51,7 +64,7 @@ const savingAutostart = ref(false)
 const autostartError = ref('')
 
 onMounted(async () => {
-  await refreshAutostart()
+  await Promise.all([refreshAutostart(), loadApiProviders()])
 })
 
 function saveHotkey() {
@@ -61,17 +74,82 @@ function saveHotkey() {
 }
 
 function pickPreferredModel(models: string[]) {
-  if (models.includes(DEFAULT_REVERSE_MODEL)) return DEFAULT_REVERSE_MODEL
-  if (models.includes(reverseModel.value)) return reverseModel.value
-  return models[0] ?? DEFAULT_REVERSE_MODEL
+  if (models.includes(apiModel.value)) return apiModel.value
+  if (apiProviderId.value === 'storyboard' && models.includes('glm-5.2')) return 'glm-5.2'
+  return models[0] ?? ''
 }
 
-function saveApiSettings() {
-  lib.library.settings.apiBaseUrl = apiBaseUrl.value.trim()
-  lib.library.settings.apiKey = apiKey.value.trim()
-  lib.library.settings.reverseModel = reverseModel.value
-  lib.library.settings.availableReverseModels = [...availableReverseModels.value]
-  lib.persist()
+function connectionStatusMessage(result: CheckAiProviderConnectionResult) {
+  if (result.ok) return '连接成功'
+
+  return (
+    {
+      PROVIDER_CREDENTIALS_REQUIRED: '请先保存 API Key',
+      INVALID_PROVIDER_URL: 'Provider 地址无效',
+      PROVIDER_TIMEOUT: '连接超时，请稍后重试',
+      PROVIDER_HTTP_ERROR: '服务返回异常，请检查配置',
+    }[result.message] ?? '连接失败，请检查 Provider 设置'
+  )
+}
+
+function applyProvider(provider: AiProvider) {
+  apiProviderId.value = provider.kind
+  apiBaseUrl.value = provider.baseUrl
+  apiModelsUrl.value = provider.modelsUrl
+  apiChatCompletionsUrl.value = provider.chatCompletionsUrl
+  availableModels.value = [...provider.availableModels]
+  apiModel.value = provider.defaultModel ?? provider.probedModel ?? pickPreferredModel(provider.availableModels)
+  apiTemperature.value = provider.temperature ?? 0.7
+  apiContextWindowTokens.value = provider.contextWindowTokens ?? 16000
+}
+
+async function loadApiProviders() {
+  try {
+    await Promise.all([providers.load('reverse-image'), providers.load('storyboard')])
+    const provider = providers.byId('reverse-image')
+    if (provider) applyProvider(provider)
+  } catch {
+    apiStatus.value = '读取 API 设置失败'
+  }
+}
+
+function selectApiProvider() {
+  apiKey.value = ''
+  apiStatus.value = ''
+  const provider = providers.byId(apiProviderId.value)
+  if (provider) applyProvider(provider)
+}
+
+async function saveApiSettings() {
+  try {
+    const existing = providers.byId(apiProviderId.value)
+    if (!existing) {
+      apiStatus.value = '未找到 API 服务'
+      return
+    }
+
+    const saved = await providers.save({
+      provider: {
+        id: existing.id,
+        kind: existing.kind,
+        displayName: existing.displayName,
+        baseUrl: apiBaseUrl.value.trim(),
+        modelsUrl: apiModelsUrl.value.trim(),
+        chatCompletionsUrl: apiChatCompletionsUrl.value.trim(),
+        defaultModel: apiModel.value || null,
+        temperature: existing.kind === 'storyboard' ? Number(apiTemperature.value) : undefined,
+        contextWindowTokens: existing.kind === 'storyboard' ? Number(apiContextWindowTokens.value) : undefined,
+        confirmCrossOrigin: false,
+      },
+      apiKey: apiKey.value,
+    })
+    applyProvider(saved)
+    apiStatus.value = '已保存'
+  } catch {
+    apiStatus.value = '保存失败，请检查地址和权限'
+  } finally {
+    apiKey.value = ''
+  }
 }
 
 async function refreshAutostart() {
@@ -111,20 +189,14 @@ async function onCheckApiConnection() {
   checkingApi.value = true
   apiStatus.value = ''
   try {
-    const result = await checkApiConnection({
-      baseUrl: apiBaseUrl.value.trim(),
-      apiKey: apiKey.value.trim(),
-    })
-    const models = result.models.length ? result.models : DEFAULT_REVERSE_MODELS
-    availableReverseModels.value = models
-    reverseModel.value = pickPreferredModel(models)
-    apiStatus.value = result.message || (result.ok ? '连接成功' : '连接失败')
-    saveApiSettings()
+    const result = await checkAiProviderConnection(apiProviderId.value)
+    if (result.models.length) {
+      availableModels.value = result.models
+      apiModel.value = pickPreferredModel(result.models)
+    }
+    apiStatus.value = connectionStatusMessage(result)
   } catch {
-    availableReverseModels.value = DEFAULT_REVERSE_MODELS
-    reverseModel.value = pickPreferredModel(DEFAULT_REVERSE_MODELS)
-    apiStatus.value = '连接失败，已保留默认模型'
-    saveApiSettings()
+    apiStatus.value = '连接失败，请检查 Provider 设置'
   } finally {
     checkingApi.value = false
   }
@@ -135,11 +207,68 @@ async function onExport() {
   ui.showToast('已导出')
 }
 
-async function onImport() {
-  const imported = await importLibrary()
-  if (!imported) return
-  lib.hydrate(imported)
-  ui.showToast('已导入')
+async function discardLegacyImport() {
+  const token = legacyImportPreview.value?.token
+  legacyImportPreview.value = null
+  overwriteLegacyCredential.value = false
+  if (!token) return
+  try {
+    await discardLegacyImportPreview(token)
+  } catch {
+    // The backend also removes stale previews on the next app startup.
+  }
+}
+
+async function onInspectLegacyImport() {
+  const picked = await open({
+    filters: [{ name: 'legacy prompt library', extensions: ['json', 'zip'] }],
+    multiple: false,
+  })
+  if (!picked || Array.isArray(picked)) return
+
+  await discardLegacyImport()
+  inspectingLegacyImport.value = true
+  legacyImportError.value = ''
+  try {
+    legacyImportPreview.value = await inspectLegacyImport(picked)
+  } catch {
+    legacyImportError.value = '无法检查旧版提示词库'
+  } finally {
+    inspectingLegacyImport.value = false
+  }
+}
+
+async function onCommitLegacyImport() {
+  const preview = legacyImportPreview.value
+  if (!preview) return
+  if (preview.credentialConflict && !overwriteLegacyCredential.value) {
+    legacyImportError.value = '请确认是否覆盖已有 API Key'
+    return
+  }
+
+  committingLegacyImport.value = true
+  legacyImportError.value = ''
+  try {
+    const committed = await commitLegacyImport(preview.token, overwriteLegacyCredential.value)
+    lib.hydrate(committed.library)
+    try {
+      await loadApiProviders()
+    } catch {
+      // The library import itself has already committed at this point.
+    }
+    legacyImportPreview.value = null
+    overwriteLegacyCredential.value = false
+    ui.showToast(`已导入 ${committed.promptsImported} 条提示词`)
+  } catch {
+    legacyImportError.value = '导入失败，原有数据未被覆盖'
+  } finally {
+    committingLegacyImport.value = false
+  }
+}
+
+async function closeSettings() {
+  await discardLegacyImport()
+  ui.closeSettings()
 }
 
 async function onBatchImport() {
@@ -241,7 +370,7 @@ async function onDownloadUpdate() {
 <template>
   <div
     class="mask"
-    @click.self="ui.closeSettings()"
+    @click.self="closeSettings"
   >
     <div class="dialog scrollable-dialog">
       <div class="dialog-header">
@@ -249,7 +378,7 @@ async function onDownloadUpdate() {
         <button
           class="close-button"
           aria-label="关闭设置"
-          @click="ui.closeSettings()"
+          @click="closeSettings"
         >
           x
         </button>
@@ -345,8 +474,19 @@ async function onDownloadUpdate() {
           >
             <div class="api-header">
               <strong>API 调用</strong>
-              <p>用于反推图片提示词。</p>
+              <p>{{ apiProviderId === 'storyboard' ? '用于故事板 Agent 对话。' : '用于反推图片提示词。' }}</p>
             </div>
+            <label>
+              服务
+              <select
+                v-model="apiProviderId"
+                data-field="api-provider"
+                @change="selectApiProvider"
+              >
+                <option value="reverse-image">反推图片</option>
+                <option value="storyboard">故事板 Agent</option>
+              </select>
+            </label>
             <label>
               Base URL
               <input
@@ -356,14 +496,54 @@ async function onDownloadUpdate() {
               >
             </label>
             <label>
+              Models URL
+              <input
+                v-model="apiModelsUrl"
+                class="api-models-url-input"
+                placeholder="https://ai.leihuo.netease.com/v1/models"
+              >
+            </label>
+            <label>
+              Chat Completions URL
+              <input
+                v-model="apiChatCompletionsUrl"
+                class="api-chat-completions-url-input"
+                placeholder="https://ai.leihuo.netease.com/v1/chat/completions"
+              >
+            </label>
+            <label>
               API Key
               <input
                 v-model="apiKey"
                 class="api-key-input"
                 type="password"
-                placeholder="请输入 API Key"
+                placeholder="留空表示不修改"
               >
             </label>
+            <template v-if="apiProviderId === 'storyboard'">
+              <label>
+                温度
+                <input
+                  v-model.number="apiTemperature"
+                  data-field="api-temperature"
+                  max="2"
+                  min="0"
+                  step="0.1"
+                  type="number"
+                >
+              </label>
+              <label>
+                上下文长度
+                <input
+                  v-model.number="apiContextWindowTokens"
+                  data-field="api-context-window"
+                  max="128000"
+                  min="512"
+                  step="1"
+                  type="number"
+                >
+              </label>
+            </template>
             <div class="api-check-row">
               <button
                 class="api-check-button"
@@ -378,14 +558,14 @@ async function onDownloadUpdate() {
               >{{ apiStatus }}</span>
             </div>
             <label>
-              反推模型
+              {{ apiProviderId === 'storyboard' ? '故事板模型' : '反推模型' }}
               <select
-                v-model="reverseModel"
+                v-model="apiModel"
                 class="api-model-select"
                 @change="saveApiSettings"
               >
                 <option
-                  v-for="model in availableReverseModels"
+                  v-for="model in availableModels"
                   :key="model"
                   :value="model"
                 >
@@ -393,6 +573,13 @@ async function onDownloadUpdate() {
                 </option>
               </select>
             </label>
+            <button
+              class="api-save-button"
+              type="button"
+              @click="saveApiSettings"
+            >
+              保存 API 设置
+            </button>
           </section>
 
           <section
@@ -421,9 +608,59 @@ async function onDownloadUpdate() {
             <button @click="onExport">
               导出 (.zip)
             </button>
-            <button @click="onImport">
-              导入 (.zip)
+            <button
+              class="legacy-import-button"
+              data-action="inspect-legacy-import"
+              :disabled="inspectingLegacyImport || committingLegacyImport"
+              @click="onInspectLegacyImport"
+            >
+              {{ inspectingLegacyImport ? '检查中...' : '导入旧版提示词库' }}
             </button>
+            <div
+              v-if="legacyImportPreview || legacyImportError"
+              class="legacy-import-preview"
+            >
+              <p v-if="legacyImportPreview">
+                提示词 {{ legacyImportPreview.promptCount }} 条，分类 {{ legacyImportPreview.categoryCount }} 个
+              </p>
+              <label
+                v-if="legacyImportPreview?.credentialConflict"
+                class="legacy-overwrite"
+              >
+                <input
+                  v-model="overwriteLegacyCredential"
+                  type="checkbox"
+                >
+                覆盖已有 API Key
+              </label>
+              <p
+                v-if="legacyImportError"
+                class="status error"
+              >
+                {{ legacyImportError }}
+              </p>
+              <div
+                v-if="legacyImportPreview"
+                class="legacy-import-actions"
+              >
+                <button
+                  type="button"
+                  data-action="discard-legacy-import"
+                  :disabled="committingLegacyImport"
+                  @click="discardLegacyImport"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  data-action="commit-legacy-import"
+                  :disabled="committingLegacyImport"
+                  @click="onCommitLegacyImport"
+                >
+                  {{ committingLegacyImport ? '导入中...' : '确认导入' }}
+                </button>
+              </div>
+            </div>
           </section>
         </div>
       </div>
@@ -615,6 +852,32 @@ select {
   gap: 10px;
   align-items: flex-start;
   justify-content: space-between;
+}
+.legacy-import-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--bb-border);
+  background: var(--bb-surface-soft);
+}
+.legacy-import-preview p {
+  margin: 0;
+  color: var(--bb-text-muted);
+  font-size: 12px;
+}
+.legacy-overwrite,
+.legacy-import-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.legacy-overwrite {
+  color: var(--bb-text);
+  font-size: 12px;
+}
+.legacy-overwrite input {
+  width: auto;
 }
 .api-check-button,
 .version-check-button,

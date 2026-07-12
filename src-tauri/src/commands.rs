@@ -1,37 +1,73 @@
+pub(crate) mod backup_commands;
+pub(crate) mod provider_commands;
+pub(crate) mod startup_commands;
+
 // src-tauri/src/commands.rs
 // IPC 命令：前端通过 src/lib/ipc.ts 调用这些函数。
 // 所有系统操作（文件、剪贴板）在此封装，前端不直接碰系统。
 
-use crate::library::{self, Library};
-use base64::Engine;
+use crate::{
+    app_state::{AppServices, StartupGate},
+    library::{self, Library},
+};
 use chrono::{DateTime, Datelike, Local, Timelike};
 use image::codecs::jpeg::JpegEncoder;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::Manager;
+use tokio_util::sync::CancellationToken;
+use url::Url;
 
-fn data_dir(app: &tauri::AppHandle) -> PathBuf {
+const MAX_DOWNLOADED_IMAGE_BYTES: usize = 15 * 1024 * 1024;
+const MAX_UPDATE_RESPONSE_BYTES: usize = 1024 * 1024;
+const APP_SERVICES_UNAVAILABLE: &str = "STARTUP_NOT_READY";
+
+pub(crate) fn data_dir(app: &tauri::AppHandle) -> PathBuf {
     app.path().app_data_dir().expect("no app data dir")
 }
 
-#[tauri::command]
-pub fn load_library(app: tauri::AppHandle) -> Library {
-    library::load_library(&data_dir(&app))
+fn require_startup_ready(gate: &StartupGate) -> Result<(), String> {
+    gate.require_ready()
 }
 
 #[tauri::command]
-pub fn save_library(app: tauri::AppHandle, library: Library) -> Result<(), String> {
+pub fn load_library(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+) -> Result<Library, String> {
+    require_startup_ready(&gate)?;
+    Ok(library::load_library(&data_dir(&app)))
+}
+
+#[tauri::command]
+pub fn save_library(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    library: Library,
+) -> Result<(), String> {
+    require_startup_ready(&gate)?;
     library::save_library(&data_dir(&app), &library).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn copy_to_clipboard(app: tauri::AppHandle, text: String) -> Result<(), String> {
+pub fn copy_to_clipboard(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    text: String,
+) -> Result<(), String> {
+    require_startup_ready(&gate)?;
     use tauri_plugin_clipboard_manager::ClipboardExt;
     app.clipboard().write_text(text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn save_image(app: tauri::AppHandle, bytes: Vec<u8>, ext: String) -> Result<String, String> {
+pub fn save_image(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    bytes: Vec<u8>,
+    ext: String,
+) -> Result<String, String> {
+    require_startup_ready(&gate)?;
     let dir = data_dir(&app).join("images");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().simple().to_string();
@@ -42,7 +78,12 @@ pub fn save_image(app: tauri::AppHandle, bytes: Vec<u8>, ext: String) -> Result<
 }
 
 #[tauri::command]
-pub fn delete_image(app: tauri::AppHandle, path: String) -> Result<(), String> {
+pub fn delete_image(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    path: String,
+) -> Result<(), String> {
+    require_startup_ready(&gate)?;
     let full = data_dir(&app).join(&path);
     if full.exists() {
         std::fs::remove_file(&full).map_err(|e| e.to_string())?;
@@ -51,21 +92,25 @@ pub fn delete_image(app: tauri::AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn read_image_bytes(app: tauri::AppHandle, path: String) -> Result<Vec<u8>, String> {
+pub fn read_image_bytes(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    path: String,
+) -> Result<Vec<u8>, String> {
+    require_startup_ready(&gate)?;
     let full = data_dir(&app).join(&path);
     std::fs::read(&full).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn export_library(app: tauri::AppHandle, dest: String) -> Result<(), String> {
+pub fn export_library(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    dest: String,
+) -> Result<(), String> {
+    require_startup_ready(&gate)?;
     let zip_path = std::path::PathBuf::from(&dest);
     library::export_library(&data_dir(&app), &zip_path).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn import_library(app: tauri::AppHandle, zip_path: String) -> Result<Library, String> {
-    library::import_library(std::path::Path::new(&zip_path), &data_dir(&app))
-        .map_err(|e| e.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -100,36 +145,6 @@ struct GithubReleaseAsset {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CheckApiConnectionInput {
-    pub base_url: String,
-    pub api_key: String,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CheckApiConnectionResult {
-    pub ok: bool,
-    pub message: String,
-    pub models: Vec<String>,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReverseImagePromptInput {
-    pub base_url: String,
-    pub api_key: String,
-    pub model: String,
-    pub image_path: String,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReverseImagePromptResult {
-    pub prompt: String,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ImportImageFromPathInput {
     pub source_path: String,
 }
@@ -155,41 +170,21 @@ pub struct CompressMediaResult {
 }
 
 #[derive(serde::Deserialize)]
-struct OpenAiModelsResponse {
-    data: Vec<OpenAiModel>,
-}
-
-#[derive(serde::Deserialize)]
-struct OpenAiModel {
-    id: String,
-}
-
-#[derive(serde::Deserialize)]
-struct ChatCompletionResponse {
+pub(crate) struct ChatCompletionResponse {
     choices: Vec<ChatCompletionChoice>,
 }
 
 #[derive(serde::Deserialize)]
-struct ChatCompletionChoice {
+pub(crate) struct ChatCompletionChoice {
     message: ChatCompletionMessage,
 }
 
 #[derive(serde::Deserialize)]
-struct ChatCompletionMessage {
+pub(crate) struct ChatCompletionMessage {
     content: String,
 }
 
-fn openai_url(base_url: &str, path: &str) -> String {
-    let trimmed = base_url.trim().trim_end_matches('/');
-    let base = if trimmed.ends_with("/v1") {
-        trimmed.to_string()
-    } else {
-        format!("{}/v1", trimmed)
-    };
-    format!("{}/{}", base, path.trim_start_matches('/'))
-}
-
-fn reverse_image_prompt_instruction() -> &'static str {
+pub(crate) fn reverse_image_prompt_instruction() -> &'static str {
     r#"请根据这张图片反推出适合 AI 绘图或设计复现的中文提示词。请严格按下面十个维度输出结构化长模板，所有内容都围绕图片本身描述；无法从图片判断的项目写“未明显体现”。不要输出解释、寒暄、免责声明或模板外的额外内容。
 
 一、基础画面属性（生成的底层框架）
@@ -248,7 +243,7 @@ fn reverse_image_prompt_instruction() -> &'static str {
 - 需规避元素：文字、水印、logo、多余杂物、不符合场景的违和元素"#
 }
 
-fn mime_from_path(path: &str) -> &'static str {
+pub(crate) fn mime_from_path(path: &str) -> &'static str {
     match path
         .rsplit('.')
         .next()
@@ -263,7 +258,7 @@ fn mime_from_path(path: &str) -> &'static str {
     }
 }
 
-fn parse_chat_completion_prompt(body: &str) -> Result<String, String> {
+pub(crate) fn parse_chat_completion_prompt(body: &str) -> Result<String, String> {
     let parsed: ChatCompletionResponse = serde_json::from_str(body).map_err(|e| e.to_string())?;
     parsed
         .choices
@@ -428,7 +423,11 @@ fn compressed_output_path(source: &Path, ext: &str, suffix: &str) -> Result<Path
 
 // 读取目录下所有 .md/.txt 文件内容，供前端解析
 #[tauri::command]
-pub fn read_import_dir(dir: String) -> Result<Vec<ImportFile>, String> {
+pub fn read_import_dir(
+    gate: tauri::State<StartupGate>,
+    dir: String,
+) -> Result<Vec<ImportFile>, String> {
+    require_startup_ready(&gate)?;
     let mut files = Vec::new();
     let read = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
     for entry in read {
@@ -447,19 +446,28 @@ pub fn read_import_dir(dir: String) -> Result<Vec<ImportFile>, String> {
 
 // 下载远程图片到 images/，返回相对路径
 #[tauri::command]
-pub fn download_image(app: tauri::AppHandle, url: String) -> Result<String, String> {
-    use std::io::Read;
-    let resp = ureq::get(&url).call().map_err(|e| e.to_string())?;
-    let mut bytes = Vec::new();
-    resp.into_reader()
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
+pub async fn download_image(
+    app: tauri::AppHandle,
+    gate: tauri::State<'_, StartupGate>,
+    url: String,
+) -> Result<String, String> {
+    require_startup_ready(&gate)?;
+    let services = app
+        .try_state::<AppServices>()
+        .ok_or_else(|| APP_SERVICES_UNAVAILABLE.to_string())?;
+    let request_url = Url::parse(&url).map_err(|_| "INVALID_DOWNLOAD_URL")?;
+    let bytes = services
+        .provider_http
+        .get_public_bounded(
+            request_url.clone(),
+            MAX_DOWNLOADED_IMAGE_BYTES,
+            CancellationToken::new(),
+        )
+        .await?;
     let dir = data_dir(&app).join("images");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let ext = url
-        .split('?')
-        .next()
-        .unwrap_or(&url)
+    let ext = request_url
+        .path()
         .rsplit('.')
         .next()
         .filter(|s| ["png", "jpg", "jpeg", "webp", "gif"].contains(s))
@@ -472,13 +480,27 @@ pub fn download_image(app: tauri::AppHandle, url: String) -> Result<String, Stri
 }
 
 #[tauri::command]
-pub fn check_for_update() -> Result<UpdateCheckResult, String> {
+pub async fn check_for_update(
+    app: tauri::AppHandle,
+    gate: tauri::State<'_, StartupGate>,
+) -> Result<UpdateCheckResult, String> {
+    require_startup_ready(&gate)?;
+    let services = app
+        .try_state::<AppServices>()
+        .ok_or_else(|| APP_SERVICES_UNAVAILABLE.to_string())?;
     let current_version = env!("CARGO_PKG_VERSION").to_string();
-    let resp = ureq::get("https://api.github.com/repos/felix1709/banana-box/releases/latest")
-        .set("User-Agent", "banana-box")
-        .call()
-        .map_err(|e| e.to_string())?;
-    let body = resp.into_string().map_err(|e| e.to_string())?;
+    let release_url =
+        Url::parse("https://api.github.com/repos/felix1709/banana-box/releases/latest")
+            .map_err(|_| "INVALID_UPDATE_URL")?;
+    let body = services
+        .provider_http
+        .get_public_bounded(
+            release_url,
+            MAX_UPDATE_RESPONSE_BYTES,
+            CancellationToken::new(),
+        )
+        .await?;
+    let body = String::from_utf8(body).map_err(|_| "INVALID_UPDATE_RESPONSE")?;
     let release: GithubRelease = serde_json::from_str(&body).map_err(|e| e.to_string())?;
     let latest_version = release
         .tag_name
@@ -497,113 +519,12 @@ pub fn check_for_update() -> Result<UpdateCheckResult, String> {
 }
 
 #[tauri::command]
-pub fn check_api_connection(input: CheckApiConnectionInput) -> CheckApiConnectionResult {
-    if input.base_url.trim().is_empty() {
-        return CheckApiConnectionResult {
-            ok: false,
-            message: "Base URL 不能为空".to_string(),
-            models: vec![],
-        };
-    }
-    if input.api_key.trim().is_empty() {
-        return CheckApiConnectionResult {
-            ok: false,
-            message: "API Key 不能为空".to_string(),
-            models: vec![],
-        };
-    }
-
-    let url = openai_url(&input.base_url, "models");
-    let response = ureq::get(&url)
-        .set("Authorization", &format!("Bearer {}", input.api_key.trim()))
-        .set("User-Agent", "banana-box")
-        .call();
-
-    match response {
-        Ok(resp) => match resp.into_string() {
-            Ok(body) => {
-                let models = serde_json::from_str::<OpenAiModelsResponse>(&body)
-                    .map(|parsed| parsed.data.into_iter().map(|model| model.id).collect())
-                    .unwrap_or_else(|_| vec![]);
-                CheckApiConnectionResult {
-                    ok: true,
-                    message: "连接成功".to_string(),
-                    models,
-                }
-            }
-            Err(err) => CheckApiConnectionResult {
-                ok: false,
-                message: format!("读取响应失败：{}", err),
-                models: vec![],
-            },
-        },
-        Err(err) => CheckApiConnectionResult {
-            ok: false,
-            message: format!("连接失败：{}", err),
-            models: vec![],
-        },
-    }
-}
-
-#[tauri::command]
-pub fn reverse_image_prompt(
-    app: tauri::AppHandle,
-    input: ReverseImagePromptInput,
-) -> Result<ReverseImagePromptResult, String> {
-    if input.api_key.trim().is_empty() {
-        return Err("API Key 不能为空".to_string());
-    }
-    if input.model.trim().is_empty() {
-        return Err("反推模型不能为空".to_string());
-    }
-
-    let full = data_dir(&app).join(&input.image_path);
-    let bytes = std::fs::read(&full).map_err(|e| e.to_string())?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    let data_url = format!(
-        "data:{};base64,{}",
-        mime_from_path(&input.image_path),
-        encoded
-    );
-    let request = serde_json::json!({
-        "model": input.model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": reverse_image_prompt_instruction()
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": data_url
-                        }
-                    }
-                ]
-            }
-        ]
-    });
-
-    let url = openai_url(&input.base_url, "chat/completions");
-    let resp = ureq::post(&url)
-        .set("Authorization", &format!("Bearer {}", input.api_key.trim()))
-        .set("User-Agent", "banana-box")
-        .set("Content-Type", "application/json")
-        .send_string(&request.to_string())
-        .map_err(|e| e.to_string())?;
-    let body = resp.into_string().map_err(|e| e.to_string())?;
-    Ok(ReverseImagePromptResult {
-        prompt: parse_chat_completion_prompt(&body)?,
-    })
-}
-
-#[tauri::command]
 pub fn import_image_from_path(
     app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
     input: ImportImageFromPathInput,
 ) -> Result<String, String> {
+    require_startup_ready(&gate)?;
     let source = PathBuf::from(&input.source_path);
     if !source.exists() {
         return Err("图片文件不存在".to_string());
@@ -623,7 +544,11 @@ pub fn import_image_from_path(
 }
 
 #[tauri::command]
-pub fn compress_media(input: CompressMediaInput) -> Result<CompressMediaResult, String> {
+pub fn compress_media(
+    gate: tauri::State<StartupGate>,
+    input: CompressMediaInput,
+) -> Result<CompressMediaResult, String> {
+    require_startup_ready(&gate)?;
     if input.target_mb <= 0.0 {
         return Err("目标大小必须大于 0 MB".to_string());
     }
@@ -645,8 +570,10 @@ pub fn compress_media(input: CompressMediaInput) -> Result<CompressMediaResult, 
 
 #[tauri::command]
 pub fn suggest_compressed_output_path(
+    gate: tauri::State<StartupGate>,
     input: SuggestCompressedOutputPathInput,
 ) -> Result<String, String> {
+    require_startup_ready(&gate)?;
     let source = PathBuf::from(&input.source_path);
     let ext = compressed_output_ext(&source);
     let output = compressed_output_path(&source, ext, &timestamp_suffix_now())?;
@@ -686,18 +613,6 @@ fn version_parts(version: &str) -> Vec<u32> {
 mod tests {
     use super::*;
     use chrono::TimeZone;
-
-    #[test]
-    fn openai_url_join_adds_v1_path_once() {
-        assert_eq!(
-            openai_url("https://ai.leihuo.netease.com", "models"),
-            "https://ai.leihuo.netease.com/v1/models"
-        );
-        assert_eq!(
-            openai_url("https://ai.leihuo.netease.com/v1/", "chat/completions"),
-            "https://ai.leihuo.netease.com/v1/chat/completions"
-        );
-    }
 
     #[test]
     fn parse_chat_completion_prompt_reads_first_text_content() {
@@ -789,6 +704,19 @@ mod tests {
         assert_eq!(
             release_download_url(&release),
             "https://github.com/felix1709/banana-box/releases/download/v0.1.2/banana-box_0.1.2_x64-setup.exe"
+        );
+    }
+
+    #[test]
+    fn legacy_business_command_gate_rejects_recovery_before_work_starts() {
+        let gate = crate::app_state::StartupGate::new(crate::app_state::StartupStatus::Recovery {
+            message: "Recovery required".into(),
+            backup_paths: vec![],
+        });
+
+        assert_eq!(
+            require_startup_ready(&gate).unwrap_err(),
+            "STARTUP_NOT_READY"
         );
     }
 }

@@ -19,15 +19,6 @@ function seed(): Library {
     settings: {
       hotkey: 'Ctrl+Shift+B',
       theme: 'auto',
-      apiBaseUrl: 'https://ai.leihuo.netease.com',
-      apiKey: '',
-      reverseModel: 'doubao-seed-1-6-vision-250815',
-      availableReverseModels: [
-        'doubao-seed-1-6-vision-250815',
-        'gpt-5.4-mini',
-        'qwen3.5-omni-plus',
-        'qwen3-vl-plus',
-      ],
     },
   }
 }

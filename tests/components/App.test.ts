@@ -14,6 +14,10 @@ const coreApi = vi.hoisted(() => ({
 }))
 const windowApi = vi.hoisted(() => ({
   startResizeDragging: vi.fn().mockResolvedValue(undefined),
+  setFullscreen: vi.fn().mockResolvedValue(undefined),
+  isFullscreen: vi.fn().mockResolvedValue(false),
+  setSize: vi.fn().mockResolvedValue(undefined),
+  center: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -39,15 +43,6 @@ vi.mock('@/lib/ipc', () => ({
     settings: {
       hotkey: 'Ctrl+Shift+B',
       theme: 'auto',
-      apiBaseUrl: 'https://ai.leihuo.netease.com',
-      apiKey: '',
-      reverseModel: 'doubao-seed-1-6-vision-250815',
-      availableReverseModels: [
-        'doubao-seed-1-6-vision-250815',
-        'gpt-5.4-mini',
-        'qwen3.5-omni-plus',
-        'qwen3-vl-plus',
-      ],
     },
   }),
   saveLibrary: vi.fn().mockResolvedValue(undefined),
@@ -60,6 +55,7 @@ describe('App', () => {
     setActivePinia(createPinia())
     floatingDropHandler = null
     vi.clearAllMocks()
+    windowApi.isFullscreen.mockResolvedValue(false)
   })
 
   afterEach(() => {
@@ -121,6 +117,83 @@ describe('App', () => {
     expect(styleBlock).toContain('height: 100vh')
     expect(styleBlock).not.toContain('width: 720px')
     expect(styleBlock).not.toContain('height: 520px')
+  })
+
+  it('grants the window permissions required by fullscreen and restore-size controls', () => {
+    const capability = JSON.parse(
+      readFileSync(resolve(process.cwd(), 'src-tauri/capabilities/default.json'), 'utf8'),
+    ) as { permissions: string[] }
+
+    expect(capability.permissions).toEqual(
+      expect.arrayContaining([
+        'core:window:allow-set-fullscreen',
+        'core:window:allow-set-size',
+        'core:window:allow-center',
+      ]),
+    )
+  })
+
+  it('toggles the main window fullscreen state from the icon control', async () => {
+    const wrapper = mount(App)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    const fullscreenButton = wrapper.findAll('.window-command')[0]
+    await fullscreenButton.trigger('click')
+
+    expect(windowApi.setFullscreen).toHaveBeenCalledWith(true)
+    expect(fullscreenButton.attributes('aria-label')).toBe('退出全屏')
+  })
+
+  it('falls back to browser fullscreen when the Tauri window API is unavailable', async () => {
+    const originalRequestFullscreen = document.documentElement.requestFullscreen
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(document.documentElement, 'requestFullscreen', {
+      configurable: true,
+      value: requestFullscreen,
+    })
+    windowApi.setFullscreen.mockRejectedValueOnce(new Error('Tauri window API unavailable'))
+
+    const wrapper = mount(App)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.findAll('.window-command')[0].trigger('click')
+
+    expect(requestFullscreen).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document.documentElement, 'requestFullscreen', {
+      configurable: true,
+      value: originalRequestFullscreen,
+    })
+  })
+
+  it('exits browser fullscreen from the restore-size control when Tauri is unavailable', async () => {
+    const originalExitFullscreen = document.exitFullscreen
+    const originalFullscreenElement = Object.getOwnPropertyDescriptor(document, 'fullscreenElement')
+    const exitFullscreen = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      value: document.documentElement,
+    })
+    Object.defineProperty(document, 'exitFullscreen', {
+      configurable: true,
+      value: exitFullscreen,
+    })
+    windowApi.setFullscreen.mockRejectedValueOnce(new Error('Tauri window API unavailable'))
+
+    const wrapper = mount(App)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.findAll('.window-command')[1].trigger('click')
+
+    expect(exitFullscreen).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document, 'exitFullscreen', {
+      configurable: true,
+      value: originalExitFullscreen,
+    })
+    if (originalFullscreenElement) {
+      Object.defineProperty(document, 'fullscreenElement', originalFullscreenElement)
+    } else {
+      Reflect.deleteProperty(document, 'fullscreenElement')
+    }
   })
 
   it('does not start window dragging from topbar clicks or interactive controls', async () => {
