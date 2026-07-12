@@ -2,6 +2,7 @@ mod app_state;
 mod command_auth;
 mod commands;
 mod db;
+mod desktop_state;
 mod fs_atomic;
 mod legacy_import;
 mod library;
@@ -15,13 +16,21 @@ mod startup;
 use app_state::{
     AppOperationGate, AppServices, RestoreBlockerRegistry, StartupGate, StartupStatus,
 };
+use desktop_state::{
+    clamp_float_position, logical_to_physical, physical_to_saved, select_restore_monitor,
+    DesktopStateStore, LogicalPoint, MonitorWorkArea, PhysicalPoint, PhysicalRect,
+    FLOAT_WINDOW_LOGICAL_SIZE,
+};
 use legacy_import::BackupStagingCoordinator;
 use migration::{StartupCoordinator, StartupOutcome};
 use secrets::{CredentialMutationCoordinator, WindowsCredentialStore};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
 use std::time::{Duration, Instant};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Manager, WindowEvent};
+use tauri::{Manager, PhysicalPosition, WebviewWindow, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 struct MainWindowDragState {
@@ -30,6 +39,12 @@ struct MainWindowDragState {
 
 struct MainWindowPinState {
     pinned: Mutex<bool>,
+}
+
+struct FloatPositionState {
+    store: DesktopStateStore,
+    save_generation: AtomicU64,
+    monitor_signature: Mutex<Vec<String>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -95,6 +110,15 @@ pub fn run() {
                     let _ = window.hide();
                 }
             }
+
+            if window.label() == "floatbtn"
+                && matches!(
+                    event,
+                    WindowEvent::Moved(_) | WindowEvent::ScaleFactorChanged { .. }
+                )
+            {
+                schedule_float_position_save(window.app_handle());
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::startup_commands::get_startup_status,
@@ -151,7 +175,7 @@ fn initialize_startup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Er
 
     if let Some(services) = services {
         app.manage(services);
-        setup_ready_desktop_shell(app)?;
+        setup_ready_desktop_shell(app, &data_dir)?;
     }
 
     if show_main_window {
@@ -185,7 +209,13 @@ fn split_startup_outcome(outcome: StartupOutcome) -> (StartupGate, Option<AppSer
     }
 }
 
-fn setup_ready_desktop_shell(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+fn setup_ready_desktop_shell(
+    app: &tauri::App,
+    data_dir: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    app.state::<StartupGate>().require_ready()?;
+    restore_float_button(app, data_dir)?;
+
     let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyB);
     app.global_shortcut().register(shortcut)?;
 
@@ -215,7 +245,234 @@ fn setup_ready_desktop_shell(app: &tauri::App) -> Result<(), Box<dyn std::error:
         })
         .build(app)?;
 
+    start_monitor_topology_watcher(app.handle().clone());
+
     Ok(())
+}
+
+fn restore_float_button(
+    app: &tauri::App,
+    data_dir: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let window = app
+        .get_webview_window("floatbtn")
+        .ok_or("float button window not found")?;
+    let monitors = monitor_work_areas(&window)?;
+    let store = DesktopStateStore::new(data_dir.join("desktop-state.json"));
+    let saved = store.load()?;
+    let monitor = saved
+        .as_ref()
+        .map(|saved| select_restore_monitor(saved, &monitors))
+        .or_else(|| monitors.iter().find(|monitor| monitor.primary))
+        .or_else(|| monitors.first())
+        .ok_or("no monitor is available for the float button")?;
+    let window_size = logical_pixels(FLOAT_WINDOW_LOGICAL_SIZE, monitor.scale_factor);
+    let clamp_margin = logical_pixels(12.0, monitor.scale_factor);
+    let requested = saved.as_ref().map_or_else(
+        || PhysicalPoint {
+            x: monitor.bounds.x + monitor.bounds.width as i32
+                - window_size
+                - logical_pixels(16.0, monitor.scale_factor),
+            y: monitor.bounds.y + (monitor.bounds.height as i32 - window_size) / 2,
+        },
+        |saved| {
+            logical_to_physical(
+                LogicalPoint {
+                    x: saved.logical_x,
+                    y: saved.logical_y,
+                },
+                monitor.bounds,
+                monitor.scale_factor,
+            )
+        },
+    );
+    let restored = clamp_float_position(requested, monitor.bounds, window_size, clamp_margin);
+    window.set_position(PhysicalPosition::new(restored.x, restored.y))?;
+    store.save(&physical_to_saved(restored, monitor))?;
+
+    let signature = monitor_signature(&monitors);
+    app.manage(FloatPositionState {
+        store,
+        save_generation: AtomicU64::new(0),
+        monitor_signature: Mutex::new(signature),
+    });
+    window.show()?;
+    Ok(())
+}
+
+fn logical_pixels(value: f64, scale_factor: f64) -> i32 {
+    (value * scale_factor).round() as i32
+}
+
+fn monitor_work_areas(window: &WebviewWindow) -> Result<Vec<MonitorWorkArea>, String> {
+    let primary_id = window
+        .primary_monitor()
+        .map_err(|error| error.to_string())?
+        .as_ref()
+        .map(monitor_id);
+    window
+        .available_monitors()
+        .map_err(|error| error.to_string())?
+        .iter()
+        .map(|monitor| {
+            let work_area = monitor.work_area();
+            let id = monitor_id(monitor);
+            Ok(MonitorWorkArea {
+                primary: primary_id.as_ref().is_some_and(|primary| primary == &id),
+                id,
+                bounds: PhysicalRect {
+                    x: work_area.position.x,
+                    y: work_area.position.y,
+                    width: work_area.size.width,
+                    height: work_area.size.height,
+                },
+                scale_factor: monitor.scale_factor(),
+            })
+        })
+        .collect()
+}
+
+fn monitor_id(monitor: &tauri::Monitor) -> String {
+    monitor.name().cloned().unwrap_or_else(|| {
+        let position = monitor.position();
+        let size = monitor.size();
+        format!(
+            "{}:{}:{}:{}",
+            position.x, position.y, size.width, size.height
+        )
+    })
+}
+
+fn monitor_signature(monitors: &[MonitorWorkArea]) -> Vec<String> {
+    let mut signature: Vec<_> = monitors
+        .iter()
+        .map(|monitor| {
+            format!(
+                "{}:{}:{}:{}:{}:{}",
+                monitor.id,
+                monitor.bounds.x,
+                monitor.bounds.y,
+                monitor.bounds.width,
+                monitor.bounds.height,
+                monitor.scale_factor,
+            )
+        })
+        .collect();
+    signature.sort();
+    signature
+}
+
+fn schedule_float_position_save(app: &tauri::AppHandle) {
+    let app = app.clone();
+    let Some(state) = app.try_state::<FloatPositionState>() else {
+        return;
+    };
+    let generation = state.save_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    drop(state);
+
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(250));
+        let Some(state) = app.try_state::<FloatPositionState>() else {
+            return;
+        };
+        if state.save_generation.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        drop(state);
+        let _ = persist_float_position(&app);
+    });
+}
+
+fn persist_float_position(app: &tauri::AppHandle) -> Result<(), String> {
+    let state = app
+        .try_state::<FloatPositionState>()
+        .ok_or_else(|| "float position state is unavailable".to_string())?;
+    let window = app
+        .get_webview_window("floatbtn")
+        .ok_or_else(|| "float button window not found".to_string())?;
+    let monitors = monitor_work_areas(&window)?;
+    let current_id = window
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .as_ref()
+        .map(monitor_id);
+    let monitor = current_id
+        .as_ref()
+        .and_then(|id| monitors.iter().find(|monitor| monitor.id == *id))
+        .or_else(|| monitors.iter().find(|monitor| monitor.primary))
+        .or_else(|| monitors.first())
+        .ok_or_else(|| "no monitor is available for the float button".to_string())?;
+    let position = window.outer_position().map_err(|error| error.to_string())?;
+    state.store.save(&physical_to_saved(
+        PhysicalPoint {
+            x: position.x,
+            y: position.y,
+        },
+        monitor,
+    ))
+}
+
+fn normalize_float_position(app: &tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("floatbtn")
+        .ok_or_else(|| "float button window not found".to_string())?;
+    let monitors = monitor_work_areas(&window)?;
+    let current_id = window
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .as_ref()
+        .map(monitor_id);
+    let monitor = current_id
+        .as_ref()
+        .and_then(|id| monitors.iter().find(|monitor| monitor.id == *id))
+        .or_else(|| monitors.iter().find(|monitor| monitor.primary))
+        .or_else(|| monitors.first())
+        .ok_or_else(|| "no monitor is available for the float button".to_string())?;
+    let position = window.outer_position().map_err(|error| error.to_string())?;
+    let clamped = clamp_float_position(
+        PhysicalPoint {
+            x: position.x,
+            y: position.y,
+        },
+        monitor.bounds,
+        logical_pixels(FLOAT_WINDOW_LOGICAL_SIZE, monitor.scale_factor),
+        logical_pixels(12.0, monitor.scale_factor),
+    );
+    if clamped.x != position.x || clamped.y != position.y {
+        window
+            .set_position(PhysicalPosition::new(clamped.x, clamped.y))
+            .map_err(|error| error.to_string())?;
+    }
+    persist_float_position(app)
+}
+
+fn start_monitor_topology_watcher(app: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(5));
+        let Some(window) = app.get_webview_window("floatbtn") else {
+            continue;
+        };
+        let Ok(monitors) = monitor_work_areas(&window) else {
+            continue;
+        };
+        let signature = monitor_signature(&monitors);
+        let changed = app
+            .try_state::<FloatPositionState>()
+            .and_then(|state| {
+                state.monitor_signature.lock().ok().map(|mut previous| {
+                    if *previous == signature {
+                        false
+                    } else {
+                        *previous = signature;
+                        true
+                    }
+                })
+            })
+            .unwrap_or(false);
+        if changed {
+            let _ = normalize_float_position(&app);
+        }
+    });
 }
 
 #[tauri::command]

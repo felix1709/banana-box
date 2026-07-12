@@ -21,12 +21,23 @@ fn banana_sprite_has_twelve_square_frames_and_transparent_edges() {
     assert_eq!(approved_open.dimensions(), (FRAME_SIZE, FRAME_SIZE));
     assert!(sprite.color().has_alpha(), "sprite must preserve alpha");
 
-    let recorded_hash = fs::read_to_string(hash_path).expect("approved endpoint hash record must exist");
-    let actual_hash = format!("{:x}", Sha256::digest(fs::read(open_path).expect("endpoint must be readable")));
-    assert!(recorded_hash.starts_with(&actual_hash), "endpoint hash record must match the approved file");
+    let recorded_hash =
+        fs::read_to_string(hash_path).expect("approved endpoint hash record must exist");
+    let actual_hash = format!(
+        "{:x}",
+        Sha256::digest(fs::read(open_path).expect("endpoint must be readable"))
+    );
+    assert!(
+        recorded_hash.starts_with(&actual_hash),
+        "endpoint hash record must match the approved file"
+    );
 
     let frames: Vec<RgbaImage> = (0..FRAME_COUNT)
-        .map(|frame| sprite.crop_imm(frame * FRAME_SIZE, 0, FRAME_SIZE, FRAME_SIZE).to_rgba8())
+        .map(|frame| {
+            sprite
+                .crop_imm(frame * FRAME_SIZE, 0, FRAME_SIZE, FRAME_SIZE)
+                .to_rgba8()
+        })
         .collect();
 
     for (index, frame) in frames.iter().enumerate() {
@@ -47,7 +58,10 @@ fn banana_sprite_has_twelve_square_frames_and_transparent_edges() {
         );
     }
 
-    assert_eq!(frames[11], approved_open, "frame 11 must equal the approved endpoint");
+    assert_eq!(
+        frames[11], approved_open,
+        "frame 11 must equal the approved endpoint"
+    );
 }
 
 fn alpha_bbox(image: &RgbaImage) -> Option<(u32, u32, u32, u32)> {
