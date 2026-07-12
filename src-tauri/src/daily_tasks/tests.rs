@@ -1,5 +1,6 @@
 use super::model::{normalize_group_code, validate_task_fields};
 use super::report::{format_full_report, format_group_report, ReportGroup, ReportTask};
+use super::{model::CreateDailyTaskInput, repository};
 
 fn group(code: &str, tasks: &[(&str, i64)]) -> ReportGroup {
     ReportGroup {
@@ -44,4 +45,50 @@ fn task_input_keeps_chinese_titles_but_rejects_report_structure_injection() {
     assert!(normalize_group_code("#L36").is_err());
     assert!(validate_task_fields("第一行\n第二行", 50, "", 0).is_err());
     assert!(validate_task_fields("【伪造】", 50, "", 0).is_err());
+}
+
+#[test]
+fn daily_groups_keep_explicit_order_and_tasks_keep_work_metadata() {
+    let db = test_database();
+    repository::create_task(&db, input("2026-07-11", "L50", "录像带", 50, 95)).unwrap();
+    repository::create_task(&db, input("2026-07-11", "L36", "三丽鸥", 100, 40)).unwrap();
+    repository::reorder_groups(&db, "2026-07-11", vec!["L36".into(), "L50".into()]).unwrap();
+
+    let day = repository::load_day(&db, "2026-07-11").unwrap();
+    assert_eq!(day.groups[0].code, "L36");
+    assert_eq!(day.groups[1].tasks[0].invested_minutes, 95);
+    assert!(!day.groups[1].tasks[0].updated_at.is_empty());
+}
+
+#[test]
+fn loading_a_history_date_never_merges_tasks_from_another_day() {
+    let db = test_database();
+    repository::create_task(&db, input("2026-07-10", "L36", "昨天", 100, 20)).unwrap();
+    repository::create_task(&db, input("2026-07-11", "L36", "今天", 0, 0)).unwrap();
+
+    let history = repository::load_day(&db, "2026-07-10").unwrap();
+    assert_eq!(history.groups[0].tasks[0].title, "昨天");
+}
+
+fn test_database() -> crate::db::Database {
+    let dir = tempfile::tempdir().unwrap();
+    crate::db::Database::open(dir.keep().join("banana.db")).unwrap()
+}
+
+fn input(
+    local_date: &str,
+    code: &str,
+    title: &str,
+    progress: i64,
+    invested_minutes: i64,
+) -> CreateDailyTaskInput {
+    CreateDailyTaskInput {
+        local_date: local_date.into(),
+        code: code.into(),
+        project_id: None,
+        title: title.into(),
+        progress,
+        note: String::new(),
+        invested_minutes,
+    }
 }
