@@ -1558,6 +1558,30 @@ mod tests {
     }
 
     #[test]
+    fn startup_coordinator_reuses_the_shared_operation_and_credential_coordinators() {
+        let directory = tempdir().unwrap();
+        let operations = Arc::new(AppOperationGate::default());
+        let credential_mutations = Arc::new(CredentialMutationCoordinator::default());
+        let coordinator = StartupCoordinator::new(
+            Arc::new(MemoryCredentialStore::default()),
+            credential_mutations.clone(),
+            operations.clone(),
+        );
+
+        let services = match coordinator.run(directory.path()) {
+            StartupOutcome::Ready { services, .. } => services,
+            StartupOutcome::Recovery(info) => {
+                panic!("fresh startup should be ready: {}", info.message)
+            }
+        };
+
+        assert!(Arc::ptr_eq(&services.operations, &operations));
+        assert!(services
+            .providers
+            .uses_credential_mutation_coordinator(&credential_mutations));
+    }
+
+    #[test]
     fn sidecar_round_trips_every_state_and_rejects_an_unsupported_version() {
         let directory = tempdir().unwrap();
         for state in [

@@ -1,8 +1,13 @@
+pub(crate) mod startup_commands;
+
 // src-tauri/src/commands.rs
 // IPC 命令：前端通过 src/lib/ipc.ts 调用这些函数。
 // 所有系统操作（文件、剪贴板）在此封装，前端不直接碰系统。
 
-use crate::library::{self, Library};
+use crate::{
+    app_state::StartupGate,
+    library::{self, Library},
+};
 use base64::Engine;
 use chrono::{DateTime, Datelike, Local, Timelike};
 use image::codecs::jpeg::JpegEncoder;
@@ -14,24 +19,48 @@ fn data_dir(app: &tauri::AppHandle) -> PathBuf {
     app.path().app_data_dir().expect("no app data dir")
 }
 
-#[tauri::command]
-pub fn load_library(app: tauri::AppHandle) -> Library {
-    library::load_library(&data_dir(&app))
+fn require_startup_ready(gate: &StartupGate) -> Result<(), String> {
+    gate.require_ready()
 }
 
 #[tauri::command]
-pub fn save_library(app: tauri::AppHandle, library: Library) -> Result<(), String> {
+pub fn load_library(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+) -> Result<Library, String> {
+    require_startup_ready(&gate)?;
+    Ok(library::load_library(&data_dir(&app)))
+}
+
+#[tauri::command]
+pub fn save_library(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    library: Library,
+) -> Result<(), String> {
+    require_startup_ready(&gate)?;
     library::save_library(&data_dir(&app), &library).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn copy_to_clipboard(app: tauri::AppHandle, text: String) -> Result<(), String> {
+pub fn copy_to_clipboard(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    text: String,
+) -> Result<(), String> {
+    require_startup_ready(&gate)?;
     use tauri_plugin_clipboard_manager::ClipboardExt;
     app.clipboard().write_text(text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn save_image(app: tauri::AppHandle, bytes: Vec<u8>, ext: String) -> Result<String, String> {
+pub fn save_image(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    bytes: Vec<u8>,
+    ext: String,
+) -> Result<String, String> {
+    require_startup_ready(&gate)?;
     let dir = data_dir(&app).join("images");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().simple().to_string();
@@ -42,7 +71,12 @@ pub fn save_image(app: tauri::AppHandle, bytes: Vec<u8>, ext: String) -> Result<
 }
 
 #[tauri::command]
-pub fn delete_image(app: tauri::AppHandle, path: String) -> Result<(), String> {
+pub fn delete_image(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    path: String,
+) -> Result<(), String> {
+    require_startup_ready(&gate)?;
     let full = data_dir(&app).join(&path);
     if full.exists() {
         std::fs::remove_file(&full).map_err(|e| e.to_string())?;
@@ -51,19 +85,34 @@ pub fn delete_image(app: tauri::AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn read_image_bytes(app: tauri::AppHandle, path: String) -> Result<Vec<u8>, String> {
+pub fn read_image_bytes(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    path: String,
+) -> Result<Vec<u8>, String> {
+    require_startup_ready(&gate)?;
     let full = data_dir(&app).join(&path);
     std::fs::read(&full).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn export_library(app: tauri::AppHandle, dest: String) -> Result<(), String> {
+pub fn export_library(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    dest: String,
+) -> Result<(), String> {
+    require_startup_ready(&gate)?;
     let zip_path = std::path::PathBuf::from(&dest);
     library::export_library(&data_dir(&app), &zip_path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn import_library(app: tauri::AppHandle, zip_path: String) -> Result<Library, String> {
+pub fn import_library(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    zip_path: String,
+) -> Result<Library, String> {
+    require_startup_ready(&gate)?;
     library::import_library(std::path::Path::new(&zip_path), &data_dir(&app))
         .map_err(|e| e.to_string())
 }
@@ -428,7 +477,11 @@ fn compressed_output_path(source: &Path, ext: &str, suffix: &str) -> Result<Path
 
 // 读取目录下所有 .md/.txt 文件内容，供前端解析
 #[tauri::command]
-pub fn read_import_dir(dir: String) -> Result<Vec<ImportFile>, String> {
+pub fn read_import_dir(
+    gate: tauri::State<StartupGate>,
+    dir: String,
+) -> Result<Vec<ImportFile>, String> {
+    require_startup_ready(&gate)?;
     let mut files = Vec::new();
     let read = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
     for entry in read {
@@ -447,7 +500,12 @@ pub fn read_import_dir(dir: String) -> Result<Vec<ImportFile>, String> {
 
 // 下载远程图片到 images/，返回相对路径
 #[tauri::command]
-pub fn download_image(app: tauri::AppHandle, url: String) -> Result<String, String> {
+pub fn download_image(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    url: String,
+) -> Result<String, String> {
+    require_startup_ready(&gate)?;
     use std::io::Read;
     let resp = ureq::get(&url).call().map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();
@@ -472,7 +530,8 @@ pub fn download_image(app: tauri::AppHandle, url: String) -> Result<String, Stri
 }
 
 #[tauri::command]
-pub fn check_for_update() -> Result<UpdateCheckResult, String> {
+pub fn check_for_update(gate: tauri::State<StartupGate>) -> Result<UpdateCheckResult, String> {
+    require_startup_ready(&gate)?;
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let resp = ureq::get("https://api.github.com/repos/felix1709/banana-box/releases/latest")
         .set("User-Agent", "banana-box")
@@ -497,20 +556,24 @@ pub fn check_for_update() -> Result<UpdateCheckResult, String> {
 }
 
 #[tauri::command]
-pub fn check_api_connection(input: CheckApiConnectionInput) -> CheckApiConnectionResult {
+pub fn check_api_connection(
+    gate: tauri::State<StartupGate>,
+    input: CheckApiConnectionInput,
+) -> Result<CheckApiConnectionResult, String> {
+    require_startup_ready(&gate)?;
     if input.base_url.trim().is_empty() {
-        return CheckApiConnectionResult {
+        return Ok(CheckApiConnectionResult {
             ok: false,
             message: "Base URL 不能为空".to_string(),
             models: vec![],
-        };
+        });
     }
     if input.api_key.trim().is_empty() {
-        return CheckApiConnectionResult {
+        return Ok(CheckApiConnectionResult {
             ok: false,
             message: "API Key 不能为空".to_string(),
             models: vec![],
-        };
+        });
     }
 
     let url = openai_url(&input.base_url, "models");
@@ -519,7 +582,7 @@ pub fn check_api_connection(input: CheckApiConnectionInput) -> CheckApiConnectio
         .set("User-Agent", "banana-box")
         .call();
 
-    match response {
+    Ok(match response {
         Ok(resp) => match resp.into_string() {
             Ok(body) => {
                 let models = serde_json::from_str::<OpenAiModelsResponse>(&body)
@@ -542,14 +605,16 @@ pub fn check_api_connection(input: CheckApiConnectionInput) -> CheckApiConnectio
             message: format!("连接失败：{}", err),
             models: vec![],
         },
-    }
+    })
 }
 
 #[tauri::command]
 pub fn reverse_image_prompt(
     app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
     input: ReverseImagePromptInput,
 ) -> Result<ReverseImagePromptResult, String> {
+    require_startup_ready(&gate)?;
     if input.api_key.trim().is_empty() {
         return Err("API Key 不能为空".to_string());
     }
@@ -602,8 +667,10 @@ pub fn reverse_image_prompt(
 #[tauri::command]
 pub fn import_image_from_path(
     app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
     input: ImportImageFromPathInput,
 ) -> Result<String, String> {
+    require_startup_ready(&gate)?;
     let source = PathBuf::from(&input.source_path);
     if !source.exists() {
         return Err("图片文件不存在".to_string());
@@ -623,7 +690,11 @@ pub fn import_image_from_path(
 }
 
 #[tauri::command]
-pub fn compress_media(input: CompressMediaInput) -> Result<CompressMediaResult, String> {
+pub fn compress_media(
+    gate: tauri::State<StartupGate>,
+    input: CompressMediaInput,
+) -> Result<CompressMediaResult, String> {
+    require_startup_ready(&gate)?;
     if input.target_mb <= 0.0 {
         return Err("目标大小必须大于 0 MB".to_string());
     }
@@ -645,8 +716,10 @@ pub fn compress_media(input: CompressMediaInput) -> Result<CompressMediaResult, 
 
 #[tauri::command]
 pub fn suggest_compressed_output_path(
+    gate: tauri::State<StartupGate>,
     input: SuggestCompressedOutputPathInput,
 ) -> Result<String, String> {
+    require_startup_ready(&gate)?;
     let source = PathBuf::from(&input.source_path);
     let ext = compressed_output_ext(&source);
     let output = compressed_output_path(&source, ext, &timestamp_suffix_now())?;
@@ -789,6 +862,19 @@ mod tests {
         assert_eq!(
             release_download_url(&release),
             "https://github.com/felix1709/banana-box/releases/download/v0.1.2/banana-box_0.1.2_x64-setup.exe"
+        );
+    }
+
+    #[test]
+    fn legacy_business_command_gate_rejects_recovery_before_work_starts() {
+        let gate = crate::app_state::StartupGate::new(crate::app_state::StartupStatus::Recovery {
+            message: "Recovery required".into(),
+            backup_paths: vec![],
+        });
+
+        assert_eq!(
+            require_startup_ready(&gate).unwrap_err(),
+            "STARTUP_NOT_READY"
         );
     }
 }

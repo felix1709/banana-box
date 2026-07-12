@@ -146,6 +146,14 @@ impl ProviderService {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn uses_credential_mutation_coordinator(
+        &self,
+        expected: &Arc<CredentialMutationCoordinator>,
+    ) -> bool {
+        Arc::ptr_eq(&self.credential_mutations, expected)
+    }
+
     pub fn list(&self, kind: ProviderKind) -> Result<Vec<AiProvider>, String> {
         let rows = database_result(self.database.with_connection(|connection| {
             let mut statement = connection

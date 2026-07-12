@@ -1,4 +1,5 @@
 mod app_state;
+mod command_auth;
 mod commands;
 mod db;
 mod fs_atomic;
@@ -9,7 +10,12 @@ mod providers;
 mod secrets;
 mod startup;
 
-use std::sync::Mutex;
+use app_state::{
+    AppOperationGate, AppServices, RestoreBlockerRegistry, StartupGate, StartupStatus,
+};
+use migration::{StartupCoordinator, StartupOutcome};
+use secrets::{CredentialMutationCoordinator, WindowsCredentialStore};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, WindowEvent};
@@ -50,46 +56,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(
             |app: &mut tauri::App| -> Result<(), Box<dyn std::error::Error>> {
-                // 注册全局快捷键 Ctrl+Shift+B
-                let shortcut =
-                    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyB);
-                app.global_shortcut().register(shortcut)?;
-
-                // 系统托盘
-                TrayIconBuilder::with_id("main")
-                    .tooltip("Banana Box")
-                    .icon(app.default_window_icon().expect("icon").clone())
-                    .on_tray_icon_event(|tray, event| {
-                        if let TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            ..
-                        } = event
-                        {
-                            toggle_main_panel(tray.app_handle());
-                        }
-                    })
-                    .menu(
-                        &tauri::menu::MenuBuilder::new(app)
-                            .item(
-                                &tauri::menu::MenuItemBuilder::with_id("show", "显示")
-                                    .build(app)?,
-                            )
-                            .item(
-                                &tauri::menu::MenuItemBuilder::with_id("quit", "退出")
-                                    .build(app)?,
-                            )
-                            .build()?,
-                    )
-                    .on_menu_event(|app, event| match event.id().as_ref() {
-                        "show" => toggle_main_panel(app),
-                        "quit" => app.exit(0),
-                        _ => {}
-                    })
-                    .build(app)?;
-
-                // 监听悬浮按钮的 toggle 事件 → 切换主面板
-                Ok(())
+                initialize_startup(app)
             },
         )
         .on_window_event(|window, event| {
@@ -127,6 +94,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::startup_commands::get_startup_status,
+            commands::startup_commands::acknowledge_migration_summary,
             commands::load_library,
             commands::save_library,
             commands::copy_to_clipboard,
@@ -151,6 +120,93 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn initialize_startup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let data_dir = app.path().app_data_dir()?;
+    let operations = Arc::new(AppOperationGate::default());
+    let restore_blockers = Arc::new(RestoreBlockerRegistry::default());
+    let credential_mutations = Arc::new(CredentialMutationCoordinator::default());
+
+    app.manage(operations.clone());
+    app.manage(restore_blockers);
+
+    let coordinator = StartupCoordinator::new(
+        Arc::new(WindowsCredentialStore),
+        credential_mutations,
+        operations,
+    );
+    let (startup_gate, services, show_main_window) =
+        split_startup_outcome(coordinator.run(&data_dir));
+    app.manage(startup_gate);
+
+    if let Some(services) = services {
+        app.manage(services);
+        setup_ready_desktop_shell(app)?;
+    }
+
+    if show_main_window {
+        if let Some(window) = app.get_webview_window("main") {
+            window.show()?;
+            window.set_focus()?;
+        }
+    }
+
+    Ok(())
+}
+
+fn split_startup_outcome(outcome: StartupOutcome) -> (StartupGate, Option<AppServices>, bool) {
+    match outcome {
+        StartupOutcome::Ready {
+            services,
+            migration_summary,
+        } => (
+            StartupGate::new(StartupStatus::Ready { migration_summary }),
+            Some(services),
+            false,
+        ),
+        StartupOutcome::Recovery(info) => (
+            StartupGate::new(StartupStatus::Recovery {
+                message: info.message,
+                backup_paths: info.backup_paths,
+            }),
+            None,
+            true,
+        ),
+    }
+}
+
+fn setup_ready_desktop_shell(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyB);
+    app.global_shortcut().register(shortcut)?;
+
+    TrayIconBuilder::with_id("main")
+        .tooltip("Banana Box")
+        .icon(app.default_window_icon().expect("icon").clone())
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                toggle_main_panel(tray.app_handle());
+            }
+        })
+        .menu(
+            &tauri::menu::MenuBuilder::new(app)
+                .item(&tauri::menu::MenuItemBuilder::with_id("show", "显示").build(app)?)
+                .item(&tauri::menu::MenuItemBuilder::with_id("quit", "退出").build(app)?)
+                .build()?,
+        )
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => toggle_main_panel(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .build(app)?;
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -257,6 +313,24 @@ mod tests {
 
         assert!(!should_hide_main_on_focus_loss(
             "main", false, None, now, true
+        ));
+    }
+
+    #[test]
+    fn recovery_startup_does_not_expose_business_services_and_shows_the_main_window() {
+        let (startup_gate, services, show_main_window) = split_startup_outcome(
+            crate::migration::StartupOutcome::Recovery(crate::migration::RecoveryInfo {
+                message: "Local data needs recovery.".into(),
+                backup_paths: vec!["C:\\backup\\library-v0.json".into()],
+            }),
+        );
+
+        assert!(services.is_none());
+        assert!(show_main_window);
+        assert!(matches!(
+            startup_gate.status().unwrap(),
+            crate::app_state::StartupStatus::Recovery { backup_paths, .. }
+                if backup_paths == ["C:\\backup\\library-v0.json"]
         ));
     }
 }
