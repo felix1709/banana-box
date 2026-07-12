@@ -1,9 +1,9 @@
 mod app_state;
 mod command_auth;
 mod commands;
+mod daily_tasks;
 mod db;
 mod desktop_state;
-mod daily_tasks;
 mod fs_atomic;
 mod legacy_import;
 mod library;
