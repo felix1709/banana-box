@@ -13,7 +13,6 @@ vi.mock('@/lib/ipc', () => ({
   deleteImage: vi.fn().mockResolvedValue(undefined),
   readImageBytes: vi.fn(),
   exportLibrary: vi.fn(),
-  importLibrary: vi.fn(),
 }))
 
 function seed(): Library {

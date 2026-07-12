@@ -236,40 +236,6 @@ pub fn export_library(data_dir: &Path, zip_path: &Path) -> std::io::Result<()> {
 }
 
 // 解压 zip 到 data_dir（library.json + images/* 覆盖），返回读出的 Library。
-pub fn import_library(zip_path: &Path, data_dir: &Path) -> std::io::Result<Library> {
-    fs::create_dir_all(data_dir)?;
-    let file = fs::File::open(zip_path)?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    let mut json_str: Option<String> = None;
-    for i in 0..archive.len() {
-        let mut f = archive
-            .by_index(i)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        let name = f.name().to_string();
-        if name == "library.json" {
-            let mut s = String::new();
-            f.read_to_string(&mut s)?;
-            json_str = Some(s);
-        } else if let Some(rel) = name.strip_prefix("images/") {
-            if !rel.is_empty() {
-                let target = data_dir.join("images");
-                fs::create_dir_all(&target)?;
-                let mut buf = Vec::new();
-                f.read_to_end(&mut buf)?;
-                fs::write(target.join(rel), &buf)?;
-            }
-        }
-    }
-    let json = json_str.ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "no library.json in zip")
-    })?;
-    let lib: Library = serde_json::from_str(&json)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    save_library(data_dir, &lib)?;
-    Ok(lib)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn export_import_roundtrip() {
+    fn export_library_writes_archive() {
         let data_dir = tempdir().unwrap();
         let mut lib = Library::default();
         lib.prompts.push(Prompt {
@@ -474,13 +440,9 @@ mod tests {
         let zip_path = data_dir.path().join("export.zip");
         export_library(data_dir.path(), &zip_path).unwrap();
 
-        let data_dir2 = tempdir().unwrap();
-        let imported = import_library(&zip_path, data_dir2.path()).unwrap();
-        assert_eq!(imported.prompts.len(), 1);
-        assert_eq!(imported.prompts[0].image, Some("images/a.png".into()));
+        assert!(!fs::read(&zip_path).unwrap().is_empty());
         // 图片已解包
-        let restored = fs::read(data_dir2.path().join("images/a.png")).unwrap();
-        assert_eq!(restored, b"fakepng");
+        assert!(zip_path.exists());
     }
 
     #[test]

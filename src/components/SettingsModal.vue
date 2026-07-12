@@ -8,15 +8,20 @@ import { useProviderStore } from '@/stores/providers'
 import { useUiStore } from '@/stores/ui'
 import {
   exportLibrary,
-  importLibrary,
   readImportDir,
   downloadImage,
 } from '@/lib/ipc'
 import { checkAiProviderConnection } from '@/lib/provider-ipc'
+import {
+  commitLegacyImport,
+  discardLegacyImportPreview,
+  inspectLegacyImport,
+} from '@/lib/backup-ipc'
 import { checkAppUpdate, installAppUpdate } from '@/lib/updater'
 import { parseFile } from '@/lib/parse'
 import type { AiProvider, CheckAiProviderConnectionResult, Prompt } from '@/types'
 import type { AppUpdateResult } from '@/lib/updater'
+import type { LegacyImportPreview } from '@/lib/backup-ipc'
 
 type SettingsTab = 'features' | 'api' | 'hotkeys' | 'import-export'
 
@@ -41,6 +46,11 @@ const availableReverseModels = ref<string[]>([])
 const checkingApi = ref(false)
 const apiStatus = ref('')
 const importing = ref(false)
+const inspectingLegacyImport = ref(false)
+const committingLegacyImport = ref(false)
+const legacyImportPreview = ref<LegacyImportPreview | null>(null)
+const overwriteLegacyCredential = ref(false)
+const legacyImportError = ref('')
 const checkingVersion = ref(false)
 const installingUpdate = ref(false)
 const updateResult = ref<AppUpdateResult | null>(null)
@@ -181,11 +191,68 @@ async function onExport() {
   ui.showToast('已导出')
 }
 
-async function onImport() {
-  const imported = await importLibrary()
-  if (!imported) return
-  lib.hydrate(imported)
-  ui.showToast('已导入')
+async function discardLegacyImport() {
+  const token = legacyImportPreview.value?.token
+  legacyImportPreview.value = null
+  overwriteLegacyCredential.value = false
+  if (!token) return
+  try {
+    await discardLegacyImportPreview(token)
+  } catch {
+    // The backend also removes stale previews on the next app startup.
+  }
+}
+
+async function onInspectLegacyImport() {
+  const picked = await open({
+    filters: [{ name: 'legacy prompt library', extensions: ['json', 'zip'] }],
+    multiple: false,
+  })
+  if (!picked || Array.isArray(picked)) return
+
+  await discardLegacyImport()
+  inspectingLegacyImport.value = true
+  legacyImportError.value = ''
+  try {
+    legacyImportPreview.value = await inspectLegacyImport(picked)
+  } catch {
+    legacyImportError.value = '无法检查旧版提示词库'
+  } finally {
+    inspectingLegacyImport.value = false
+  }
+}
+
+async function onCommitLegacyImport() {
+  const preview = legacyImportPreview.value
+  if (!preview) return
+  if (preview.credentialConflict && !overwriteLegacyCredential.value) {
+    legacyImportError.value = '请确认是否覆盖已有 API Key'
+    return
+  }
+
+  committingLegacyImport.value = true
+  legacyImportError.value = ''
+  try {
+    const committed = await commitLegacyImport(preview.token, overwriteLegacyCredential.value)
+    lib.hydrate(committed.library)
+    try {
+      await providers.load('reverse-image')
+    } catch {
+      // The library import itself has already committed at this point.
+    }
+    legacyImportPreview.value = null
+    overwriteLegacyCredential.value = false
+    ui.showToast(`已导入 ${committed.promptsImported} 条提示词`)
+  } catch {
+    legacyImportError.value = '导入失败，原有数据未被覆盖'
+  } finally {
+    committingLegacyImport.value = false
+  }
+}
+
+async function closeSettings() {
+  await discardLegacyImport()
+  ui.closeSettings()
 }
 
 async function onBatchImport() {
@@ -287,7 +354,7 @@ async function onDownloadUpdate() {
 <template>
   <div
     class="mask"
-    @click.self="ui.closeSettings()"
+    @click.self="closeSettings"
   >
     <div class="dialog scrollable-dialog">
       <div class="dialog-header">
@@ -295,7 +362,7 @@ async function onDownloadUpdate() {
         <button
           class="close-button"
           aria-label="关闭设置"
-          @click="ui.closeSettings()"
+          @click="closeSettings"
         >
           x
         </button>
@@ -490,9 +557,59 @@ async function onDownloadUpdate() {
             <button @click="onExport">
               导出 (.zip)
             </button>
-            <button @click="onImport">
-              导入 (.zip)
+            <button
+              class="legacy-import-button"
+              data-action="inspect-legacy-import"
+              :disabled="inspectingLegacyImport || committingLegacyImport"
+              @click="onInspectLegacyImport"
+            >
+              {{ inspectingLegacyImport ? '检查中...' : '导入旧版提示词库' }}
             </button>
+            <div
+              v-if="legacyImportPreview || legacyImportError"
+              class="legacy-import-preview"
+            >
+              <p v-if="legacyImportPreview">
+                提示词 {{ legacyImportPreview.promptCount }} 条，分类 {{ legacyImportPreview.categoryCount }} 个
+              </p>
+              <label
+                v-if="legacyImportPreview?.credentialConflict"
+                class="legacy-overwrite"
+              >
+                <input
+                  v-model="overwriteLegacyCredential"
+                  type="checkbox"
+                >
+                覆盖已有 API Key
+              </label>
+              <p
+                v-if="legacyImportError"
+                class="status error"
+              >
+                {{ legacyImportError }}
+              </p>
+              <div
+                v-if="legacyImportPreview"
+                class="legacy-import-actions"
+              >
+                <button
+                  type="button"
+                  data-action="discard-legacy-import"
+                  :disabled="committingLegacyImport"
+                  @click="discardLegacyImport"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  data-action="commit-legacy-import"
+                  :disabled="committingLegacyImport"
+                  @click="onCommitLegacyImport"
+                >
+                  {{ committingLegacyImport ? '导入中...' : '确认导入' }}
+                </button>
+              </div>
+            </div>
           </section>
         </div>
       </div>
@@ -684,6 +801,32 @@ select {
   gap: 10px;
   align-items: flex-start;
   justify-content: space-between;
+}
+.legacy-import-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--bb-border);
+  background: var(--bb-surface-soft);
+}
+.legacy-import-preview p {
+  margin: 0;
+  color: var(--bb-text-muted);
+  font-size: 12px;
+}
+.legacy-overwrite,
+.legacy-import-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.legacy-overwrite {
+  color: var(--bb-text);
+  font-size: 12px;
+}
+.legacy-overwrite input {
+  width: auto;
 }
 .api-check-button,
 .version-check-button,

@@ -3,7 +3,7 @@
 // 命令在 src-tauri/src/commands.rs 实现。
 
 import { invoke } from '@tauri-apps/api/core'
-import { save, open } from '@tauri-apps/plugin-dialog'
+import { save } from '@tauri-apps/plugin-dialog'
 import type { Library } from '@/types'
 
 export interface ImportFile {
@@ -75,15 +75,6 @@ export async function exportLibrary(): Promise<void> {
   })
   if (!dest) return
   await invoke('export_library', { dest })
-}
-
-export async function importLibrary(): Promise<Library | null> {
-  const picked = await open({
-    filters: [{ name: 'zip', extensions: ['zip'] }],
-    multiple: false,
-  })
-  if (!picked || Array.isArray(picked)) return null
-  return await invoke<Library>('import_library', { zipPath: picked })
 }
 
 // 批量导入：读目录下所有 .md/.txt

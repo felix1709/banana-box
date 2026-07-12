@@ -9,6 +9,12 @@ import {
 } from '@/lib/provider-ipc'
 import { checkAppUpdate, installAppUpdate } from '@/lib/updater'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
+import { open } from '@tauri-apps/plugin-dialog'
+import {
+  commitLegacyImport,
+  discardLegacyImportPreview,
+  inspectLegacyImport,
+} from '@/lib/backup-ipc'
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn(),
@@ -22,7 +28,6 @@ vi.mock('@tauri-apps/plugin-autostart', () => ({
 
 vi.mock('@/lib/ipc', () => ({
   exportLibrary: vi.fn().mockResolvedValue(undefined),
-  importLibrary: vi.fn().mockResolvedValue(null),
   readImportDir: vi.fn().mockResolvedValue([]),
   downloadImage: vi.fn(),
   saveLibrary: vi.fn().mockResolvedValue(undefined),
@@ -32,6 +37,12 @@ vi.mock('@/lib/provider-ipc', () => ({
   listAiProviders: vi.fn(),
   saveAiProvider: vi.fn(),
   checkAiProviderConnection: vi.fn(),
+}))
+
+vi.mock('@/lib/backup-ipc', () => ({
+  inspectLegacyImport: vi.fn(),
+  commitLegacyImport: vi.fn(),
+  discardLegacyImportPreview: vi.fn(),
 }))
 
 vi.mock('@/lib/updater', () => ({
@@ -61,12 +72,34 @@ const reverseImageProvider = {
   capabilityRevision: 1,
 }
 
+const legacyImportPreview = {
+  token: '2dd6bcf1-262f-4cf1-a507-2d375750759c',
+  promptCount: 2,
+  categoryCount: 1,
+  hasApiKey: true,
+  credentialConflict: false,
+  warnings: [],
+}
+
+const legacyImportCommit = {
+  library: {
+    version: 2,
+    categories: [],
+    prompts: [],
+    settings: { hotkey: 'Ctrl+Shift+B', theme: 'auto' as const },
+  },
+  promptsImported: 2,
+  categoriesImported: 1,
+  warnings: [],
+}
+
 describe('SettingsModal', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     vi.mocked(isEnabled).mockResolvedValue(false)
     vi.mocked(listAiProviders).mockResolvedValue([reverseImageProvider])
+    vi.mocked(open).mockResolvedValue(null)
   })
 
   it('groups settings into feature, API, hotkey, and import/export pages', async () => {
@@ -231,5 +264,26 @@ describe('SettingsModal', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
     expect((wrapper.find('.api-key-input').element as HTMLInputElement).value).toBe('')
+  })
+
+  it('stages a legacy library before committing the sanitized import', async () => {
+    vi.mocked(open).mockResolvedValue('C:\\Users\\Felix\\Downloads\\legacy.zip')
+    vi.mocked(inspectLegacyImport).mockResolvedValue(legacyImportPreview)
+    vi.mocked(commitLegacyImport).mockResolvedValue(legacyImportCommit)
+    const wrapper = mount(SettingsModal)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await openSettingsTab(wrapper, 3)
+
+    await wrapper.find('[data-action="inspect-legacy-import"]').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(inspectLegacyImport).toHaveBeenCalledWith('C:\\Users\\Felix\\Downloads\\legacy.zip')
+    expect(wrapper.find('.legacy-import-preview').exists()).toBe(true)
+
+    await wrapper.find('[data-action="commit-legacy-import"]').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(commitLegacyImport).toHaveBeenCalledWith(legacyImportPreview.token, false)
+    expect(discardLegacyImportPreview).not.toHaveBeenCalled()
   })
 })

@@ -3,16 +3,19 @@ mod command_auth;
 mod commands;
 mod db;
 mod fs_atomic;
+mod legacy_import;
 mod library;
 mod migration;
 mod provider_http;
 mod providers;
+mod safe_archive;
 mod secrets;
 mod startup;
 
 use app_state::{
     AppOperationGate, AppServices, RestoreBlockerRegistry, StartupGate, StartupStatus,
 };
+use legacy_import::BackupStagingCoordinator;
 use migration::{StartupCoordinator, StartupOutcome};
 use secrets::{CredentialMutationCoordinator, WindowsCredentialStore};
 use std::sync::{Arc, Mutex};
@@ -103,7 +106,6 @@ pub fn run() {
             commands::delete_image,
             commands::read_image_bytes,
             commands::export_library,
-            commands::import_library,
             commands::read_import_dir,
             commands::download_image,
             commands::check_for_update,
@@ -112,6 +114,9 @@ pub fn run() {
             commands::provider_commands::clear_ai_provider_credential,
             commands::provider_commands::check_ai_provider_connection,
             commands::provider_commands::reverse_image_prompt,
+            commands::backup_commands::inspect_legacy_import,
+            commands::backup_commands::commit_legacy_import,
+            commands::backup_commands::discard_legacy_import_preview,
             commands::import_image_from_path,
             commands::compress_media,
             commands::suggest_compressed_output_path,
@@ -133,6 +138,7 @@ fn initialize_startup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Er
 
     app.manage(operations.clone());
     app.manage(restore_blockers);
+    app.manage(BackupStagingCoordinator::new(&data_dir)?);
 
     let coordinator = StartupCoordinator::new(
         Arc::new(WindowsCredentialStore),

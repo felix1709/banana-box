@@ -1,3 +1,4 @@
+pub(crate) mod backup_commands;
 pub(crate) mod provider_commands;
 pub(crate) mod startup_commands;
 
@@ -110,17 +111,6 @@ pub fn export_library(
     require_startup_ready(&gate)?;
     let zip_path = std::path::PathBuf::from(&dest);
     library::export_library(&data_dir(&app), &zip_path).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn import_library(
-    app: tauri::AppHandle,
-    gate: tauri::State<StartupGate>,
-    zip_path: String,
-) -> Result<Library, String> {
-    require_startup_ready(&gate)?;
-    library::import_library(std::path::Path::new(&zip_path), &data_dir(&app))
-        .map_err(|e| e.to_string())
 }
 
 #[derive(serde::Serialize)]
