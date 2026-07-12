@@ -1,10 +1,12 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import AnimatedBananaButton from '@/components/AnimatedBananaButton.vue'
 import FloatButton from '@/components/FloatButton.vue'
 
 const mocks = vi.hoisted(() => ({
   emitTo: vi.fn().mockResolvedValue(undefined),
   invoke: vi.fn().mockResolvedValue(undefined),
+  listen: vi.fn(),
   onDragDropEvent: vi.fn(),
   startDragging: vi.fn().mockResolvedValue(undefined),
 }))
@@ -18,6 +20,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 
 vi.mock('@tauri-apps/api/event', () => ({
   emitTo: mocks.emitTo,
+  listen: mocks.listen,
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -25,27 +28,46 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 describe('FloatButton', () => {
+  let eventHandlers: Record<string, (event: { payload: unknown }) => void> = {}
+
   beforeEach(() => {
     mocks.emitTo.mockClear()
     mocks.invoke.mockClear()
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'get_panel_state') {
+        return Promise.resolve({
+          generation: 0,
+          desiredVisible: false,
+          actualVisible: false,
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+    eventHandlers = {}
+    mocks.listen.mockReset()
+    mocks.listen.mockImplementation((eventName, handler) => {
+      eventHandlers[eventName] = handler
+      return Promise.resolve(vi.fn())
+    })
     mocks.onDragDropEvent.mockReset()
     mocks.onDragDropEvent.mockResolvedValue(vi.fn())
     mocks.startDragging.mockClear()
   })
 
-  it('shows a banana button', () => {
+  it('shows the animated banana button', () => {
     const wrapper = mount(FloatButton)
 
-    expect(wrapper.text()).toBe('🍌')
+    expect(wrapper.findComponent(AnimatedBananaButton).exists()).toBe(true)
+    expect(wrapper.find('.animated-banana').attributes('data-frame')).toBe('0')
   })
 
   it('toggles the main panel only when the floating button is clicked', async () => {
     const wrapper = mount(FloatButton)
 
     await wrapper.trigger('click')
-    expect(mocks.invoke).toHaveBeenCalledWith('toggle_panel')
 
-    expect(wrapper.text()).toBe('🍌')
+    expect(mocks.invoke).toHaveBeenCalledWith('toggle_panel', {})
+    expect(wrapper.findComponent(AnimatedBananaButton).exists()).toBe(true)
   })
 
   it('does not toggle the main panel after dragging the floating button', async () => {
@@ -56,7 +78,28 @@ describe('FloatButton', () => {
     await wrapper.trigger('click')
 
     expect(mocks.startDragging).toHaveBeenCalledTimes(1)
-    expect(mocks.invoke).not.toHaveBeenCalledWith('toggle_panel')
+    expect(mocks.invoke).not.toHaveBeenCalledWith('toggle_panel', {})
+  })
+
+  it('opens the banana from Rust panel state and acknowledges the reveal frame', async () => {
+    const wrapper = mount(FloatButton)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    eventHandlers['panel-target-changed']?.({
+      payload: {
+        generation: 7,
+        targetVisible: true,
+        reason: 'banana',
+        revealAtFrame: 6,
+      },
+    })
+    await wrapper.vm.$nextTick()
+    wrapper.findComponent(AnimatedBananaButton).vm.$emit('frame', 6)
+
+    expect(mocks.invoke).toHaveBeenCalledWith('ack_panel_reveal', {
+      generation: 7,
+      frame: 6,
+    })
   })
 
   it('emits an image drop action payload to the main window', async () => {
@@ -73,7 +116,7 @@ describe('FloatButton', () => {
     })
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
-    expect(mocks.invoke).toHaveBeenCalledWith('show_panel')
+    expect(mocks.invoke).toHaveBeenCalledWith('show_panel', {})
     expect(mocks.emitTo).toHaveBeenCalledWith('main', 'floating-file-dropped', {
       filePath: 'C:/tmp/photo.png',
       fileName: 'photo.png',
@@ -99,7 +142,7 @@ describe('FloatButton', () => {
     })
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
-    expect(mocks.invoke).toHaveBeenCalledWith('show_panel')
+    expect(mocks.invoke).toHaveBeenCalledWith('show_panel', {})
     expect(mocks.emitTo).toHaveBeenCalledWith('main', 'floating-file-dropped', {
       filePath: 'C:\\tmp\\photo.png',
       fileName: 'photo.png',

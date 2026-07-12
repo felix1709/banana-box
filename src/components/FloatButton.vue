@@ -1,14 +1,25 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
+import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
-import { emitTo } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import AnimatedBananaButton from '@/components/AnimatedBananaButton.vue'
+import type {
+  PanelStateSnapshot,
+  PanelTargetChanged,
+  PanelVisibilityChanged,
+} from '@/types/desktop'
 
 const win = getCurrentWindow()
+const panelOpen = ref(false)
+const panelGeneration = ref(0)
+let acknowledgedGeneration = -1
 let startX = 0
 let startY = 0
 let dragging = false
-let unlistenDragDrop: (() => void) | null = null
+let unlistenDragDrop: UnlistenFn | null = null
+let unlistenPanelTarget: UnlistenFn | null = null
+let unlistenPanelVisibility: UnlistenFn | null = null
 
 type DroppedFileType = 'image' | 'video'
 
@@ -35,8 +46,29 @@ function fileNameFromPath(path: string) {
   return path.split(/[\\/]/).pop() || path
 }
 
+function applyPanelTarget(payload: PanelTargetChanged) {
+  if (payload.generation < panelGeneration.value) return
+  panelGeneration.value = payload.generation
+  panelOpen.value = payload.targetVisible
+  if (!payload.targetVisible) acknowledgedGeneration = -1
+}
+
+function applyPanelSnapshot(payload: PanelStateSnapshot) {
+  if (payload.generation < panelGeneration.value) return
+  panelGeneration.value = payload.generation
+  panelOpen.value = payload.desiredVisible
+}
+
+function applyPanelVisibility(payload: PanelVisibilityChanged) {
+  if (payload.generation < panelGeneration.value) return
+  if (!payload.visible) {
+    panelOpen.value = false
+    acknowledgedGeneration = -1
+  }
+}
+
 async function emitDroppedFile(filePath: string, fileName: string, fileType: DroppedFileType) {
-  await invoke('show_panel')
+  await invoke('show_panel', {})
   await emitTo('main', 'floating-file-dropped', {
     filePath,
     fileName,
@@ -44,21 +76,21 @@ async function emitDroppedFile(filePath: string, fileName: string, fileType: Dro
   })
 }
 
-function onMousedown(e: MouseEvent) {
-  if (e.button !== 0) return
-  startX = e.screenX
-  startY = e.screenY
+function onMousedown(event: MouseEvent) {
+  if (event.button !== 0) return
+  startX = event.screenX
+  startY = event.screenY
   dragging = false
 }
 
-async function onMousemove(e: MouseEvent) {
-  if (e.buttons !== 1 || dragging) return
-  if (Math.abs(e.screenX - startX) > 3 || Math.abs(e.screenY - startY) > 3) {
+async function onMousemove(event: MouseEvent) {
+  if (event.buttons !== 1 || dragging) return
+  if (Math.abs(event.screenX - startX) > 3 || Math.abs(event.screenY - startY) > 3) {
     dragging = true
     try {
       await win.startDragging()
     } catch {
-      // ignore
+      // The window manager can reject a drag while the app is being hidden.
     }
   }
 }
@@ -68,12 +100,21 @@ async function onClick() {
     dragging = false
     return
   }
-  await invoke('toggle_panel')
+  await invoke('toggle_panel', {})
 }
 
-async function onDrop(e: DragEvent) {
-  e.preventDefault()
-  const file = e.dataTransfer?.files?.[0]
+function onFrame(frame: number) {
+  if (!panelOpen.value || frame < 6 || acknowledgedGeneration === panelGeneration.value) return
+  acknowledgedGeneration = panelGeneration.value
+  void invoke('ack_panel_reveal', {
+    generation: panelGeneration.value,
+    frame,
+  })
+}
+
+async function onDrop(event: DragEvent) {
+  event.preventDefault()
+  const file = event.dataTransfer?.files?.[0]
   if (!file) return
   const fileType = classifyFile(file)
   if (!fileType) return
@@ -82,33 +123,49 @@ async function onDrop(e: DragEvent) {
 }
 
 onMounted(async () => {
-  unlistenDragDrop = await win.onDragDropEvent((event) => {
-    if (event.payload.type !== 'drop') return
-    const filePath = event.payload.paths[0]
-    if (!filePath) return
-    const fileType = classifyPath(filePath)
-    if (!fileType) return
-    void emitDroppedFile(filePath, fileNameFromPath(filePath), fileType)
-  })
+  ;[unlistenPanelTarget, unlistenPanelVisibility, unlistenDragDrop] = await Promise.all([
+    listen<PanelTargetChanged>('panel-target-changed', (event) => applyPanelTarget(event.payload)),
+    listen<PanelVisibilityChanged>('panel-visibility-changed', (event) =>
+      applyPanelVisibility(event.payload),
+    ),
+    win.onDragDropEvent((event) => {
+      if (event.payload.type !== 'drop') return
+      const filePath = event.payload.paths[0]
+      if (!filePath) return
+      const fileType = classifyPath(filePath)
+      if (!fileType) return
+      void emitDroppedFile(filePath, fileNameFromPath(filePath), fileType)
+    }),
+  ])
+
+  try {
+    applyPanelSnapshot(await invoke<PanelStateSnapshot>('get_panel_state', {}))
+  } catch {
+    // The normal startup sequence retries state sync after the next panel event.
+  }
 })
 
 onUnmounted(() => {
   unlistenDragDrop?.()
+  unlistenPanelTarget?.()
+  unlistenPanelVisibility?.()
   unlistenDragDrop = null
+  unlistenPanelTarget = null
+  unlistenPanelVisibility = null
 })
 </script>
 
 <template>
-  <div
+  <AnimatedBananaButton
     class="float-btn"
+    :open="panelOpen"
     @mousedown="onMousedown"
     @mousemove="onMousemove"
     @click="onClick"
     @dragover.prevent
     @drop.prevent="onDrop"
-  >
-    🍌
-  </div>
+    @frame="onFrame"
+  />
 </template>
 
 <style scoped>
@@ -121,17 +178,11 @@ onUnmounted(() => {
 }
 
 .float-btn {
-  width: 100vw;
-  height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  cursor: pointer;
+  display: grid;
+  width: 64px;
+  height: 64px;
+  place-items: center;
   user-select: none;
-  background: transparent;
-  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", system-ui, sans-serif;
-  line-height: 1;
   transition:
     filter 140ms ease,
     transform 140ms ease;

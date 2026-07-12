@@ -12,10 +12,12 @@ mod providers;
 mod safe_archive;
 mod secrets;
 mod startup;
+mod window_state;
 
 use app_state::{
     AppOperationGate, AppServices, RestoreBlockerRegistry, StartupGate, StartupStatus,
 };
+use command_auth::{FloatArgs, MainOrFloatArgs};
 use desktop_state::{
     clamp_float_position, logical_to_physical, physical_to_saved, select_restore_monitor,
     DesktopStateStore, LogicalPoint, MonitorWorkArea, PhysicalPoint, PhysicalRect,
@@ -32,6 +34,10 @@ use std::time::{Duration, Instant};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, PhysicalPosition, WebviewWindow, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use window_state::{
+    PanelRevealAck, PanelStateSnapshot, PanelTargetChanged, PanelTransitionReason,
+    WindowStateService,
+};
 
 struct MainWindowDragState {
     ignore_focus_loss_until: Mutex<Option<Instant>>,
@@ -60,7 +66,7 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
                     if event.state == ShortcutState::Pressed {
-                        toggle_main_panel(app);
+                        request_panel_toggle(app, PanelTransitionReason::Shortcut);
                     }
                 })
                 .build(),
@@ -107,7 +113,22 @@ pub fn run() {
                     Instant::now(),
                     main_window_pinned,
                 ) {
-                    let _ = window.hide();
+                    request_panel_visibility(
+                        window.app_handle(),
+                        false,
+                        PanelTransitionReason::FocusLoss,
+                    );
+                }
+            }
+
+            if window.label() == "main" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    request_panel_visibility(
+                        window.app_handle(),
+                        false,
+                        PanelTransitionReason::TitlebarClose,
+                    );
                 }
             }
 
@@ -147,6 +168,8 @@ pub fn run() {
             begin_main_window_drag,
             begin_main_window_resize,
             set_main_window_pinned,
+            get_panel_state,
+            ack_panel_reveal,
             toggle_panel,
             show_panel,
         ])
@@ -175,6 +198,7 @@ fn initialize_startup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Er
 
     if let Some(services) = services {
         app.manage(services);
+        app.manage(Arc::new(WindowStateService::default()));
         setup_ready_desktop_shell(app, &data_dir)?;
     }
 
@@ -229,7 +253,7 @@ fn setup_ready_desktop_shell(
                 ..
             } = event
             {
-                toggle_main_panel(tray.app_handle());
+                request_panel_toggle(tray.app_handle(), PanelTransitionReason::Tray);
             }
         })
         .menu(
@@ -239,7 +263,7 @@ fn setup_ready_desktop_shell(
                 .build()?,
         )
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => toggle_main_panel(app),
+            "show" => request_panel_toggle(app, PanelTransitionReason::Tray),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -508,31 +532,74 @@ fn set_main_window_pinned(
     Ok(())
 }
 
-#[tauri::command]
-fn toggle_panel(app: tauri::AppHandle) {
-    toggle_main_panel(&app);
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EmptyPanelCommandArgs {}
+
+fn panel_service(app: &tauri::AppHandle) -> Result<Arc<WindowStateService>, String> {
+    app.try_state::<Arc<WindowStateService>>()
+        .map(|service| Arc::clone(&service))
+        .ok_or_else(|| "STARTUP_NOT_READY".to_string())
 }
 
 #[tauri::command]
-fn show_panel(app: tauri::AppHandle) {
-    show_main_panel(&app);
+fn get_panel_state(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    _args: FloatArgs<EmptyPanelCommandArgs>,
+) -> Result<PanelStateSnapshot, String> {
+    gate.require_ready()?;
+    Ok(panel_service(&app)?.snapshot())
 }
 
-fn toggle_main_panel(app: &tauri::AppHandle) {
-    if let Some(win) = app.get_webview_window("main") {
-        if win.is_visible().unwrap_or(false) {
-            let _ = win.hide();
-        } else {
-            let _ = win.show();
-            let _ = win.set_focus();
-        }
+#[tauri::command]
+fn ack_panel_reveal(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    acknowledgement: FloatArgs<PanelRevealAck>,
+) -> Result<(), String> {
+    gate.require_ready()?;
+    panel_service(&app).and_then(|service| {
+        service
+            .acknowledge_reveal(&acknowledgement.0)
+            .then_some(())
+            .ok_or_else(|| "STALE_PANEL_GENERATION".to_string())
+    })
+}
+
+#[tauri::command]
+fn toggle_panel(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    _args: FloatArgs<EmptyPanelCommandArgs>,
+) -> Result<PanelTargetChanged, String> {
+    gate.require_ready()?;
+    panel_service(&app)?.toggle(&app, PanelTransitionReason::Banana)
+}
+
+#[tauri::command]
+fn show_panel(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    _args: MainOrFloatArgs<EmptyPanelCommandArgs>,
+) -> Result<PanelTargetChanged, String> {
+    gate.require_ready()?;
+    panel_service(&app)?.request_visibility(&app, true, PanelTransitionReason::FileDrop)
+}
+
+fn request_panel_toggle(app: &tauri::AppHandle, reason: PanelTransitionReason) {
+    if let Ok(service) = panel_service(app) {
+        let _ = service.toggle(app, reason);
     }
 }
 
-fn show_main_panel(app: &tauri::AppHandle) {
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.show();
-        let _ = win.set_focus();
+fn request_panel_visibility(
+    app: &tauri::AppHandle,
+    target_visible: bool,
+    reason: PanelTransitionReason,
+) {
+    if let Ok(service) = panel_service(app) {
+        let _ = service.request_visibility(app, target_visible, reason);
     }
 }
 
