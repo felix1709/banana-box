@@ -3,7 +3,7 @@
 
 import { defineStore } from 'pinia'
 
-export type ActiveTool = 'prompts' | 'reverse-image' | 'compression' | 'projects'
+export type ActiveTool = 'prompts' | 'reverse-image' | 'compression' | 'projects' | 'daily-tasks'
 export interface PromptEditorPrefill {
   title?: string
   content?: string

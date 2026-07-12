@@ -17,6 +17,7 @@ import FastCompressionPanel from '@/components/FastCompressionPanel.vue'
 import FloatingActionDialog from '@/components/FloatingActionDialog.vue'
 import ProjectBoardPage from '@/components/projects/ProjectBoardPage.vue'
 import ProjectEditor from '@/components/projects/ProjectEditor.vue'
+import DailyTasksPage from '@/components/daily/DailyTasksPage.vue'
 
 const lib = useLibraryStore()
 const projects = useProjectsStore()
@@ -277,6 +278,7 @@ watchEffect(async () => {
         <ReverseImagePanel v-else-if="ui.activeTool === 'reverse-image'" />
         <FastCompressionPanel v-else-if="ui.activeTool === 'compression'" />
         <ProjectBoardPage v-else-if="ui.activeTool === 'projects'" />
+        <DailyTasksPage v-else-if="ui.activeTool === 'daily-tasks'" />
       </main>
     </div>
     <PromptEditor v-if="ui.editorOpen" />

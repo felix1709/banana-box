@@ -50,6 +50,16 @@ describe('AppSidebar', () => {
     expect(wrapper.find('.sidebar-category-list').exists()).toBe(false)
   })
 
+  it('switches to the daily task tool', async () => {
+    const wrapper = mount(AppSidebar)
+    const ui = useUiStore()
+
+    const dailyTasksButton = wrapper.get('[data-tool="daily-tasks"]')
+    await dailyTasksButton.trigger('click')
+
+    expect(ui.activeTool).toBe('daily-tasks')
+  })
+
   it('puts a red plus new prompt action next to the prompt library tool', async () => {
     const wrapper = mount(AppSidebar)
     const ui = useUiStore()
