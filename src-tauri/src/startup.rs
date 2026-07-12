@@ -2,6 +2,7 @@ use crate::{
     db::{schema, Database},
     fs_atomic,
     library::{library_path, Library, LIBRARY_VERSION},
+    migration::{self, MigrationState, MIGRATION_SIDECAR_FILE},
     providers::{self, ProviderKind, SaveProviderInput},
 };
 use fs2::FileExt;
@@ -18,7 +19,6 @@ use uuid::Uuid;
 const LIBRARY_FILE: &str = "library.json";
 const DATABASE_FILE: &str = "banana.db";
 const INIT_SIDECAR_FILE: &str = "init-v1.json";
-const MIGRATION_SIDECAR_FILE: &str = "migration-v1.json";
 const STARTUP_LOCK_FILE: &str = "startup-v1.lock";
 const INIT_FORMAT: u32 = 1;
 const REVERSE_BASE_URL: &str = "https://ai.leihuo.netease.com";
@@ -78,21 +78,6 @@ struct InitializationSidecar {
     database: InitializationFile,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum MigrationState {
-    Preparing,
-    Prepared,
-    Committing,
-    Complete,
-}
-
-#[derive(Deserialize)]
-struct MigrationSidecarProbe {
-    migration: u32,
-    state: MigrationState,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ArtifactState {
     Staged,
@@ -138,19 +123,13 @@ pub fn classify(data_dir: &Path) -> Result<StartupPath, String> {
         });
     }
     if migration_presence == EntryPresence::File {
-        let probe = match read_migration_probe(&migration_sidecar) {
-            Ok(probe) => probe,
-            Err(_) => return Ok(StartupPath::RecoveryRequired),
-        };
-        if probe.migration != 1 {
-            return Ok(StartupPath::RecoveryRequired);
-        }
-        if probe.state != MigrationState::Complete {
-            return Ok(StartupPath::RecoverMigration);
-        }
-        return match live_file_matrix(data_dir)? {
-            (EntryPresence::File, EntryPresence::File) => Ok(classify_ready_v1(data_dir)),
-            _ => Ok(StartupPath::RecoveryRequired),
+        return match migration::migration_sidecar_state(data_dir) {
+            Ok(MigrationState::Complete) => match live_file_matrix(data_dir)? {
+                (EntryPresence::File, EntryPresence::File) => Ok(classify_ready_v1(data_dir)),
+                _ => Ok(StartupPath::RecoveryRequired),
+            },
+            Ok(_) => Ok(StartupPath::RecoverMigration),
+            Err(_) => Ok(StartupPath::RecoveryRequired),
         };
     }
 
@@ -319,11 +298,6 @@ fn live_file_matrix(data_dir: &Path) -> Result<(EntryPresence, EntryPresence), S
         entry_presence(&library_path(data_dir))?,
         entry_presence(&data_dir.join(DATABASE_FILE))?,
     ))
-}
-
-fn read_migration_probe(path: &Path) -> Result<MigrationSidecarProbe, String> {
-    let bytes = fs::read(path).map_err(|_| STARTUP_CLASSIFICATION_UNAVAILABLE.to_string())?;
-    serde_json::from_slice(&bytes).map_err(|_| STARTUP_CLASSIFICATION_UNAVAILABLE.to_string())
 }
 
 fn read_init_sidecar(data_dir: &Path) -> Result<InitializationSidecar, String> {
@@ -817,7 +791,7 @@ mod tests {
         let migrating = tempdir().unwrap();
         fs::write(
             migrating.path().join("migration-v1.json"),
-            r#"{"migration":1,"state":"preparing"}"#,
+            valid_migration_sidecar_json("preparing"),
         )
         .unwrap();
         assert_eq!(
@@ -829,7 +803,7 @@ mod tests {
         initialize_fresh(completed_migration.path()).unwrap();
         fs::write(
             completed_migration.path().join("migration-v1.json"),
-            r#"{"migration":1,"state":"complete"}"#,
+            valid_migration_sidecar_json("complete"),
         )
         .unwrap();
         assert_eq!(
@@ -859,7 +833,7 @@ mod tests {
         .unwrap();
         fs::write(
             conflicting_sidecars.path().join("migration-v1.json"),
-            r#"{"migration":1,"state":"preparing"}"#,
+            valid_migration_sidecar_json("preparing"),
         )
         .unwrap();
         assert_eq!(
@@ -890,6 +864,18 @@ mod tests {
         .unwrap();
         assert_eq!(
             classify(directory.path()).unwrap(),
+            StartupPath::RecoveryRequired
+        );
+
+        let forged_complete = tempdir().unwrap();
+        initialize_fresh(forged_complete.path()).unwrap();
+        fs::write(
+            forged_complete.path().join("migration-v1.json"),
+            r#"{"migration":1,"state":"complete"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            classify(forged_complete.path()).unwrap(),
             StartupPath::RecoveryRequired
         );
     }
@@ -1239,6 +1225,22 @@ mod tests {
             r#"{{"format":1,"phase":"{phase}","library":{{"live_file":"library.json","temp_file":"init-library-0123456789abcdef0123456789abcdef.tmp","sha256":"{}","old_absent":true}},"database":{{"live_file":"banana.db","temp_file":"init-database-fedcba9876543210fedcba9876543210.tmp","sha256":"{}","old_absent":true}}}}"#,
             "a".repeat(64),
             "b".repeat(64),
+        )
+    }
+
+    fn valid_migration_sidecar_json(state: &str) -> String {
+        let original_hash = "a".repeat(64);
+        let original_backup = format!(".migration-original-library-{}.tmp", "c".repeat(32));
+        if state == "preparing" {
+            return format!(
+                r#"{{"migration":1,"state":"preparing","original_library_hash":"{original_hash}","temp_library_hash":null,"temp_database_hash":null,"backup_path":null,"original_library_backup_path":"{original_backup}","candidate_credential_ref":null,"credential_origin_fingerprint":null,"summary":null}}"#
+            );
+        }
+        format!(
+            r#"{{"migration":1,"state":"{state}","original_library_hash":"{original_hash}","temp_library_hash":"{}","temp_database_hash":"{}","backup_path":"migration-backup-{}.json","original_library_backup_path":"{original_backup}","candidate_credential_ref":null,"credential_origin_fingerprint":null,"summary":{{"promptsMigrated":1,"favoritesDefaulted":0,"ordersRebuilt":0,"backupPath":"C:/safe/migration-backup.json","warnings":[]}},"summary_acknowledged":false}}"#,
+            "b".repeat(64),
+            "c".repeat(64),
+            "d".repeat(32),
         )
     }
 

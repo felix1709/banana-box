@@ -36,19 +36,19 @@ pub struct Prompt {
     pub updated_at: i64,
 }
 
-fn default_api_base_url() -> String {
+pub(crate) fn default_api_base_url() -> String {
     "https://ai.leihuo.netease.com".to_string()
 }
 
-fn default_api_key() -> String {
+pub(crate) fn default_api_key() -> String {
     String::new()
 }
 
-fn default_reverse_model() -> String {
+pub(crate) fn default_reverse_model() -> String {
     "doubao-seed-1-6-vision-250815".to_string()
 }
 
-fn default_available_reverse_models() -> Vec<String> {
+pub(crate) fn default_available_reverse_models() -> Vec<String> {
     vec![
         "doubao-seed-1-6-vision-250815".to_string(),
         "gpt-5.4-mini".to_string(),
@@ -107,11 +107,111 @@ pub fn load_library(dir: &Path) -> Library {
     load_library_strict(dir).unwrap_or_else(|_| Library::default())
 }
 
+pub struct LegacySecrets {
+    pub api_base_url: String,
+    pub api_key: Option<String>,
+    pub reverse_model: String,
+    pub available_reverse_models: Vec<String>,
+}
+
 pub fn load_library_strict(dir: &Path) -> Result<Library, String> {
     let path = library_path(dir);
     let content = fs::read_to_string(&path)
         .map_err(|error| format!("读取 {} 失败：{error}", path.display()))?;
     serde_json::from_str(&content).map_err(|error| format!("解析 {} 失败：{error}", path.display()))
+}
+
+pub fn normalize_legacy_json(raw: &str) -> Result<(Library, LegacySecrets, Vec<String>), String> {
+    let (library, secrets, warnings, _, _) = normalize_legacy_json_with_counts(raw)?;
+    Ok((library, secrets, warnings))
+}
+
+pub(crate) fn normalize_legacy_json_with_counts(
+    raw: &str,
+) -> Result<(Library, LegacySecrets, Vec<String>, usize, usize), String> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|_| "legacy library JSON 无法解析".to_string())?;
+    if value.get("version").and_then(serde_json::Value::as_i64) != Some(1) {
+        return Err("legacy library 版本不受支持".into());
+    }
+    let prompts = value
+        .get_mut("prompts")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or_else(|| "legacy library 缺少 prompts 数组".to_string())?;
+    let mut favorites_defaulted = 0;
+    let mut orders_rebuilt = 0;
+    for (index, prompt) in prompts.iter_mut().enumerate() {
+        let object = prompt
+            .as_object_mut()
+            .ok_or_else(|| "legacy library 的 prompt 不是对象".to_string())?;
+        if !object.contains_key("favorite") {
+            object.insert("favorite".into(), serde_json::Value::Bool(false));
+            favorites_defaulted += 1;
+        }
+        if !object.contains_key("order") {
+            object.insert("order".into(), serde_json::Value::from(index as i64));
+            orders_rebuilt += 1;
+        }
+    }
+
+    let settings = value
+        .get_mut("settings")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| "legacy library 缺少 settings 对象".to_string())?;
+    let secrets = LegacySecrets {
+        api_base_url: settings
+            .remove("apiBaseUrl")
+            .and_then(|item| item.as_str().map(str::to_owned))
+            .unwrap_or_else(default_api_base_url),
+        api_key: settings
+            .remove("apiKey")
+            .and_then(|item| item.as_str().map(str::to_owned))
+            .filter(|value| !value.trim().is_empty()),
+        reverse_model: settings
+            .remove("reverseModel")
+            .and_then(|item| item.as_str().map(str::to_owned))
+            .unwrap_or_else(default_reverse_model),
+        available_reverse_models: settings
+            .remove("availableReverseModels")
+            .and_then(|item| serde_json::from_value(item).ok())
+            .unwrap_or_else(default_available_reverse_models),
+    };
+    value["version"] = serde_json::Value::from(LIBRARY_VERSION);
+    let library =
+        serde_json::from_value(value).map_err(|_| "legacy library 的数据结构无效".to_string())?;
+
+    let mut warnings = Vec::new();
+    if favorites_defaulted != 0 {
+        warnings.push("缺失的 favorite 已按 false 迁移，历史上已经丢失的收藏无法恢复".into());
+    }
+    if orders_rebuilt != 0 {
+        warnings.push(format!("{orders_rebuilt} 条提示词缺少排序，已按原顺序迁移"));
+    }
+    Ok((
+        library,
+        secrets,
+        warnings,
+        favorites_defaulted,
+        orders_rebuilt,
+    ))
+}
+
+pub(crate) fn serialize_sanitized_library(library: &Library) -> Result<Vec<u8>, String> {
+    let mut value =
+        serde_json::to_value(library).map_err(|_| "无法序列化迁移后的 library".to_string())?;
+    let settings = value
+        .get_mut("settings")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| "迁移后的 library 缺少 settings 对象".to_string())?;
+    for key in [
+        "apiBaseUrl",
+        "apiKey",
+        "reverseModel",
+        "availableReverseModels",
+    ] {
+        settings.remove(key);
+    }
+    serde_json::to_vec_pretty(&value).map_err(|_| "无法序列化迁移后的 library".to_string())
 }
 
 pub fn save_library(dir: &Path, lib: &Library) -> std::io::Result<()> {
@@ -190,6 +290,67 @@ pub fn import_library(zip_path: &Path, data_dir: &Path) -> std::io::Result<Libra
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn normalizes_legacy_fields_without_retaining_credential_in_sanitized_json() {
+        const LEGACY_KEY: &str = "test-only-legacy-key";
+        let raw = format!(
+            r#"{{
+              "version": 1,
+              "categories": [],
+              "prompts": [
+                {{
+                  "id": "p1",
+                  "title": "旧提示词",
+                  "content": "内容",
+                  "categoryId": null,
+                  "tags": [],
+                  "image": null,
+                  "createdAt": 1,
+                  "updatedAt": 2
+                }}
+              ],
+              "settings": {{
+                "hotkey": "Ctrl+Shift+B",
+                "theme": "auto",
+                "apiBaseUrl": "https://legacy.example.test/v1",
+                "apiKey": "{LEGACY_KEY}",
+                "reverseModel": "legacy-model",
+                "availableReverseModels": ["legacy-model"]
+              }}
+            }}"#
+        );
+
+        let (library, secrets, warnings) = normalize_legacy_json(&raw).unwrap();
+        let sanitized = serialize_sanitized_library(&library).unwrap();
+        let sanitized_text = String::from_utf8(sanitized).unwrap();
+
+        assert_eq!(library.version, LIBRARY_VERSION);
+        assert!(!library.prompts[0].favorite);
+        assert_eq!(library.prompts[0].order, 0);
+        assert_eq!(secrets.api_base_url, "https://legacy.example.test/v1");
+        assert_eq!(secrets.api_key.as_deref(), Some(LEGACY_KEY));
+        assert_eq!(secrets.reverse_model, "legacy-model");
+        assert_eq!(secrets.available_reverse_models, vec!["legacy-model"]);
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("缺失的 favorite 已按 false 迁移")));
+        assert!(!sanitized_text.contains(LEGACY_KEY));
+        assert!(!sanitized_text.contains("apiKey"));
+        assert!(!sanitized_text.contains("apiBaseUrl"));
+        assert!(!sanitized_text.contains("reverseModel"));
+        assert!(!sanitized_text.contains("availableReverseModels"));
+    }
+
+    #[test]
+    fn legacy_normalization_rejects_a_missing_prompt_array() {
+        let error = match normalize_legacy_json(r#"{"version":1,"settings":{}}"#) {
+            Ok(_) => panic!("缺少 prompts 的旧数据不应被接受"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("prompts"));
+    }
 
     #[test]
     fn load_missing_returns_default() {

@@ -3,6 +3,7 @@ mod commands;
 mod db;
 mod fs_atomic;
 mod library;
+mod migration;
 mod provider_http;
 mod providers;
 mod secrets;

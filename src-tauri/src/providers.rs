@@ -659,12 +659,12 @@ fn stored_provider_is_valid(stored: &StoredProvider) -> bool {
     }
 }
 
-fn credential_reference(provider_id: &str, origin_fingerprint: &str) -> String {
+pub(crate) fn credential_reference(provider_id: &str, origin_fingerprint: &str) -> String {
     let origin_hash = origin_fingerprint_hash(origin_fingerprint);
     format!("provider/{provider_id}/{origin_hash}/{}", Uuid::new_v4())
 }
 
-fn credential_ref_matches_binding(
+pub(crate) fn credential_ref_matches_binding(
     credential_ref: &str,
     provider_id: &str,
     origin_fingerprint: &str,
@@ -688,7 +688,7 @@ fn credential_ref_matches_binding(
         .unwrap_or(false)
 }
 
-fn origin_fingerprint_hash(origin_fingerprint: &str) -> String {
+pub(crate) fn origin_fingerprint_hash(origin_fingerprint: &str) -> String {
     format!("{:x}", Sha256::digest(origin_fingerprint.as_bytes()))
 }
 

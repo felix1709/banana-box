@@ -1,3 +1,4 @@
+use crate::{db::Database, provider_http::ProviderHttpClient, providers::ProviderService};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 const OPERATION_GATE_UNAVAILABLE: &str = "OPERATION_GATE_UNAVAILABLE";
@@ -184,7 +185,7 @@ impl Default for RestoreBlockerRegistry {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MigrationSummary {
     pub prompts_migrated: usize,
@@ -192,6 +193,13 @@ pub struct MigrationSummary {
     pub orders_rebuilt: usize,
     pub backup_path: String,
     pub warnings: Vec<String>,
+}
+
+pub struct AppServices {
+    pub database: Arc<Database>,
+    pub provider_http: Arc<ProviderHttpClient>,
+    pub providers: Arc<ProviderService>,
+    pub operations: Arc<AppOperationGate>,
 }
 
 #[derive(Clone, serde::Serialize)]

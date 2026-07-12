@@ -3,6 +3,42 @@
 use std::path::Path;
 
 pub fn replace_file(source: &Path, destination: &Path) -> Result<(), String> {
+    ensure_same_parent(source, destination)?;
+    replace_file_platform(source, destination)
+}
+
+pub fn replace_existing_file(source: &Path, destination: &Path) -> Result<(), String> {
+    replace_existing_file_with_optional_backup(source, destination, None)
+}
+
+pub fn replace_existing_file_with_backup(
+    source: &Path,
+    destination: &Path,
+    backup: &Path,
+) -> Result<(), String> {
+    ensure_same_parent(source, backup)?;
+    ensure_same_parent(destination, backup)?;
+    match std::fs::symlink_metadata(backup) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        _ => return Err("atomic replacement backup path must not already exist".into()),
+    }
+    replace_existing_file_with_optional_backup(source, destination, Some(backup))
+}
+
+fn replace_existing_file_with_optional_backup(
+    source: &Path,
+    destination: &Path,
+    backup: Option<&Path>,
+) -> Result<(), String> {
+    ensure_same_parent(source, destination)?;
+    match std::fs::symlink_metadata(destination) {
+        Ok(metadata) if metadata.file_type().is_file() => {}
+        _ => return Err("atomic replacement requires an existing regular destination".into()),
+    }
+    replace_existing_file_platform(source, destination, backup)
+}
+
+fn ensure_same_parent(source: &Path, destination: &Path) -> Result<(), String> {
     let source_parent = source
         .parent()
         .ok_or_else(|| "source file has no parent directory".to_string())?;
@@ -18,7 +54,7 @@ pub fn replace_file(source: &Path, destination: &Path) -> Result<(), String> {
     if source_parent != destination_parent {
         return Err("atomic replacement requires the same parent directory".into());
     }
-    replace_file_platform(source, destination)
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -48,15 +84,64 @@ fn replace_file_platform(source: &Path, destination: &Path) -> Result<(), String
     }
 }
 
+#[cfg(windows)]
+fn replace_existing_file_platform(
+    source: &Path,
+    destination: &Path,
+    backup: Option<&Path>,
+) -> Result<(), String> {
+    use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
+    use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+
+    fn wide(value: &OsStr) -> Vec<u16> {
+        value.encode_wide().chain(std::iter::once(0)).collect()
+    }
+
+    let source = wide(source.as_os_str());
+    let destination = wide(destination.as_os_str());
+    let backup = backup.map(|path| wide(path.as_os_str()));
+    let ok = unsafe {
+        ReplaceFileW(
+            destination.as_ptr(),
+            source.as_ptr(),
+            backup
+                .as_ref()
+                .map_or(std::ptr::null(), |path| path.as_ptr()),
+            0,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    if ok == 0 {
+        Err(std::io::Error::last_os_error().to_string())
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(not(windows))]
 fn replace_file_platform(source: &Path, destination: &Path) -> Result<(), String> {
+    std::fs::rename(source, destination).map_err(|error| error.to_string())
+}
+
+#[cfg(not(windows))]
+fn replace_existing_file_platform(
+    source: &Path,
+    destination: &Path,
+    _backup: Option<&Path>,
+) -> Result<(), String> {
     std::fs::rename(source, destination).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::replace_file;
-    use std::fs;
+    use std::{fs, fs::OpenOptions};
+
+    #[cfg(windows)]
+    use super::{replace_existing_file, replace_existing_file_with_backup};
+    #[cfg(windows)]
+    use fs2::FileExt;
 
     #[test]
     fn replaces_a_nonexistent_destination() {
@@ -92,6 +177,62 @@ mod tests {
             fs::read_to_string(destination).unwrap(),
             "second replacement"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn replaces_an_existing_destination_while_its_content_is_exclusively_locked() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("destination.txt");
+        let source = dir.path().join("replacement.txt");
+        fs::write(&destination, "old version").unwrap();
+        fs::write(&source, "new version").unwrap();
+        let target_lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&destination)
+            .unwrap();
+        target_lock.try_lock_exclusive().unwrap();
+
+        replace_existing_file(&source, &destination).unwrap();
+
+        assert!(!source.exists());
+        assert_eq!(fs::read_to_string(destination).unwrap(), "new version");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn replaces_an_existing_destination_and_keeps_a_named_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("destination.txt");
+        let source = dir.path().join("replacement.txt");
+        let backup = dir.path().join("original-backup.txt");
+        fs::write(&destination, "old version").unwrap();
+        fs::write(&source, "new version").unwrap();
+
+        replace_existing_file_with_backup(&source, &destination, &backup).unwrap();
+
+        assert!(!source.exists());
+        assert_eq!(fs::read_to_string(destination).unwrap(), "new version");
+        assert_eq!(fs::read_to_string(backup).unwrap(), "old version");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn refuses_to_overwrite_an_existing_named_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("destination.txt");
+        let source = dir.path().join("replacement.txt");
+        let backup = dir.path().join("original-backup.txt");
+        fs::write(&destination, "old version").unwrap();
+        fs::write(&source, "new version").unwrap();
+        fs::write(&backup, "protected backup").unwrap();
+
+        assert!(replace_existing_file_with_backup(&source, &destination, &backup).is_err());
+
+        assert_eq!(fs::read_to_string(destination).unwrap(), "old version");
+        assert_eq!(fs::read_to_string(source).unwrap(), "new version");
+        assert_eq!(fs::read_to_string(backup).unwrap(), "protected backup");
     }
 
     #[test]
