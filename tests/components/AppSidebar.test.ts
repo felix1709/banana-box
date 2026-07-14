@@ -10,7 +10,7 @@ describe('AppSidebar', () => {
     setActivePinia(createPinia())
   })
 
-  it('shows the three top-level tools and switches between them', async () => {
+  it('shows the top-level tools and switches between them', async () => {
     const wrapper = mount(AppSidebar)
     const ui = useUiStore()
 
@@ -54,8 +54,7 @@ describe('AppSidebar', () => {
     const wrapper = mount(AppSidebar)
     const ui = useUiStore()
 
-    const dailyTasksButton = wrapper.get('[data-tool="daily-tasks"]')
-    await dailyTasksButton.trigger('click')
+    await wrapper.get('[data-tool="daily-tasks"]').trigger('click')
 
     expect(ui.activeTool).toBe('daily-tasks')
   })

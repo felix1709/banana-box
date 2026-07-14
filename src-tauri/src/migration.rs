@@ -986,7 +986,7 @@ fn validate_current_v1_pair(data_dir: &Path) -> Result<(), String> {
     }
     let connection = Connection::open_with_flags(&database_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|_| MIGRATION_RECOVERY_REQUIRED)?;
-    schema::validate(&connection).map_err(|_| MIGRATION_RECOVERY_REQUIRED)?;
+    schema::validate_migratable(&connection).map_err(|_| MIGRATION_RECOVERY_REQUIRED)?;
     for (id, kind) in [
         ("reverse-image", "reverse-image"),
         ("storyboard", "storyboard"),
@@ -1835,6 +1835,89 @@ mod tests {
             StartupOutcome::Ready { .. } => panic!("确认后的摘要不应再次显示"),
             StartupOutcome::Recovery(info) => {
                 panic!("正常编辑后的 v1 数据不应进入恢复模式：{}", info.message)
+            }
+        }
+    }
+
+    #[test]
+    fn completed_migration_sidecar_allows_database_schema_upgrade() {
+        let directory = tempdir().unwrap();
+        fs::write(library_path(directory.path()), legacy_library_json()).unwrap();
+        let coordinator = StartupCoordinator::new(
+            Arc::new(MemoryCredentialStore::default()),
+            Arc::new(CredentialMutationCoordinator::default()),
+            Arc::new(AppOperationGate::default()),
+        );
+
+        match coordinator.run(directory.path()) {
+            StartupOutcome::Ready { .. } => {}
+            StartupOutcome::Recovery(info) => panic!("迁移不应进入恢复模式：{}", info.message),
+        }
+        acknowledge_migration_summary(directory.path()).unwrap();
+        {
+            for suffix in ["", "-wal", "-shm"] {
+                let path = directory.path().join(format!("{DATABASE_FILE}{suffix}"));
+                if path.exists() {
+                    fs::remove_file(path).unwrap();
+                }
+            }
+            let connection = Connection::open(directory.path().join(DATABASE_FILE)).unwrap();
+            connection
+                .execute_batch(
+                    &[
+                        include_str!("../migrations/0001_v1.sql"),
+                        include_str!("../migrations/0002_allow_duplicate_project_codes.sql"),
+                        include_str!("../migrations/0003_storyboard_agent.sql"),
+                        include_str!("../migrations/0004_cloud_foundation.sql"),
+                        "
+                        INSERT INTO schema_migrations (version, applied_at) VALUES (1, '2026-07-12T00:00:00Z');
+                        INSERT INTO schema_migrations (version, applied_at) VALUES (2, '2026-07-12T00:00:00Z');
+                        INSERT INTO schema_migrations (version, applied_at) VALUES (3, '2026-07-12T00:00:00Z');
+                        INSERT INTO schema_migrations (version, applied_at) VALUES (4, '2026-07-12T00:00:00Z');
+                        INSERT INTO ai_providers (
+                            id, kind, display_name, base_url, models_url, chat_completions_url,
+                            default_model, available_models_json, probed_model, structured_mode,
+                            interactive_compatible, bound_host, needs_credentials, credential_ref,
+                            created_at, updated_at
+                        ) VALUES (
+                            'reverse-image', 'reverse-image', '图片反推',
+                            'https://example.supabase.co/v1',
+                            'https://example.supabase.co/v1/models',
+                            'https://example.supabase.co/v1/chat/completions',
+                            'test-model', '[\"test-model\"]', NULL, NULL, NULL,
+                            'https://example.supabase.co', 1, NULL,
+                            '2026-07-12T00:00:00Z', '2026-07-12T00:00:00Z'
+                        );
+                        INSERT INTO ai_providers (
+                            id, kind, display_name, base_url, models_url, chat_completions_url,
+                            default_model, available_models_json, probed_model, structured_mode,
+                            interactive_compatible, bound_host, needs_credentials, credential_ref,
+                            created_at, updated_at
+                        ) VALUES (
+                            'storyboard', 'storyboard', '故事板 Agent',
+                            '', '', '', NULL, '[]', NULL, NULL, NULL, NULL, 1, NULL,
+                            '2026-07-12T00:00:00Z', '2026-07-12T00:00:00Z'
+                        );
+                        PRAGMA user_version = 4;
+                        ",
+                    ]
+                    .join("\n"),
+                )
+                .unwrap();
+        }
+
+        match coordinator.run(directory.path()) {
+            StartupOutcome::Ready { services, .. } => {
+                services
+                    .database
+                    .with_connection(|connection| {
+                        crate::db::schema::validate(connection)
+                            .map_err(|error| error.to_string())
+                    })
+                    .unwrap();
+            }
+            StartupOutcome::Recovery(info) => {
+                panic!("可升级的 v3 数据库不应进入恢复模式：{}", info.message)
             }
         }
     }

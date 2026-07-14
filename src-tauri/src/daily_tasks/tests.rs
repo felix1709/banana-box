@@ -44,10 +44,14 @@ fn group_report_omits_daily_header_and_keeps_incomplete_tasks() {
 #[test]
 fn task_input_keeps_chinese_titles_but_rejects_report_structure_injection() {
     assert_eq!(normalize_group_code(" l36 ").unwrap(), "L36");
-    assert!(validate_task_fields("三丽鸥跟进 #角色", 50, "工作记录", 95).is_ok());
+    assert!(
+        validate_task_fields("三丽鸥跟进 #角色", 50, "工作记录", 95, "09:30", "提醒")
+            .is_ok()
+    );
     assert!(normalize_group_code("#L36").is_err());
-    assert!(validate_task_fields("第一行\n第二行", 50, "", 0).is_err());
-    assert!(validate_task_fields("【伪造】", 50, "", 0).is_err());
+    assert!(validate_task_fields("第一行\n第二行", 50, "", 0, "", "").is_err());
+    assert!(validate_task_fields("【伪造】", 50, "", 0, "", "").is_err());
+    assert!(validate_task_fields("正常任务", 50, "", 0, "24:00", "").is_err());
 }
 
 #[test]
@@ -100,10 +104,13 @@ fn tasks_can_update_reorder_and_delete_without_leaving_stale_rows() {
             progress: 80,
             note: "备注".into(),
             invested_minutes: 35,
+            reminder_time: "10:30".into(),
+            reminder_content: "检查进度".into(),
         },
     )
     .unwrap();
     assert_eq!(changed.groups[0].tasks[0].progress, 80);
+    assert_eq!(changed.groups[0].tasks[0].reminder_time, "10:30");
 
     let reordered = repository::reorder_tasks(
         &db,
@@ -139,5 +146,7 @@ fn input(
         progress,
         note: String::new(),
         invested_minutes,
+        reminder_time: String::new(),
+        reminder_content: String::new(),
     }
 }

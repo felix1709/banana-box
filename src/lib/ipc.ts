@@ -4,7 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
-import type { Library } from '@/types'
+import type { CloudConfig, CloudRuntimeConfig, Library, SaveCloudConfigInput } from '@/types'
 
 export interface ImportFile {
   filename: string
@@ -39,6 +39,18 @@ export interface SuggestCompressedOutputPathInput {
 
 export async function loadLibrary(): Promise<Library> {
   return await invoke<Library>('load_library')
+}
+
+export async function loadCloudConfig(): Promise<CloudConfig> {
+  return await invoke<CloudConfig>('load_cloud_config', {})
+}
+
+export async function loadCloudRuntimeConfig(): Promise<CloudRuntimeConfig> {
+  return await invoke<CloudRuntimeConfig>('load_cloud_runtime_config', {})
+}
+
+export async function saveCloudConfig(input: SaveCloudConfigInput): Promise<CloudConfig> {
+  return await invoke<CloudConfig>('save_cloud_config', { input })
 }
 
 export async function saveLibrary(library: Library): Promise<void> {

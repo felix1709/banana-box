@@ -6,11 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '@/App.vue'
 import PromptCard from '@/components/PromptCard.vue'
 import { useLibraryStore } from '@/stores/library'
+import { useCloudSessionStore } from '@/stores/cloudSession'
+import { useAuthStore } from '@/stores/auth'
+import { useDailyTasksStore } from '@/stores/dailyTasks'
 import { useUiStore } from '@/stores/ui'
 
-let floatingDropHandler: ((event: { payload: unknown }) => void) | null = null
+let eventHandlers: Record<string, (event: { payload: unknown }) => void> = {}
 const coreApi = vi.hoisted(() => ({
   invoke: vi.fn().mockResolvedValue(undefined),
+}))
+const eventApi = vi.hoisted(() => ({
+  emitTo: vi.fn().mockResolvedValue(undefined),
 }))
 const windowApi = vi.hoisted(() => ({
   startResizeDragging: vi.fn().mockResolvedValue(undefined),
@@ -21,8 +27,9 @@ const windowApi = vi.hoisted(() => ({
 }))
 
 vi.mock('@tauri-apps/api/event', () => ({
+  emitTo: eventApi.emitTo,
   listen: vi.fn((eventName: string, handler: (event: { payload: unknown }) => void) => {
-    if (eventName === 'floating-file-dropped') floatingDropHandler = handler
+    eventHandlers[eventName] = handler
     return Promise.resolve(vi.fn())
   }),
 }))
@@ -46,6 +53,17 @@ vi.mock('@/lib/ipc', () => ({
     },
   }),
   saveLibrary: vi.fn().mockResolvedValue(undefined),
+  loadCloudConfig: vi.fn().mockResolvedValue({
+    supabaseUrl: '',
+    hasAnonKey: false,
+    cloudEnabled: false,
+    updatedAt: null,
+  }),
+  loadCloudRuntimeConfig: vi.fn().mockResolvedValue({
+    supabaseUrl: '',
+    anonKey: '',
+    cloudEnabled: false,
+  }),
   readImageBytes: vi.fn(),
 }))
 
@@ -53,8 +71,9 @@ describe('App', () => {
   beforeEach(() => {
     vi.useRealTimers()
     setActivePinia(createPinia())
-    floatingDropHandler = null
+    eventHandlers = {}
     vi.clearAllMocks()
+    eventApi.emitTo.mockClear()
     windowApi.isFullscreen.mockResolvedValue(false)
   })
 
@@ -246,7 +265,7 @@ describe('App', () => {
     mount(App)
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
-    floatingDropHandler?.({
+    eventHandlers['floating-file-dropped']?.({
       payload: {
         filePath: 'C:/tmp/photo.png',
         fileName: 'photo.png',
@@ -260,12 +279,135 @@ describe('App', () => {
     expect(ui.floatingActionFile?.fileName).toBe('photo.png')
   })
 
+  it('sends due daily task reminders to the floating window', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 12, 10, 0, 0))
+    const daily = useDailyTasksStore()
+    daily.selectedDate = '2026-07-12'
+    daily.day = {
+      id: 'd1',
+      localDate: '2026-07-12',
+      settledAt: null,
+      reportSnapshot: null,
+      groups: [{
+        id: 'g1',
+        code: 'L36',
+        projectId: null,
+        position: 0,
+        tasks: [{
+          id: 't1',
+          title: 'Shot refinement',
+          progress: 45,
+          note: '',
+          investedMinutes: 0,
+          reminderTime: '10:01',
+          reminderContent: 'Check delivery notes',
+          position: 0,
+          sourceTaskId: null,
+          sourceSnapshotHash: null,
+          createdAt: '2026-07-12T08:00:00Z',
+          updatedAt: '2026-07-12T08:00:00Z',
+        }],
+      }],
+    }
+
+    const wrapper = mount(App)
+    await vi.advanceTimersByTimeAsync(0)
+    coreApi.invoke.mockClear()
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await wrapper.vm.$nextTick()
+
+    expect(eventApi.emitTo).toHaveBeenCalledWith('floatbtn', 'daily-task-reminder', {
+      taskId: 't1',
+      title: 'Shot refinement',
+      body: 'Check delivery notes',
+      time: '10:01',
+      localDate: '2026-07-12',
+    })
+    expect(wrapper.find('[data-reminder-dialog]').exists()).toBe(false)
+  })
+
+  it('snoozes a due daily task reminder by updating the task reminder time', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 12, 10, 1, 0))
+    const daily = useDailyTasksStore()
+    const update = vi.spyOn(daily, 'update').mockResolvedValue(undefined)
+    daily.selectedDate = '2026-07-12'
+    daily.day = {
+      id: 'd1',
+      localDate: '2026-07-12',
+      settledAt: null,
+      reportSnapshot: null,
+      groups: [{
+        id: 'g1',
+        code: 'L36',
+        projectId: null,
+        position: 0,
+        tasks: [{
+          id: 't1',
+          title: 'Shot refinement',
+          progress: 45,
+          note: 'Keep color pass tight',
+          investedMinutes: 30,
+          reminderTime: '10:01',
+          reminderContent: 'Check delivery notes',
+          position: 0,
+          sourceTaskId: null,
+          sourceSnapshotHash: null,
+          createdAt: '2026-07-12T08:00:00Z',
+          updatedAt: '2026-07-12T08:00:00Z',
+        }],
+      }],
+    }
+
+    mount(App)
+    await vi.advanceTimersByTimeAsync(0)
+
+    eventHandlers['daily-task-reminder-snooze']?.({
+      payload: {
+        taskId: 't1',
+        localDate: '2026-07-12',
+        minutes: 10,
+      },
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(update).toHaveBeenCalledWith({
+      taskId: 't1',
+      title: 'Shot refinement',
+      progress: 45,
+      note: 'Keep color pass tight',
+      investedMinutes: 30,
+      reminderTime: '10:11',
+      reminderContent: 'Check delivery notes',
+    })
+  })
+
   it('does not render the old separate category pane in the prompt library', async () => {
     const wrapper = mount(App)
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
     expect(wrapper.find('.category-pane').exists()).toBe(false)
     expect(wrapper.find('.sidebar-category-list').exists()).toBe(true)
+  })
+
+  it('refreshes auth when cloud settings become ready after the app has mounted', async () => {
+    const wrapper = mount(App)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    const auth = useAuthStore()
+    const initialize = vi.spyOn(auth, 'initialize').mockResolvedValue(undefined)
+
+    useCloudSessionStore().config = {
+      supabaseUrl: 'https://example.supabase.co',
+      hasAnonKey: true,
+      cloudEnabled: true,
+      updatedAt: '2026-07-13T15:50:00Z',
+    }
+    await wrapper.vm.$nextTick()
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(initialize).toHaveBeenCalled()
   })
 
   it('keeps the prompt library list in a dedicated scroll area', async () => {

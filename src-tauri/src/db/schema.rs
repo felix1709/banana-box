@@ -1,17 +1,26 @@
 use rusqlite::{Connection, TransactionBehavior};
 use sha2::{Digest, Sha256};
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 6;
 pub const DATABASE_SCHEMA_INVALID: &str = "DATABASE_SCHEMA_INVALID";
 const MIGRATION_V1: &str = include_str!("../../migrations/0001_v1.sql");
 const MIGRATION_V2: &str = include_str!("../../migrations/0002_allow_duplicate_project_codes.sql");
 const MIGRATION_V3: &str = include_str!("../../migrations/0003_storyboard_agent.sql");
+const MIGRATION_V4: &str = include_str!("../../migrations/0004_cloud_foundation.sql");
+const MIGRATION_V5: &str = include_str!("../../migrations/0005_workspace_sync_foundation.sql");
+const MIGRATION_V6: &str = include_str!("../../migrations/0006_daily_task_reminders.sql");
 const V1_SCHEMA_FINGERPRINT: &str =
     "9efed7e5f33c46abefdd4cfe98a19a7374c2f08c81ed7f55f7eac1ced5bba1e4";
 const V2_SCHEMA_FINGERPRINT: &str =
     "8417ad4553c0f710ded1daef30d5725fc5601f7aafba0580e3f8e4df6276c20e";
 const V3_SCHEMA_FINGERPRINT: &str =
     "1ab5bb541a8c84e3465ead97c74b5cc2f3c7aac1290d814bd1c22a4c74a7e1a3";
+const V4_SCHEMA_FINGERPRINT: &str =
+    "31242f2b209ce2873b34e6be19ab019ce3437fea9e00fdb9013eb68c9becb74f";
+const V5_SCHEMA_FINGERPRINT: &str =
+    "36f288ab2feb0a4764f158a1ac03bf7e86eab62f7eb55fa40baa2d8c632da6c8";
+const V6_SCHEMA_FINGERPRINT: &str =
+    "1fc20a884699cd7529cf3c587c340f4d0fc9b85aa51f1ee36babef4c6d135570";
 const REQUIRED_TABLES_PRE_V3: [&str; 15] = [
     "schema_migrations",
     "ai_providers",
@@ -29,7 +38,7 @@ const REQUIRED_TABLES_PRE_V3: [&str; 15] = [
     "storyboard_message_blocks",
     "reminder_log",
 ];
-const REQUIRED_TABLES: [&str; 16] = [
+const REQUIRED_TABLES_PRE_V4: [&str; 16] = [
     "schema_migrations",
     "ai_providers",
     "credential_cleanup",
@@ -46,6 +55,48 @@ const REQUIRED_TABLES: [&str; 16] = [
     "storyboard_message_blocks",
     "storyboard_thread_skills",
     "reminder_log",
+];
+const REQUIRED_TABLES_PRE_V5: [&str; 17] = [
+    "schema_migrations",
+    "ai_providers",
+    "credential_cleanup",
+    "projects",
+    "project_stages",
+    "daily_task_days",
+    "daily_task_groups",
+    "daily_tasks",
+    "skills",
+    "skill_versions",
+    "storyboard_threads",
+    "agent_requests",
+    "storyboard_messages",
+    "storyboard_message_blocks",
+    "storyboard_thread_skills",
+    "reminder_log",
+    "cloud_config",
+];
+const REQUIRED_TABLES: [&str; 21] = [
+    "schema_migrations",
+    "ai_providers",
+    "credential_cleanup",
+    "projects",
+    "project_stages",
+    "daily_task_days",
+    "daily_task_groups",
+    "daily_tasks",
+    "skills",
+    "skill_versions",
+    "storyboard_threads",
+    "agent_requests",
+    "storyboard_messages",
+    "storyboard_message_blocks",
+    "storyboard_thread_skills",
+    "reminder_log",
+    "cloud_config",
+    "local_workspaces",
+    "sync_outbox",
+    "sync_cursors",
+    "local_device_bindings",
 ];
 
 pub fn migrate(connection: &mut Connection) -> Result<(), String> {
@@ -116,6 +167,42 @@ pub fn migrate(connection: &mut Connection) -> Result<(), String> {
                 .map_err(|error| error.to_string())?;
             applied_version = 3;
         }
+        if applied_version == 3 {
+            transaction
+                .execute_batch(MIGRATION_V4)
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (4, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+            applied_version = 4;
+        }
+        if applied_version == 4 {
+            transaction
+                .execute_batch(MIGRATION_V5)
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (5, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+            applied_version = 5;
+        }
+        if applied_version == 5 {
+            transaction
+                .execute_batch(MIGRATION_V6)
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (6, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+            applied_version = 6;
+        }
         transaction
             .pragma_update(None, "user_version", applied_version)
             .map_err(|error| error.to_string())?;
@@ -147,7 +234,7 @@ pub fn validate(connection: &Connection) -> Result<(), String> {
     validate_migration_records(connection, SCHEMA_VERSION)?;
 
     let fingerprint = schema_fingerprint(connection).map_err(schema_invalid)?;
-    if fingerprint != V3_SCHEMA_FINGERPRINT {
+    if fingerprint != V6_SCHEMA_FINGERPRINT {
         return Err(schema_invalid("schema fingerprint mismatch"));
     }
     validate_database_health(connection)
@@ -163,6 +250,9 @@ pub fn validate_migratable(connection: &Connection) -> Result<(), String> {
     let (required_tables, expected_fingerprint) = match version {
         1 => (&REQUIRED_TABLES_PRE_V3[..], V1_SCHEMA_FINGERPRINT),
         2 => (&REQUIRED_TABLES_PRE_V3[..], V2_SCHEMA_FINGERPRINT),
+        3 => (&REQUIRED_TABLES_PRE_V4[..], V3_SCHEMA_FINGERPRINT),
+        4 => (&REQUIRED_TABLES_PRE_V5[..], V4_SCHEMA_FINGERPRINT),
+        5 => (&REQUIRED_TABLES[..], V5_SCHEMA_FINGERPRINT),
         _ => {
             return Err(schema_invalid(format!(
                 "expected a migratable user_version, found {version}"
@@ -282,8 +372,9 @@ fn normalize_schema_sql(sql: &str) -> String {
 mod tests {
     use super::{
         migrate, schema_fingerprint, validate, validate_migratable, DATABASE_SCHEMA_INVALID,
-        MIGRATION_V1, MIGRATION_V2, SCHEMA_VERSION, V1_SCHEMA_FINGERPRINT, V2_SCHEMA_FINGERPRINT,
-        V3_SCHEMA_FINGERPRINT,
+        MIGRATION_V1, MIGRATION_V2, MIGRATION_V3, MIGRATION_V4, MIGRATION_V5, SCHEMA_VERSION,
+        V1_SCHEMA_FINGERPRINT, V2_SCHEMA_FINGERPRINT, V3_SCHEMA_FINGERPRINT,
+        V4_SCHEMA_FINGERPRINT, V5_SCHEMA_FINGERPRINT, V6_SCHEMA_FINGERPRINT,
     };
     use rusqlite::Connection;
 
@@ -331,7 +422,7 @@ mod tests {
             connection
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
-            3,
+            6,
         );
         for id in ["project-1", "project-2"] {
             assert!(connection
@@ -344,7 +435,7 @@ mod tests {
         }
         assert_eq!(
             schema_fingerprint(&connection).unwrap(),
-            V3_SCHEMA_FINGERPRINT
+            V6_SCHEMA_FINGERPRINT
         );
         validate(&connection).unwrap();
     }
@@ -436,6 +527,198 @@ mod tests {
     }
 
     #[test]
+    fn validate_migratable_accepts_a_valid_v3_database() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(MIGRATION_V1).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (1, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection.execute_batch(MIGRATION_V2).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (2, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection.execute_batch(MIGRATION_V3).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (3, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "user_version", 3_i64)
+            .unwrap();
+
+        assert_eq!(
+            schema_fingerprint(&connection).unwrap(),
+            V3_SCHEMA_FINGERPRINT
+        );
+        validate_migratable(&connection).unwrap();
+    }
+
+    #[test]
+    fn validate_migratable_accepts_a_valid_v4_database() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(MIGRATION_V1).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (1, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection.execute_batch(MIGRATION_V2).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (2, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection.execute_batch(MIGRATION_V3).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (3, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection.execute_batch(MIGRATION_V4).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (4, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "user_version", 4_i64)
+            .unwrap();
+
+        assert_eq!(
+            schema_fingerprint(&connection).unwrap(),
+            V4_SCHEMA_FINGERPRINT
+        );
+        validate_migratable(&connection).unwrap();
+    }
+
+    #[test]
+    fn migrate_upgrades_v5_daily_tasks_with_reminder_columns() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(MIGRATION_V1).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (1, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection.execute_batch(MIGRATION_V2).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (2, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection.execute_batch(MIGRATION_V3).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (3, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection.execute_batch(MIGRATION_V4).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (4, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection.execute_batch(MIGRATION_V5).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (5, '2026-07-12T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "user_version", 5_i64)
+            .unwrap();
+
+        assert_eq!(
+            schema_fingerprint(&connection).unwrap(),
+            V5_SCHEMA_FINGERPRINT
+        );
+        validate_migratable(&connection).unwrap();
+
+        migrate(&mut connection).unwrap();
+
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            6,
+        );
+        let columns = table_columns(&connection, "daily_tasks");
+        assert!(columns.contains(&"reminder_time".to_string()));
+        assert!(columns.contains(&"reminder_content".to_string()));
+        assert_eq!(
+            schema_fingerprint(&connection).unwrap(),
+            V6_SCHEMA_FINGERPRINT
+        );
+    }
+
+    #[test]
+    fn workspace_sync_foundation_schema_creates_local_cache_tables_and_columns() {
+        let mut connection = Connection::open_in_memory().unwrap();
+
+        migrate(&mut connection).unwrap();
+
+        for required in [
+            "local_workspaces",
+            "sync_outbox",
+            "sync_cursors",
+            "local_device_bindings",
+        ] {
+            let exists: i64 = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                    [required],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 1, "missing {required}");
+        }
+
+        let project_columns = table_columns(&connection, "projects");
+        for required in [
+            "local_workspace_id",
+            "cloud_id",
+            "cloud_workspace_id",
+            "revision",
+            "sync_state",
+            "deleted_at",
+        ] {
+            assert!(project_columns.contains(&required.to_string()), "missing projects.{required}");
+        }
+
+        let daily_day_columns = table_columns(&connection, "daily_task_days");
+        for required in [
+            "local_workspace_id",
+            "cloud_id",
+            "cloud_workspace_id",
+            "revision",
+            "sync_state",
+            "deleted_at",
+        ] {
+            assert!(
+                daily_day_columns.contains(&required.to_string()),
+                "missing daily_task_days.{required}"
+            );
+        }
+    }
+
+    #[test]
     fn production_management_schema_creates_all_tables() {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::Database::open(dir.path().join("banana.db")).unwrap();
@@ -523,5 +806,16 @@ mod tests {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(migration).unwrap();
         schema_fingerprint(&connection).unwrap()
+    }
+
+    fn table_columns(connection: &Connection, table: &str) -> Vec<String> {
+        let mut statement = connection
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap();
+        statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
     }
 }

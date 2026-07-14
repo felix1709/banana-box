@@ -1,4 +1,5 @@
 import { mount } from '@vue/test-utils'
+import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AnimatedBananaButton from '@/components/AnimatedBananaButton.vue'
 import FloatButton from '@/components/FloatButton.vue'
@@ -9,12 +10,18 @@ const mocks = vi.hoisted(() => ({
   listen: vi.fn(),
   onDragDropEvent: vi.fn(),
   startDragging: vi.fn().mockResolvedValue(undefined),
+  setSize: vi.fn().mockResolvedValue(undefined),
+  setPosition: vi.fn().mockResolvedValue(undefined),
+  outerPosition: vi.fn().mockResolvedValue({ x: 1200, y: 320 }),
 }))
 
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     startDragging: mocks.startDragging,
     onDragDropEvent: mocks.onDragDropEvent,
+    setSize: mocks.setSize,
+    setPosition: mocks.setPosition,
+    outerPosition: mocks.outerPosition,
   }),
 }))
 
@@ -52,6 +59,9 @@ describe('FloatButton', () => {
     mocks.onDragDropEvent.mockReset()
     mocks.onDragDropEvent.mockResolvedValue(vi.fn())
     mocks.startDragging.mockClear()
+    mocks.setSize.mockClear()
+    mocks.setPosition.mockClear()
+    mocks.outerPosition.mockClear()
   })
 
   it('shows the animated banana button', () => {
@@ -59,6 +69,20 @@ describe('FloatButton', () => {
 
     expect(wrapper.findComponent(AnimatedBananaButton).exists()).toBe(true)
     expect(wrapper.find('.animated-banana').attributes('data-frame')).toBe('0')
+  })
+
+  it('keeps every floating window background layer transparent', () => {
+    const componentSource = readFileSync('src/components/FloatButton.vue', 'utf8')
+    const globalStyleSource = readFileSync('src/styles/main.css', 'utf8')
+
+    expect(componentSource).toMatch(/\.floating-shell\s*\{[^}]*background:\s*transparent;/s)
+    expect(globalStyleSource).toMatch(/#app\s*\{[^}]*background:\s*transparent;/s)
+  })
+
+  it('does not draw a shadow backdrop behind the floating reminder card', () => {
+    const componentSource = readFileSync('src/components/FloatButton.vue', 'utf8')
+
+    expect(componentSource).toMatch(/\.floating-reminder\s*\{[^}]*box-shadow:\s*none;/s)
   })
 
   it('toggles the main panel only when the floating button is clicked', async () => {
@@ -148,5 +172,54 @@ describe('FloatButton', () => {
       fileName: 'photo.png',
       fileType: 'image',
     })
+  })
+
+  it('shows a reminder dialog inside the floating window when a daily reminder arrives', async () => {
+    const wrapper = mount(FloatButton)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    eventHandlers['daily-task-reminder']?.({
+      payload: {
+        taskId: 't1',
+        title: 'Shot refinement',
+        body: 'Check delivery notes',
+        time: '10:01',
+        localDate: '2026-07-12',
+      },
+    })
+    await wrapper.vm.$nextTick()
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(wrapper.get('[data-floating-reminder]').text()).toContain('Shot refinement')
+    expect(wrapper.get('[data-floating-reminder]').text()).toContain('Check delivery notes')
+    expect(mocks.setSize).toHaveBeenCalled()
+    expect(mocks.setPosition).toHaveBeenCalled()
+  })
+
+  it('lets users snooze a floating reminder and closes the reminder window', async () => {
+    const wrapper = mount(FloatButton)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    eventHandlers['daily-task-reminder']?.({
+      payload: {
+        taskId: 't1',
+        title: 'Shot refinement',
+        body: 'Check delivery notes',
+        time: '10:01',
+        localDate: '2026-07-12',
+      },
+    })
+    await wrapper.vm.$nextTick()
+
+    await wrapper.get('[data-action="snooze-reminder-10"]').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(mocks.emitTo).toHaveBeenCalledWith('main', 'daily-task-reminder-snooze', {
+      taskId: 't1',
+      localDate: '2026-07-12',
+      minutes: 10,
+    })
+    expect(wrapper.find('[data-floating-reminder]').exists()).toBe(false)
+    expect(mocks.setSize).toHaveBeenLastCalledWith(expect.objectContaining({ width: 64, height: 64 }))
   })
 })

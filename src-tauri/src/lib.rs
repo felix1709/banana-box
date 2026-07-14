@@ -1,5 +1,6 @@
 mod app_state;
 mod command_auth;
+mod cloud_config;
 mod commands;
 mod daily_tasks;
 mod db;
@@ -148,6 +149,9 @@ pub fn run() {
             commands::startup_commands::acknowledge_migration_summary,
             commands::load_library,
             commands::save_library,
+            commands::load_cloud_config,
+            commands::load_cloud_runtime_config,
+            commands::save_cloud_config,
             commands::copy_to_clipboard,
             commands::save_image,
             commands::delete_image,

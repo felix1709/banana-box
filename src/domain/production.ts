@@ -92,6 +92,8 @@ export interface DailyTask {
   progress: number
   note: string
   investedMinutes: number
+  reminderTime: string
+  reminderContent: string
   position: number
   sourceTaskId: string | null
   sourceSnapshotHash: string | null
@@ -107,6 +109,8 @@ export interface CreateDailyTaskInput {
   progress: number
   note: string
   investedMinutes: number
+  reminderTime?: string
+  reminderContent?: string
 }
 
 export interface UpdateDailyTaskInput {
@@ -115,6 +119,8 @@ export interface UpdateDailyTaskInput {
   progress: number
   note: string
   investedMinutes: number
+  reminderTime: string
+  reminderContent: string
 }
 
 export interface DailyTaskGroup {

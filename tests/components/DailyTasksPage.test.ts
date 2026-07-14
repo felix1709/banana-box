@@ -61,9 +61,10 @@ describe('DailyTasksPage', () => {
     expect(wrapper.find('[data-field="new-task-minutes"]').exists()).toBe(false)
   })
 
-  it('renders a task card with a draggable progress control and compact actions', async () => {
+  it('auto-saves progress changes, keeps delete action, and hides empty notes', async () => {
     const store = useDailyTasksStore()
     store.day = day()
+    store.day.groups[0].tasks[0].note = ''
     vi.spyOn(store, 'selectDate').mockResolvedValue()
     const update = vi.spyOn(store, 'update').mockResolvedValue()
     const remove = vi.spyOn(store, 'remove').mockResolvedValue()
@@ -75,20 +76,122 @@ describe('DailyTasksPage', () => {
     const progress = wrapper.get('[data-task-id="t1"] [data-field="task-progress"]')
     expect(progress.attributes('type')).toBe('range')
     expect(wrapper.get('[data-task-id="t1"] .task-card-actions').exists()).toBe(true)
+    expect(wrapper.find('[data-task-id="t1"] [data-field="task-note"]').exists()).toBe(false)
+    expect(wrapper.find('[data-task-id="t1"] [data-action="save-task"]').exists()).toBe(false)
 
     await progress.setValue(80)
     expect(wrapper.get('[data-task-id="t1"] [data-progress-value]').text()).toBe('80%')
-    await wrapper.get('[data-task-id="t1"] [data-action="save-task"]').trigger('click')
     expect(update).toHaveBeenCalledWith({
       taskId: 't1',
       title: 'Shot refinement',
       progress: 80,
-      note: 'Transition pass',
+      note: '',
       investedMinutes: 90,
+      reminderTime: '',
+      reminderContent: '',
     })
 
     await wrapper.get('[data-task-id="t1"] [data-action="delete-task"]').trigger('click')
     expect(remove).toHaveBeenCalledWith('t1')
+  })
+
+  it('opens a reminder popover from the alarm icon and saves reminder details', async () => {
+    const store = useDailyTasksStore()
+    store.day = day()
+    vi.spyOn(store, 'selectDate').mockResolvedValue()
+    const update = vi.spyOn(store, 'update').mockResolvedValue()
+    const wrapper = mount(DailyTasksPage)
+
+    await wrapper.get('[data-task-id="t1"] [data-action="task-reminder"]').trigger('click')
+    expect(document.body.querySelector('.task-reminder-popover')).toBeTruthy()
+
+    const time = document.body.querySelector('[data-field="task-reminder-time"]') as HTMLInputElement
+    const content = document.body.querySelector('[data-field="task-reminder-content"]') as HTMLTextAreaElement
+    time.value = '18:30'
+    time.dispatchEvent(new Event('input', { bubbles: true }))
+    content.value = 'Check delivery notes'
+    content.dispatchEvent(new Event('input', { bubbles: true }))
+
+    const save = document.body.querySelector('[data-action="save-task-reminder"]') as HTMLButtonElement
+    save.click()
+    await Promise.resolve()
+
+    expect(update).toHaveBeenCalledWith({
+      taskId: 't1',
+      title: 'Shot refinement',
+      progress: 45,
+      note: 'Transition pass',
+      investedMinutes: 90,
+      reminderTime: '18:30',
+      reminderContent: 'Check delivery notes',
+    })
+  })
+
+  it('closes the reminder popover when clicking outside it', async () => {
+    const store = useDailyTasksStore()
+    store.day = day()
+    vi.spyOn(store, 'selectDate').mockResolvedValue()
+    const wrapper = mount(DailyTasksPage)
+
+    await wrapper.get('[data-task-id="t1"] [data-action="task-reminder"]').trigger('click')
+    expect(document.body.querySelector('.task-reminder-popover')).toBeTruthy()
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+
+    expect(document.body.querySelector('.task-reminder-popover')).toBeFalsy()
+  })
+
+  it('keeps the reminder popover inside the visible window near the bottom edge', async () => {
+    const store = useDailyTasksStore()
+    store.day = day()
+    vi.spyOn(store, 'selectDate').mockResolvedValue()
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 260,
+      y: 130,
+      top: 130,
+      right: 290,
+      bottom: 160,
+      left: 260,
+      width: 30,
+      height: 30,
+      toJSON: () => ({}),
+    } as DOMRect)
+    const originalInnerHeight = window.innerHeight
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 190 })
+    const wrapper = mount(DailyTasksPage)
+
+    await wrapper.get('[data-task-id="t1"] [data-action="task-reminder"]').trigger('click')
+    const popover = document.body.querySelector('.task-reminder-popover') as HTMLElement
+
+    expect(Number.parseFloat(popover.style.top)).toBeLessThan(130)
+
+    rectSpy.mockRestore()
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight })
+  })
+
+  it('opens the task editor by double-clicking a task card and saves edits', async () => {
+    const store = useDailyTasksStore()
+    store.day = day()
+    vi.spyOn(store, 'selectDate').mockResolvedValue()
+    const update = vi.spyOn(store, 'update').mockResolvedValue()
+    const wrapper = mount(DailyTasksPage)
+
+    await wrapper.get('[data-task-id="t1"]').trigger('dblclick')
+    expect(wrapper.find('.task-editor-dialog').exists()).toBe(true)
+
+    await wrapper.get('[data-field="task-editor-title"]').setValue('Updated task')
+    await wrapper.get('[data-action="save-task-editor"]').trigger('click')
+
+    expect(update).toHaveBeenCalledWith({
+      taskId: 't1',
+      title: 'Updated task',
+      progress: 45,
+      note: 'Transition pass',
+      investedMinutes: 90,
+      reminderTime: '',
+      reminderContent: '',
+    })
   })
 
   it('shows a read-only settlement notice for settled days', async () => {
@@ -172,6 +275,8 @@ function day(): DailyTaskDay {
             progress: 45,
             note: 'Transition pass',
             investedMinutes: 90,
+            reminderTime: '',
+            reminderContent: '',
             position: 0,
             sourceTaskId: null,
             sourceSnapshotHash: null,

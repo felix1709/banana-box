@@ -6,11 +6,20 @@ import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { useLibraryStore } from '@/stores/library'
 import { useProviderStore } from '@/stores/providers'
 import { useUiStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
+import { useCloudSessionStore } from '@/stores/cloudSession'
 import {
+  copyToClipboard,
   exportLibrary,
   readImportDir,
   downloadImage,
 } from '@/lib/ipc'
+import authWorkspaceSql from '../../supabase/migrations/0001_auth_workspaces.sql?raw'
+import contentCollaborationSql from '../../supabase/migrations/0002_content_collaboration_schema.sql?raw'
+import inviteAcceptanceRealtimeSql from '../../supabase/migrations/0003_invite_acceptance_realtime.sql?raw'
+import workspaceBootstrapFixSql from '../../supabase/migrations/0004_workspace_bootstrap_fix.sql?raw'
+import profileBootstrapFixSql from '../../supabase/migrations/0005_profile_bootstrap_fix.sql?raw'
+import dailyTaskRemindersSql from '../../supabase/migrations/0006_daily_task_reminders.sql?raw'
 import { checkAiProviderConnection } from '@/lib/provider-ipc'
 import {
   commitLegacyImport,
@@ -35,11 +44,15 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 const lib = useLibraryStore()
 const providers = useProviderStore()
 const ui = useUiStore()
+const auth = useAuthStore()
+const cloud = useCloudSessionStore()
 const activeTab = ref<SettingsTab>('features')
 const hotkey = ref(lib.library.settings.hotkey)
+const cloudSupabaseUrl = ref('')
+const cloudAnonKey = ref('')
+const cloudEnabled = ref(false)
+const cloudStatus = ref('')
 const apiBaseUrl = ref('')
-const apiModelsUrl = ref('')
-const apiChatCompletionsUrl = ref('')
 const apiKey = ref('')
 const apiProviderId = ref<ProviderKind>('reverse-image')
 const apiModel = ref('')
@@ -62,9 +75,10 @@ const autostartEnabled = ref(false)
 const loadingAutostart = ref(true)
 const savingAutostart = ref(false)
 const autostartError = ref('')
+const cloudSetupSql = `${authWorkspaceSql.trim()}\n\n${contentCollaborationSql.trim()}\n\n${inviteAcceptanceRealtimeSql.trim()}\n\n${workspaceBootstrapFixSql.trim()}\n\n${profileBootstrapFixSql.trim()}\n\n${dailyTaskRemindersSql.trim()}\n`
 
 onMounted(async () => {
-  await Promise.all([refreshAutostart(), loadApiProviders()])
+  await Promise.all([refreshAutostart(), loadApiProviders(), loadCloudSettings()])
 })
 
 function saveHotkey() {
@@ -77,6 +91,90 @@ function pickPreferredModel(models: string[]) {
   if (models.includes(apiModel.value)) return apiModel.value
   if (apiProviderId.value === 'storyboard' && models.includes('glm-5.2')) return 'glm-5.2'
   return models[0] ?? ''
+}
+
+function cloudStatusText() {
+  if (cloudStatus.value) return cloudStatus.value
+  if (cloud.readiness === 'configured') return '云端配置已保存'
+  if (cloud.readiness === 'invalid') return '云端配置无效'
+  return '本地离线模式'
+}
+
+function canManageCloudSettings() {
+  return !auth.user || auth.isCloudAdmin
+}
+
+async function loadCloudSettings() {
+  await cloud.load()
+  cloudSupabaseUrl.value = cloud.config?.supabaseUrl ?? ''
+  cloudEnabled.value = cloud.config?.cloudEnabled ?? false
+  cloudAnonKey.value = ''
+}
+
+async function saveCloudSettings() {
+  await cloud.save({
+    supabaseUrl: cloudSupabaseUrl.value,
+    anonKey: cloudAnonKey.value,
+    cloudEnabled: cloudEnabled.value,
+  })
+  cloudAnonKey.value = ''
+  cloudStatus.value = cloud.error ? `保存失败：${cloud.error}` : '云端配置已保存'
+}
+
+async function copyCloudSetupSql() {
+  await copyToClipboard(cloudSetupSql)
+  cloudStatus.value = 'Supabase 建表 SQL 已复制'
+}
+
+function trimTrailingSlashes(value: string) {
+  return value.trim().replace(/\/+$/, '')
+}
+
+function withDefaultApiVersion(baseUrl: string) {
+  const normalized = trimTrailingSlashes(baseUrl)
+  try {
+    const parsed = new URL(normalized)
+    if (parsed.pathname === '' || parsed.pathname === '/') {
+      parsed.pathname = '/v1'
+      return trimTrailingSlashes(parsed.toString())
+    }
+  } catch {
+    return normalized
+  }
+  return normalized
+}
+
+function providerEndpointsFromBaseUrl(baseUrl: string) {
+  const normalized = withDefaultApiVersion(baseUrl)
+  return {
+    baseUrl: normalized,
+    modelsUrl: `${normalized}/models`,
+    chatCompletionsUrl: `${normalized}/chat/completions`,
+  }
+}
+
+function apiBaseUrlFromProvider(provider: AiProvider) {
+  const modelsUrl = trimTrailingSlashes(provider.modelsUrl)
+  const chatUrl = trimTrailingSlashes(provider.chatCompletionsUrl)
+  if (
+    modelsUrl.endsWith('/models')
+    && chatUrl.endsWith('/chat/completions')
+  ) {
+    const modelBaseUrl = modelsUrl.slice(0, -'/models'.length)
+    const chatBaseUrl = chatUrl.slice(0, -'/chat/completions'.length)
+    if (modelBaseUrl === chatBaseUrl) return withDefaultApiVersion(modelBaseUrl)
+  }
+  return withDefaultApiVersion(provider.baseUrl)
+}
+
+function hasUnsavedApiConnectionInput() {
+  const provider = providers.byId(apiProviderId.value)
+  const endpoints = providerEndpointsFromBaseUrl(apiBaseUrl.value)
+  return (
+    Boolean(apiKey.value.trim())
+    || endpoints.modelsUrl !== trimTrailingSlashes(provider?.modelsUrl ?? '')
+    || endpoints.chatCompletionsUrl !== trimTrailingSlashes(provider?.chatCompletionsUrl ?? '')
+  )
 }
 
 function connectionStatusMessage(result: CheckAiProviderConnectionResult) {
@@ -94,11 +192,15 @@ function connectionStatusMessage(result: CheckAiProviderConnectionResult) {
 
 function applyProvider(provider: AiProvider) {
   apiProviderId.value = provider.kind
-  apiBaseUrl.value = provider.baseUrl
-  apiModelsUrl.value = provider.modelsUrl
-  apiChatCompletionsUrl.value = provider.chatCompletionsUrl
-  availableModels.value = [...provider.availableModels]
-  apiModel.value = provider.defaultModel ?? provider.probedModel ?? pickPreferredModel(provider.availableModels)
+  apiBaseUrl.value = apiBaseUrlFromProvider(provider)
+  const selectedModel = provider.defaultModel ?? provider.probedModel ?? ''
+  const nextModels = provider.availableModels.length
+    ? provider.availableModels
+    : availableModels.value
+  availableModels.value = selectedModel && !nextModels.includes(selectedModel)
+    ? [selectedModel, ...nextModels]
+    : [...nextModels]
+  apiModel.value = selectedModel || pickPreferredModel(availableModels.value)
   apiTemperature.value = provider.temperature ?? 0.7
   apiContextWindowTokens.value = provider.contextWindowTokens ?? 16000
 }
@@ -128,14 +230,15 @@ async function saveApiSettings() {
       return
     }
 
+    const endpoints = providerEndpointsFromBaseUrl(apiBaseUrl.value)
     const saved = await providers.save({
       provider: {
         id: existing.id,
         kind: existing.kind,
         displayName: existing.displayName,
-        baseUrl: apiBaseUrl.value.trim(),
-        modelsUrl: apiModelsUrl.value.trim(),
-        chatCompletionsUrl: apiChatCompletionsUrl.value.trim(),
+        baseUrl: endpoints.baseUrl,
+        modelsUrl: endpoints.modelsUrl,
+        chatCompletionsUrl: endpoints.chatCompletionsUrl,
         defaultModel: apiModel.value || null,
         temperature: existing.kind === 'storyboard' ? Number(apiTemperature.value) : undefined,
         contextWindowTokens: existing.kind === 'storyboard' ? Number(apiContextWindowTokens.value) : undefined,
@@ -189,6 +292,10 @@ async function onCheckApiConnection() {
   checkingApi.value = true
   apiStatus.value = ''
   try {
+    if (hasUnsavedApiConnectionInput()) {
+      apiStatus.value = '请先保存 API 设置后再检测连接'
+      return
+    }
     const result = await checkAiProviderConnection(apiProviderId.value)
     if (result.models.length) {
       availableModels.value = result.models
@@ -466,6 +573,59 @@ async function onDownloadUpdate() {
                 下载更新
               </button>
             </div>
+
+            <section
+              v-if="canManageCloudSettings()"
+              class="cloud-config-section"
+            >
+              <div class="section-heading">
+                <strong>云端协作</strong>
+                <p>配置 Supabase 后，下一阶段可登录并启用用户云空间。</p>
+              </div>
+              <label>
+                Supabase URL
+                <input
+                  v-model="cloudSupabaseUrl"
+                  class="cloud-url-input"
+                  placeholder="https://example.supabase.co"
+                >
+              </label>
+              <label>
+                Supabase anon key
+                <input
+                  v-model="cloudAnonKey"
+                  class="cloud-anon-key-input"
+                  type="password"
+                  placeholder="留空表示不修改"
+                >
+              </label>
+              <label class="cloud-enabled-row">
+                <input
+                  v-model="cloudEnabled"
+                  class="cloud-enabled-toggle"
+                  type="checkbox"
+                >
+                启用云端配置
+              </label>
+              <div class="cloud-config-actions">
+                <button
+                  class="cloud-save-button"
+                  type="button"
+                  :disabled="cloud.saving"
+                  @click="saveCloudSettings"
+                >
+                  {{ cloud.saving ? '保存中...' : '保存云端配置' }}
+                </button>
+                <button
+                  class="cloud-sql-copy-button"
+                  type="button"
+                  @click="copyCloudSetupSql"
+                >
+                  复制建表 SQL
+                </button>
+                <span class="cloud-status">{{ cloudStatusText() }}</span>
+              </div>
+            </section>
           </section>
 
           <section
@@ -488,27 +648,11 @@ async function onDownloadUpdate() {
               </select>
             </label>
             <label>
-              Base URL
+              API URL
               <input
                 v-model="apiBaseUrl"
                 class="api-base-url-input"
-                placeholder="https://ai.leihuo.netease.com"
-              >
-            </label>
-            <label>
-              Models URL
-              <input
-                v-model="apiModelsUrl"
-                class="api-models-url-input"
-                placeholder="https://ai.leihuo.netease.com/v1/models"
-              >
-            </label>
-            <label>
-              Chat Completions URL
-              <input
-                v-model="apiChatCompletionsUrl"
-                class="api-chat-completions-url-input"
-                placeholder="https://ai.leihuo.netease.com/v1/chat/completions"
+                placeholder="https://api.example.com/v1"
               >
             </label>
             <label>
@@ -677,7 +821,7 @@ async function onDownloadUpdate() {
   align-items: center;
   justify-content: center;
   backdrop-filter: blur(5px);
-  z-index: 20;
+  z-index: 260;
 }
 .dialog {
   background: var(--bb-surface);
@@ -772,6 +916,7 @@ select {
 }
 .setting-row,
 .version-panel,
+.cloud-config-section,
 .api-panel {
   border: 1px solid var(--bb-border);
   border-radius: var(--bb-radius-md);
@@ -788,6 +933,8 @@ select {
 .setting-row p,
 .api-header p,
 .api-status,
+.section-heading p,
+.cloud-status,
 .version-header p,
 .version-status,
 .status {
@@ -847,11 +994,37 @@ select {
   box-shadow: var(--bb-focus);
 }
 .api-check-row,
+.cloud-config-actions,
 .version-header {
   display: flex;
   gap: 10px;
   align-items: flex-start;
   justify-content: space-between;
+}
+.cloud-config-section {
+  display: grid;
+  gap: 10px;
+}
+.cloud-config-section label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--bb-text);
+  font-size: 13px;
+}
+.cloud-enabled-row {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+}
+.cloud-enabled-row input {
+  width: auto;
+  min-height: 0;
+}
+.cloud-config-actions {
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
 }
 .legacy-import-preview {
   display: flex;

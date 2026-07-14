@@ -4,6 +4,7 @@ pub const MAX_GROUP_CODE_BYTES: usize = 32;
 pub const MAX_TASK_TITLE_SCALARS: usize = 200;
 pub const MAX_TASK_TITLE_BYTES: usize = 800;
 pub const MAX_TASK_NOTE_BYTES: usize = 64 * 1024;
+pub const MAX_REMINDER_CONTENT_BYTES: usize = 800;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +41,8 @@ pub struct DailyTaskDto {
     pub progress: i64,
     pub note: String,
     pub invested_minutes: i64,
+    pub reminder_time: String,
+    pub reminder_content: String,
     pub position: i64,
     pub source_task_id: Option<String>,
     pub source_snapshot_hash: Option<String>,
@@ -57,6 +60,10 @@ pub struct CreateDailyTaskInput {
     pub progress: i64,
     pub note: String,
     pub invested_minutes: i64,
+    #[serde(default)]
+    pub reminder_time: String,
+    #[serde(default)]
+    pub reminder_content: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -67,6 +74,8 @@ pub struct UpdateDailyTaskInput {
     pub progress: i64,
     pub note: String,
     pub invested_minutes: i64,
+    pub reminder_time: String,
+    pub reminder_content: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -109,6 +118,8 @@ pub fn validate_task_fields(
     progress: i64,
     note: &str,
     invested_minutes: i64,
+    reminder_time: &str,
+    reminder_content: &str,
 ) -> Result<(), String> {
     let title = title.trim();
     if title.is_empty()
@@ -137,6 +148,31 @@ pub fn validate_task_fields(
     {
         return Err("DAILY_TASK_NOTE_INVALID".into());
     }
+    if !reminder_time.is_empty() {
+        let bytes = reminder_time.as_bytes();
+        let valid_time = bytes.len() == 5
+            && bytes[2] == b':'
+            && bytes[0].is_ascii_digit()
+            && bytes[1].is_ascii_digit()
+            && bytes[3].is_ascii_digit()
+            && bytes[4].is_ascii_digit()
+            && ((bytes[0] - b'0') * 10 + (bytes[1] - b'0')) <= 23
+            && ((bytes[3] - b'0') * 10 + (bytes[4] - b'0')) <= 59;
+        if !valid_time {
+            return Err("DAILY_TASK_REMINDER_TIME_INVALID".into());
+        }
+    }
+    if reminder_content.len() > MAX_REMINDER_CONTENT_BYTES
+        || reminder_content.chars().any(|character| {
+            character == '\0'
+                || (character.is_control()
+                    && character != '\n'
+                    && character != '\r'
+                    && character != '\t')
+        })
+    {
+        return Err("DAILY_TASK_REMINDER_CONTENT_INVALID".into());
+    }
     Ok(())
 }
 
@@ -148,6 +184,8 @@ pub fn validate_create(input: &CreateDailyTaskInput) -> Result<String, String> {
         input.progress,
         &input.note,
         input.invested_minutes,
+        &input.reminder_time,
+        &input.reminder_content,
     )?;
     Ok(code)
 }
@@ -159,5 +197,7 @@ pub fn validate_update(input: &UpdateDailyTaskInput) -> Result<(), String> {
         input.progress,
         &input.note,
         input.invested_minutes,
+        &input.reminder_time,
+        &input.reminder_content,
     )
 }

@@ -8,6 +8,15 @@ pub(crate) mod startup_commands;
 
 use crate::{
     app_state::{AppServices, StartupGate},
+    cloud_config::{
+        load_cloud_config as load_cloud_config_from_db,
+        load_cloud_runtime_config as load_cloud_runtime_config_from_db,
+        save_cloud_config as save_cloud_config_to_db,
+        CloudConfigDto,
+        CloudRuntimeConfigDto,
+        SaveCloudConfigInput,
+    },
+    command_auth::MainArgs,
     library::{self, Library},
 };
 use chrono::{DateTime, Datelike, Local, Timelike};
@@ -47,6 +56,48 @@ pub fn save_library(
 ) -> Result<(), String> {
     require_startup_ready(&gate)?;
     library::save_library(&data_dir(&app), &library).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn load_cloud_config(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    _args: MainArgs<LoadCloudConfigCommandArgs>,
+) -> Result<CloudConfigDto, String> {
+    require_startup_ready(&gate)?;
+    let services = app
+        .try_state::<AppServices>()
+        .ok_or_else(|| APP_SERVICES_UNAVAILABLE.to_string())?;
+    let _permit = services.operations.enter_user()?;
+    load_cloud_config_from_db(&services.database)
+}
+
+#[tauri::command]
+pub fn load_cloud_runtime_config(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    _args: MainArgs<LoadCloudConfigCommandArgs>,
+) -> Result<CloudRuntimeConfigDto, String> {
+    require_startup_ready(&gate)?;
+    let services = app
+        .try_state::<AppServices>()
+        .ok_or_else(|| APP_SERVICES_UNAVAILABLE.to_string())?;
+    let _permit = services.operations.enter_user()?;
+    load_cloud_runtime_config_from_db(&services.database)
+}
+
+#[tauri::command]
+pub fn save_cloud_config(
+    app: tauri::AppHandle,
+    gate: tauri::State<StartupGate>,
+    args: MainArgs<SaveCloudConfigCommandArgs>,
+) -> Result<CloudConfigDto, String> {
+    require_startup_ready(&gate)?;
+    let services = app
+        .try_state::<AppServices>()
+        .ok_or_else(|| APP_SERVICES_UNAVAILABLE.to_string())?;
+    let _permit = services.operations.enter_user()?;
+    save_cloud_config_to_db(&services.database, args.0.input)
 }
 
 #[tauri::command]
@@ -168,6 +219,16 @@ pub struct SuggestCompressedOutputPathInput {
 pub struct CompressMediaResult {
     pub output_path: String,
 }
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SaveCloudConfigCommandArgs {
+    input: SaveCloudConfigInput,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LoadCloudConfigCommandArgs {}
 
 #[derive(serde::Deserialize)]
 pub(crate) struct ChatCompletionResponse {

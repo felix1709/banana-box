@@ -79,8 +79,8 @@ pub fn create_task(
         transaction
             .execute(
                 "INSERT INTO daily_tasks
-                 (id, group_id, title, progress, note, invested_minutes, position, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+                 (id, group_id, title, progress, note, invested_minutes, reminder_time, reminder_content, position, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
                 params![
                     uuid::Uuid::new_v4().to_string(),
                     group_id,
@@ -88,6 +88,8 @@ pub fn create_task(
                     input.progress,
                     input.note,
                     input.invested_minutes,
+                    input.reminder_time,
+                    input.reminder_content,
                     position,
                     now,
                 ],
@@ -154,8 +156,17 @@ pub fn update_task(
         reject_settled(transaction, &day_id)?;
         transaction
             .execute(
-                "UPDATE daily_tasks SET title = ?1, progress = ?2, note = ?3, invested_minutes = ?4, updated_at = ?5 WHERE id = ?6",
-                params![input.title.trim(), input.progress, input.note, input.invested_minutes, timestamp(), input.task_id],
+                "UPDATE daily_tasks SET title = ?1, progress = ?2, note = ?3, invested_minutes = ?4, reminder_time = ?5, reminder_content = ?6, updated_at = ?7 WHERE id = ?8",
+                params![
+                    input.title.trim(),
+                    input.progress,
+                    input.note,
+                    input.invested_minutes,
+                    input.reminder_time,
+                    input.reminder_content,
+                    timestamp(),
+                    input.task_id,
+                ],
             )
             .map_err(|error| error.to_string())?;
         load_day_from_connection(transaction, &local_date)
@@ -393,7 +404,7 @@ fn read_groups(connection: &Connection, day_id: &str) -> Result<Vec<DailyTaskGro
 }
 
 fn read_tasks(connection: &Connection, group_id: &str) -> Result<Vec<DailyTaskDto>, String> {
-    let mut statement = connection.prepare("SELECT id, title, progress, note, invested_minutes, position, source_task_id, source_snapshot_hash, created_at, updated_at FROM daily_tasks WHERE group_id = ?1 ORDER BY position, id").map_err(|error| error.to_string())?;
+    let mut statement = connection.prepare("SELECT id, title, progress, note, invested_minutes, reminder_time, reminder_content, position, source_task_id, source_snapshot_hash, created_at, updated_at FROM daily_tasks WHERE group_id = ?1 ORDER BY position, id").map_err(|error| error.to_string())?;
     let tasks = statement
         .query_map([group_id], |row| {
             Ok(DailyTaskDto {
@@ -402,11 +413,13 @@ fn read_tasks(connection: &Connection, group_id: &str) -> Result<Vec<DailyTaskDt
                 progress: row.get(2)?,
                 note: row.get(3)?,
                 invested_minutes: row.get(4)?,
-                position: row.get(5)?,
-                source_task_id: row.get(6)?,
-                source_snapshot_hash: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                reminder_time: row.get(5)?,
+                reminder_content: row.get(6)?,
+                position: row.get(7)?,
+                source_task_id: row.get(8)?,
+                source_snapshot_hash: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })
         .map_err(|error| error.to_string())?

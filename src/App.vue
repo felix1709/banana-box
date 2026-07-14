@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watchEffect } from 'vue'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
+import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { LogicalSize } from '@tauri-apps/api/dpi'
@@ -8,7 +8,15 @@ import { Maximize2, Minimize2, RotateCcw } from '@lucide/vue'
 import { useLibraryStore } from '@/stores/library'
 import { useProjectsStore } from '@/stores/projects'
 import { useUiStore } from '@/stores/ui'
+import { useDailyTasksStore } from '@/stores/dailyTasks'
+import { useAuthStore } from '@/stores/auth'
+import { useCloudSessionStore } from '@/stores/cloudSession'
+import { useWorkspacesStore } from '@/stores/workspaces'
+import { useSyncStatusStore } from '@/stores/syncStatus'
+import { useNotificationsStore } from '@/stores/notifications'
+import { usePresenceStore } from '@/stores/presence'
 import { readImageBytes } from '@/lib/ipc'
+import { subscribeWorkspaceRealtime, type WorkspaceRealtimeSubscription } from '@/lib/realtime/workspaceRealtime'
 import SearchBar from '@/components/SearchBar.vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import PromptCard from '@/components/PromptCard.vue'
@@ -21,10 +29,19 @@ import ProjectBoardPage from '@/components/projects/ProjectBoardPage.vue'
 import ProjectEditor from '@/components/projects/ProjectEditor.vue'
 import DailyTasksPage from '@/components/daily/DailyTasksPage.vue'
 import StoryboardPage from '@/components/storyboard/StoryboardPage.vue'
+import CloudMigrationDialog from '@/components/cloud/CloudMigrationDialog.vue'
+import UserCloudMenu from '@/components/cloud/UserCloudMenu.vue'
 
 const lib = useLibraryStore()
 const projects = useProjectsStore()
 const ui = useUiStore()
+const daily = useDailyTasksStore()
+const cloud = useCloudSessionStore()
+const auth = useAuthStore()
+const workspaces = useWorkspacesStore()
+const sync = useSyncStatusStore()
+const notifications = useNotificationsStore()
+const presence = usePresenceStore()
 const previewUrl = ref('')
 const expandedPromptId = ref<string | null>(null)
 const sortingPromptId = ref<string | null>(null)
@@ -32,6 +49,27 @@ const windowDragActive = ref(false)
 const mainWindowPinned = ref(false)
 const fullscreen = ref(false)
 let unlistenFloatingDrop: UnlistenFn | null = null
+let unlistenReminderOpenTask: UnlistenFn | null = null
+let unlistenReminderSnooze: UnlistenFn | null = null
+let workspaceRealtime: WorkspaceRealtimeSubscription | null = null
+let dailyReminderTimer: ReturnType<typeof window.setTimeout> | null = null
+const firedDailyReminders = new Set<string>()
+
+interface DailyReminder {
+  key: string
+  taskId: string
+  title: string
+  body: string
+  time: string
+  localDate: string
+  dueAt: number
+}
+
+interface DailyReminderSnoozePayload {
+  taskId: string
+  localDate: string
+  minutes: 10 | 60
+}
 
 type ResizeDirection =
   | 'North'
@@ -165,8 +203,132 @@ function onSortEnd() {
   sortingPromptId.value = null
 }
 
+function clearDailyReminderTimer() {
+  if (dailyReminderTimer !== null) {
+    window.clearTimeout(dailyReminderTimer)
+    dailyReminderTimer = null
+  }
+}
+
+function parseDailyReminderTime(localDate: string, time: string) {
+  const [year, month, day] = localDate.split('-').map(Number)
+  const [hour, minute] = time.split(':').map(Number)
+  if (!year || !month || !day || Number.isNaN(hour) || Number.isNaN(minute)) return null
+  return new Date(year, month - 1, day, hour, minute, 0, 0).getTime()
+}
+
+function formatReminderTime(value: Date) {
+  const hour = String(value.getHours()).padStart(2, '0')
+  const minute = String(value.getMinutes()).padStart(2, '0')
+  return `${hour}:${minute}`
+}
+
+function isDailyReminderSnoozePayload(value: unknown): value is DailyReminderSnoozePayload {
+  if (!value || typeof value !== 'object') return false
+  const payload = value as Partial<DailyReminderSnoozePayload>
+  return (
+    typeof payload.taskId === 'string' &&
+    typeof payload.localDate === 'string' &&
+    (payload.minutes === 10 || payload.minutes === 60)
+  )
+}
+
+function findDailyTask(taskId: string) {
+  for (const group of daily.day?.groups ?? []) {
+    const task = group.tasks.find((item) => item.id === taskId)
+    if (task) return task
+  }
+  return null
+}
+
+function collectDailyReminders(): DailyReminder[] {
+  if (!daily.day || daily.day.settledAt) return []
+  return daily.day.groups.flatMap((group) =>
+    group.tasks.flatMap((task) => {
+      if (!task.reminderTime) return []
+      const dueAt = parseDailyReminderTime(daily.day?.localDate ?? '', task.reminderTime)
+      if (dueAt === null) return []
+      return [{
+        key: `${daily.day?.localDate}:${task.id}:${task.reminderTime}`,
+        taskId: task.id,
+        title: task.title,
+        body: task.reminderContent || task.title,
+        time: task.reminderTime,
+        localDate: daily.day?.localDate ?? '',
+        dueAt,
+      }]
+    }),
+  )
+}
+
+function scheduleDailyReminderCheck() {
+  clearDailyReminderTimer()
+  const nextReminder = collectDailyReminders()
+    .filter((reminder) => !firedDailyReminders.has(reminder.key))
+    .sort((left, right) => left.dueAt - right.dueAt)[0]
+  if (!nextReminder) return
+
+  const delay = Math.max(0, Math.min(nextReminder.dueAt - Date.now(), 2_147_483_647))
+  dailyReminderTimer = window.setTimeout(() => {
+    void showDailyReminder(nextReminder)
+  }, delay)
+}
+
+async function showDailyReminder(reminder: DailyReminder) {
+  if (firedDailyReminders.has(reminder.key)) return
+  firedDailyReminders.add(reminder.key)
+  try {
+    await emitTo('floatbtn', 'daily-task-reminder', {
+      taskId: reminder.taskId,
+      title: reminder.title,
+      body: reminder.body,
+      time: reminder.time,
+      localDate: reminder.localDate,
+    })
+  } catch {
+    ui.showToast('任务提醒发送失败')
+  } finally {
+    scheduleDailyReminderCheck()
+  }
+}
+
+async function openReminderTaskFromFloat() {
+  ui.setActiveTool('daily-tasks')
+  ui.showPanel()
+  try {
+    await invoke('show_panel', {})
+  } catch {
+    // Browser previews do not have the native Tauri panel command.
+  }
+}
+
+async function snoozeDailyReminderFromFloat(payload: DailyReminderSnoozePayload) {
+  if (daily.day?.localDate !== payload.localDate) return
+  const task = findDailyTask(payload.taskId)
+  if (!task || daily.day?.settledAt) return
+
+  const nextTime = formatReminderTime(new Date(Date.now() + payload.minutes * 60_000))
+  try {
+    await daily.update({
+      taskId: task.id,
+      title: task.title,
+      progress: task.progress,
+      note: task.note,
+      investedMinutes: task.investedMinutes,
+      reminderTime: nextTime,
+      reminderContent: task.reminderContent || task.title,
+    })
+  } catch {
+    ui.showToast('稍后提醒设置失败')
+  }
+}
+
 onMounted(async () => {
-  await Promise.all([lib.load(), projects.load()])
+  await Promise.all([lib.load(), projects.load(), cloud.load()])
+  await auth.initialize()
+  if (auth.client && auth.user) {
+    await workspaces.bootstrapForUser(auth.client, auth.user)
+  }
   fullscreen.value = await getCurrentWindow().isFullscreen().catch(() => false)
   ui.showPanel()
   window.addEventListener('mouseup', clearResizeActive)
@@ -175,13 +337,87 @@ onMounted(async () => {
     ui.showPanel()
     ui.openFloatingActionDialog(event.payload)
   })
+  unlistenReminderOpenTask = await listen('daily-task-reminder-open-task', () => {
+    void openReminderTaskFromFloat()
+  })
+  unlistenReminderSnooze = await listen('daily-task-reminder-snooze', (event) => {
+    if (!isDailyReminderSnoozePayload(event.payload)) return
+    void snoozeDailyReminderFromFloat(event.payload)
+  })
 })
 
 onUnmounted(() => {
   window.removeEventListener('mouseup', clearResizeActive)
+  clearDailyReminderTimer()
   unlistenFloatingDrop?.()
   unlistenFloatingDrop = null
+  unlistenReminderOpenTask?.()
+  unlistenReminderOpenTask = null
+  unlistenReminderSnooze?.()
+  unlistenReminderSnooze = null
+  workspaceRealtime?.unsubscribe()
+  workspaceRealtime = null
+  void presence.leave()
+  auth.dispose()
 })
+
+watch(
+  () =>
+    collectDailyReminders()
+      .map((reminder) => `${reminder.key}:${reminder.title}:${reminder.body}`)
+      .join('|'),
+  scheduleDailyReminderCheck,
+  { immediate: true },
+)
+
+watch(
+  () => auth.user?.id ?? '',
+  async (userId) => {
+    if (!userId || !auth.client || !auth.user) {
+      workspaces.clear()
+      return
+    }
+    await workspaces.bootstrapForUser(auth.client, auth.user)
+  },
+)
+
+watch(
+  () =>
+    [
+      cloud.config?.supabaseUrl ?? '',
+      cloud.config?.hasAnonKey ? 'key' : 'no-key',
+      cloud.config?.cloudEnabled ? 'enabled' : 'disabled',
+      cloud.config?.updatedAt ?? '',
+    ].join('|'),
+  async () => {
+    if (cloud.readiness === 'configured') {
+      await auth.initialize()
+    }
+  },
+)
+
+watch(
+  () => workspaces.activeWorkspaceId,
+  async (workspaceId) => {
+    workspaceRealtime?.unsubscribe()
+    workspaceRealtime = null
+    await presence.leave()
+    if (!workspaceId || !auth.client || !auth.user) return
+
+    await sync.pullWorkspace(auth.client, workspaceId)
+    await notifications.loadUnread(auth.client, auth.user.id)
+    await presence.joinWorkspace(auth.client, {
+      workspaceId,
+      userId: auth.user.id,
+      email: auth.user.email ?? '',
+    })
+    workspaceRealtime = subscribeWorkspaceRealtime(auth.client, workspaceId, () => {
+      if (!auth.client || !auth.user) return
+      void sync.pullWorkspace(auth.client, workspaceId)
+      void notifications.loadUnread(auth.client, auth.user.id)
+    })
+  },
+)
 
 watchEffect(async () => {
   if (ui.previewImage) {
@@ -273,6 +509,7 @@ watchEffect(async () => {
       >
         设置
       </button>
+      <UserCloudMenu />
       <button
         class="window-command"
         type="button"
@@ -360,6 +597,7 @@ watchEffect(async () => {
     <PromptEditor v-if="ui.editorOpen" />
     <ProjectEditor v-if="projects.projectEditorOpen" />
     <SettingsModal v-if="ui.settingsOpen" />
+    <CloudMigrationDialog />
     <FloatingActionDialog />
     <div
       v-if="ui.toast"

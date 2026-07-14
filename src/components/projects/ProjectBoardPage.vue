@@ -1,12 +1,22 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { Pencil, Plus } from '@lucide/vue'
-import { STAGE_DEFINITIONS, type StageKey } from '@/domain/production'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Pencil, Plus, UserPlus } from '@lucide/vue'
+import { STAGE_DEFINITIONS, type Project, type StageKey } from '@/domain/production'
+import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
+import InviteDialog from '@/components/collaboration/InviteDialog.vue'
+import CommentPanel from '@/components/collaboration/CommentPanel.vue'
+import PresenceAvatars from '@/components/collaboration/PresenceAvatars.vue'
 import ProjectTimeline from './ProjectTimeline.vue'
 
+const auth = useAuthStore()
 const projects = useProjectsStore()
 const selectedProjectId = ref<string | null>(null)
+const detailOpen = ref(false)
+const inviteOpen = ref(false)
+const inviteTrigger = ref<HTMLButtonElement | null>(null)
+const invitePopover = ref<HTMLElement | null>(null)
+const invitePopoverStyle = ref<Record<string, string>>({})
 
 const selectedProject = computed(
   () =>
@@ -15,22 +25,24 @@ const selectedProject = computed(
     null,
 )
 
-const timelineProjects = computed(() =>
-  projects.filteredProjects.filter((project) => project.stages.some((stage) => stage.progress < 100)),
-)
-
 watch(
   () => projects.filteredProjects.map((project) => project.id),
   (projectIds) => {
     if (!selectedProjectId.value || !projectIds.includes(selectedProjectId.value)) {
       selectedProjectId.value = projectIds[0] ?? null
+      detailOpen.value = false
     }
   },
   { immediate: true },
 )
 
-function selectStage(stageKey: StageKey | 'all') {
-  projects.filters.stageKey = stageKey
+function stageDefinition(stageKey: StageKey) {
+  return STAGE_DEFINITIONS.find((stage) => stage.key === stageKey) ?? STAGE_DEFINITIONS[0]
+}
+
+function selectProject(project: Project) {
+  selectedProjectId.value = project.id
+  detailOpen.value = true
 }
 
 function openNewProject() {
@@ -40,17 +52,78 @@ function openNewProject() {
 function openSelectedProject() {
   if (selectedProject.value) projects.openEditor(selectedProject.value.id)
 }
+
+function editProject(project: Project) {
+  selectedProjectId.value = project.id
+  projects.openEditor(project.id)
+}
+
+async function positionInvitePopover() {
+  await nextTick()
+  const rect = inviteTrigger.value?.getBoundingClientRect()
+  if (!rect) return
+  const width = Math.min(340, window.innerWidth - 24)
+  const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width))
+  invitePopoverStyle.value = {
+    position: 'fixed',
+    zIndex: '240',
+    top: `${rect.bottom + 8}px`,
+    left: `${left}px`,
+    width: `${width}px`,
+  }
+}
+
+async function toggleInvitePopover() {
+  inviteOpen.value = !inviteOpen.value
+  if (inviteOpen.value) await positionInvitePopover()
+}
+
+function closeInviteWhenClickingOutside(event: MouseEvent) {
+  if (!inviteOpen.value) return
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if (inviteTrigger.value?.contains(target)) return
+  if (invitePopover.value?.contains(target)) return
+  inviteOpen.value = false
+}
+
+onMounted(() => {
+  document.addEventListener('click', closeInviteWhenClickingOutside)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeInviteWhenClickingOutside)
+})
 </script>
 
 <template>
   <main class="project-board-page">
     <header class="project-board-toolbar">
-      <div>
+      <div class="project-board-title">
         <p>Production</p>
-        <h2>项目管理</h2>
+        <div class="project-title-row">
+          <h2>项目管理</h2>
+          <button
+            v-if="auth.user"
+            ref="inviteTrigger"
+            class="project-toolbar-icon"
+            data-action="project-invite-menu"
+            type="button"
+            title="协作邀请"
+            aria-label="协作邀请"
+            :aria-expanded="inviteOpen"
+            @click="toggleInvitePopover"
+          >
+            <UserPlus
+              :size="16"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
       </div>
 
       <div class="project-board-controls">
+        <PresenceAvatars v-if="auth.user" />
         <input
           v-model="projects.filters.query"
           aria-label="搜索项目"
@@ -105,6 +178,22 @@ function openSelectedProject() {
       </div>
     </header>
 
+    <Teleport to="body">
+      <section
+        v-if="auth.user && inviteOpen"
+        ref="invitePopover"
+        class="project-invite-popover"
+        aria-label="协作邀请"
+        :style="invitePopoverStyle"
+      >
+        <header>
+          <strong>协作邀请</strong>
+          <span>{{ selectedProject ? selectedProject.code : '全部项目' }}</span>
+        </header>
+        <InviteDialog :project-id="selectedProject?.id ?? null" />
+      </section>
+    </Teleport>
+
     <div
       v-if="projects.error"
       class="project-board-error"
@@ -115,54 +204,51 @@ function openSelectedProject() {
 
     <div class="project-board-scroll">
       <section
-        class="project-board"
-        aria-label="项目阶段看板"
+        class="project-note-grid"
+        aria-label="项目便签"
       >
-        <section
-          v-for="stage in STAGE_DEFINITIONS"
-          :key="stage.key"
-          class="project-stage-column"
-          :data-stage-column="stage.key"
-        >
-          <header :style="{ '--stage-color': stage.color, '--stage-text-color': stage.textColor }">
-            <button
-              type="button"
-              @click="selectStage(stage.key)"
-            >
-              {{ stage.label }}
-            </button>
-            <span>{{ projects.projectsByStage[stage.key].length }}</span>
-          </header>
-
-          <div class="project-stage-list">
-            <button
-              v-for="project in projects.projectsByStage[stage.key]"
-              :key="project.id"
-              class="project-stage-card"
-              :class="{ selected: selectedProject?.id === project.id }"
-              :data-project-id="project.id"
-              type="button"
-              @click="selectedProjectId = project.id"
-            >
-              <span class="project-code">{{ project.code }} · {{ project.version }}</span>
-              <strong>{{ project.name }}</strong>
-              <span class="project-release">{{ project.releaseDate }}</span>
-              <span class="project-progress">
-                <span :style="{ width: `${project.stages.find((item) => item.stageKey === stage.key)?.progress ?? 0}%` }" />
-              </span>
-              <b>{{ project.stages.find((item) => item.stageKey === stage.key)?.progress ?? 0 }}%</b>
-            </button>
-            <p v-if="projects.projectsByStage[stage.key].length === 0">
-              暂无项目
-            </p>
-          </div>
-        </section>
-      </section>
-      <section class="project-timeline-list">
-        <ProjectTimeline
-          v-for="project in timelineProjects"
+        <button
+          v-for="project in projects.filteredProjects"
           :key="project.id"
-          :project="project"
+          class="project-note"
+          :class="{ selected: selectedProject?.id === project.id && detailOpen }"
+          :data-project-note="project.id"
+          type="button"
+          @click="selectProject(project)"
+          @dblclick.stop="editProject(project)"
+        >
+          <span
+            class="project-note-stage"
+            :style="{
+              '--stage-color': stageDefinition(project.mainStageKey).color,
+              '--stage-text-color': stageDefinition(project.mainStageKey).textColor,
+            }"
+          >
+            {{ stageDefinition(project.mainStageKey).label }}
+          </span>
+          <span class="project-note-code">{{ project.code }}</span>
+          <span class="project-note-version">{{ project.version }}</span>
+          <strong>{{ project.name }}</strong>
+          <span class="project-note-release">{{ project.releaseDate }}</span>
+        </button>
+        <p
+          v-if="!projects.loading && projects.filteredProjects.length === 0"
+          class="project-note-empty"
+        >
+          暂无项目
+        </p>
+      </section>
+
+      <section
+        v-if="detailOpen && selectedProject"
+        class="project-detail-panel"
+        aria-label="项目具体排期进度"
+      >
+        <ProjectTimeline :project="selectedProject" />
+        <CommentPanel
+          v-if="auth.user"
+          target-type="project"
+          :target-id="selectedProject.id"
         />
       </section>
     </div>
@@ -188,12 +274,12 @@ function openSelectedProject() {
   border-bottom: 1px solid var(--bb-border);
 }
 
-.project-board-toolbar p,
-.project-board-toolbar h2 {
+.project-board-title p,
+.project-board-title h2 {
   margin: 0;
 }
 
-.project-board-toolbar p {
+.project-board-title p {
   color: var(--bb-primary);
   font-family: var(--bb-mono);
   font-size: 11px;
@@ -201,8 +287,14 @@ function openSelectedProject() {
   text-transform: uppercase;
 }
 
-.project-board-toolbar h2 {
+.project-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   margin-top: 3px;
+}
+
+.project-board-title h2 {
   font-size: 20px;
   font-weight: 650;
 }
@@ -248,6 +340,40 @@ function openSelectedProject() {
   background: var(--bb-primary-strong);
 }
 
+.project-invite-popover {
+  position: fixed;
+  z-index: 240;
+  max-height: min(460px, calc(100vh - 86px));
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--bb-border-strong);
+  border-radius: var(--bb-radius-md);
+  background: rgba(5, 14, 22, 0.98);
+  box-shadow: var(--bb-shadow-floating);
+}
+
+.project-invite-popover > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.project-invite-popover strong {
+  font-size: 13px;
+}
+
+.project-invite-popover span {
+  overflow: hidden;
+  color: var(--bb-text-soft);
+  font-family: var(--bb-mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .project-board-error {
   padding: 8px 22px;
   border-bottom: 1px solid var(--bb-danger-border);
@@ -261,137 +387,83 @@ function openSelectedProject() {
   overflow: auto;
 }
 
-.project-timeline-list {
-  border-top: 1px solid var(--bb-border);
-}
-
-.project-board {
+.project-note-grid {
   display: grid;
-  min-width: 1260px;
-  grid-template-columns: repeat(8, minmax(148px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(174px, 1fr));
+  gap: 10px;
   align-items: stretch;
-  min-height: 100%;
+  padding: 14px;
 }
 
-.project-stage-column {
+.project-note {
+  position: relative;
+  display: grid;
   min-width: 0;
-  border-right: 1px solid var(--bb-border);
-  background: rgba(12, 23, 33, 0.38);
+  min-height: 132px;
+  align-content: start;
+  gap: 7px;
+  padding: 11px;
+  border: 1px solid rgba(148, 179, 188, 0.18);
+  border-radius: var(--bb-radius-sm);
+  background:
+    linear-gradient(180deg, rgba(20, 35, 47, 0.96), rgba(9, 21, 31, 0.96));
+  color: var(--bb-text);
+  text-align: left;
+  box-shadow: var(--bb-shadow-card);
 }
 
-.project-stage-column:last-child {
-  border-right: 0;
+.project-note:hover,
+.project-note.selected {
+  border-color: rgba(123, 255, 226, 0.42);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(102, 247, 211, 0.1), transparent 38%),
+    linear-gradient(180deg, rgba(23, 41, 54, 0.98), rgba(10, 22, 32, 0.98));
+  box-shadow: var(--bb-shadow-floating);
 }
 
-.project-stage-column > header {
-  display: flex;
-  height: 38px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 9px;
-  border-bottom: 1px solid rgba(5, 11, 18, 0.18);
+.project-note-stage {
+  justify-self: start;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: var(--bb-radius-xs);
   background: var(--stage-color);
   color: var(--stage-text-color);
-}
-
-.project-stage-column > header button {
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
+  font-size: 11px;
   font-weight: 750;
 }
 
-.project-stage-column > header button:hover:not(:disabled) {
-  box-shadow: none;
-  text-decoration: underline;
-}
-
-.project-stage-column > header span {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--stage-text-color) 16%, transparent);
-  color: inherit;
-  font-family: var(--bb-mono);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.project-stage-list {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  min-height: 132px;
-  padding: 10px;
-}
-
-.project-stage-list > p {
-  margin: 5px 0;
-  color: var(--bb-text-soft);
-  font-size: 11px;
-  text-align: center;
-}
-
-.project-stage-card {
-  display: grid;
-  min-width: 0;
-  gap: 6px;
-  padding: 10px;
-  border-color: rgba(148, 179, 188, 0.18);
-  border-radius: var(--bb-radius-sm);
-  background: var(--bb-surface-soft);
-  color: var(--bb-text);
-  text-align: left;
-}
-
-.project-stage-card.selected {
-  border-color: var(--bb-primary);
-  box-shadow: 0 0 0 1px rgba(102, 247, 211, 0.14), 0 10px 18px rgba(0, 0, 0, 0.14);
-}
-
-.project-code,
-.project-release,
-.project-stage-card b {
+.project-note-code,
+.project-note-version,
+.project-note-release {
   color: var(--bb-text-muted);
   font-family: var(--bb-mono);
   font-size: 10px;
 }
 
-.project-stage-card strong {
+.project-note strong {
+  min-width: 0;
   overflow: hidden;
   color: var(--bb-text);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.project-release {
+.project-note-release {
+  margin-top: auto;
   color: var(--bb-text-soft);
 }
 
-.project-progress {
-  display: block;
-  height: 4px;
-  overflow: hidden;
-  border-radius: 2px;
-  background: rgba(148, 179, 188, 0.14);
+.project-note-empty {
+  grid-column: 1 / -1;
+  margin: 32px 0;
+  color: var(--bb-text-soft);
+  text-align: center;
 }
 
-.project-progress span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--bb-primary);
-}
-
-.project-stage-card b {
-  color: var(--bb-primary-strong);
-  font-weight: 700;
+.project-detail-panel {
+  border-top: 1px solid var(--bb-border);
 }
 
 @media (max-width: 760px) {
@@ -401,6 +473,11 @@ function openSelectedProject() {
 
   .project-board-controls input[aria-label='搜索项目'] {
     width: min(100%, 220px);
+  }
+
+  .project-note-grid {
+    grid-template-columns: repeat(auto-fit, minmax(146px, 1fr));
+    padding: 10px;
   }
 }
 </style>

@@ -2,6 +2,26 @@
 // 核心数据类型，与 Rust 端 library.rs 的 struct 对齐（serde camelCase）
 
 export type {
+  CloudConfig,
+  CloudConfigValidationResult,
+  CloudReadiness,
+  CloudRuntimeConfig,
+  SaveCloudConfigInput,
+} from './cloud'
+
+export type { AppProfile, AuthMode } from './auth'
+export type { Workspace, WorkspaceMember, WorkspaceRole } from './workspace'
+export type {
+  AppNotification,
+  CollaborationInvite,
+  CommentItem,
+  CommentTargetType,
+  InviteScopeType,
+  NotificationKind,
+  PresenceUser,
+} from './collaboration'
+
+export type {
   AiProvider,
   CheckAiProviderConnectionResult,
   ProviderKind,

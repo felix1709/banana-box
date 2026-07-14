@@ -1,0 +1,132 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { Cloud, HardDrive, LogOut } from '@lucide/vue'
+import { useAuthStore } from '@/stores/auth'
+import { useWorkspacesStore } from '@/stores/workspaces'
+
+const auth = useAuthStore()
+const workspaces = useWorkspacesStore()
+const activeWorkspace = computed(() => workspaces.activeWorkspace)
+const displayEmail = computed(() => workspaces.profile?.email || auth.user?.email || '')
+const fallbackWorkspaceName = computed(() => {
+  const accountName = displayEmail.value.split('@')[0] || '个人'
+  return `${accountName} 的个人空间`
+})
+const displayWorkspaceName = computed(() => {
+  const name = activeWorkspace.value?.name ?? ''
+  if (!name) return '尚未选择工作区'
+  if (name.includes('?')) return fallbackWorkspaceName.value
+  return name
+})
+
+async function signOut() {
+  await auth.signOut()
+  workspaces.clear()
+}
+</script>
+
+<template>
+  <section
+    class="workspace-switcher"
+    aria-label="当前工作区"
+  >
+    <div
+      v-if="!auth.cloudAvailable"
+      class="workspace-state"
+    >
+      <HardDrive
+        :size="14"
+        aria-hidden="true"
+      />
+      <span>本地离线模式</span>
+    </div>
+    <template v-else-if="auth.user">
+      <div class="workspace-state">
+        <Cloud
+          :size="14"
+          aria-hidden="true"
+        />
+        <span v-if="workspaces.loading">正在创建个人空间</span>
+        <span v-else>{{ displayWorkspaceName }}</span>
+      </div>
+      <p class="workspace-user">
+        {{ displayEmail }}
+      </p>
+      <button
+        class="workspace-sign-out"
+        data-action="auth-sign-out"
+        type="button"
+        @click="signOut"
+      >
+        <LogOut
+          :size="14"
+          aria-hidden="true"
+        />
+        <span>退出</span>
+      </button>
+    </template>
+    <div
+      v-else
+      class="workspace-state"
+    >
+      <Cloud
+        :size="14"
+        aria-hidden="true"
+      />
+      <span>云端未登录</span>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.workspace-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid rgba(123, 255, 226, 0.14);
+  border-radius: var(--bb-radius-md);
+  background: rgba(102, 247, 211, 0.06);
+  min-width: 0;
+}
+
+.workspace-state,
+.workspace-sign-out {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workspace-state {
+  color: var(--bb-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workspace-state span,
+.workspace-user,
+.workspace-sign-out span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-user {
+  margin: 0;
+  color: var(--bb-text-muted);
+  font-size: 11px;
+}
+
+.workspace-sign-out {
+  width: 100%;
+  min-height: 30px;
+  justify-content: center;
+  padding: 5px 8px;
+  border-color: rgba(123, 255, 226, 0.16);
+  background: rgba(4, 12, 18, 0.42);
+  color: var(--bb-text-muted);
+  font-size: 12px;
+}
+</style>

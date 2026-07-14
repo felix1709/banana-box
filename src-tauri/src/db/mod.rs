@@ -213,7 +213,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .map_err(|error| error.to_string())?;
-            assert_eq!(version, 3);
+            assert_eq!(version, crate::db::schema::SCHEMA_VERSION);
             assert_eq!(table_count, 1);
             assert!(connection.execute(
                 "INSERT INTO projects (id, code, version, name, file_path, release_date, main_stage_key, archived, created_at, updated_at)
