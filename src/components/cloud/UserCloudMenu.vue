@@ -103,7 +103,7 @@ watch(
         <WorkspaceSwitcher />
         <SyncStatusIndicator />
         <LoginPanel v-if="auth.cloudAvailable && !auth.user" />
-        <InviteAcceptPanel v-if="auth.user && auth.isCloudAdmin" />
+        <InviteAcceptPanel v-if="auth.user" />
         <p
           v-if="workspaces.error"
           class="user-cloud-error"

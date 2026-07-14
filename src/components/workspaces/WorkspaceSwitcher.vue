@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { Cloud, HardDrive, LogOut } from '@lucide/vue'
+import { computed, ref } from 'vue'
+import { Check, Cloud, HardDrive, LogOut, Pencil } from '@lucide/vue'
 import { useAuthStore } from '@/stores/auth'
 import { useWorkspacesStore } from '@/stores/workspaces'
 
@@ -8,6 +8,9 @@ const auth = useAuthStore()
 const workspaces = useWorkspacesStore()
 const activeWorkspace = computed(() => workspaces.activeWorkspace)
 const displayEmail = computed(() => workspaces.profile?.email || auth.user?.email || '')
+const editingName = ref(false)
+const nameDraft = ref('')
+const displayName = computed(() => workspaces.profile?.displayName || displayEmail.value.split('@')[0] || '')
 const fallbackWorkspaceName = computed(() => {
   const accountName = displayEmail.value.split('@')[0] || '个人'
   return `${accountName} 的个人空间`
@@ -22,6 +25,17 @@ const displayWorkspaceName = computed(() => {
 async function signOut() {
   await auth.signOut()
   workspaces.clear()
+}
+
+function startEditingName() {
+  nameDraft.value = displayName.value
+  editingName.value = true
+}
+
+async function saveDisplayName() {
+  if (!auth.client) return
+  await workspaces.updateDisplayName(auth.client, nameDraft.value)
+  if (!workspaces.error) editingName.value = false
 }
 </script>
 
@@ -50,8 +64,43 @@ async function signOut() {
         <span v-else>{{ displayWorkspaceName }}</span>
       </div>
       <p class="workspace-user">
-        {{ displayEmail }}
+        <span>{{ displayName }}</span>
+        <small>{{ displayEmail }}</small>
       </p>
+      <div
+        v-if="editingName"
+        class="workspace-name-editor"
+      >
+        <input
+          v-model="nameDraft"
+          data-field="display-name"
+          aria-label="协作昵称"
+        >
+        <button
+          type="button"
+          data-action="save-display-name"
+          :disabled="!nameDraft.trim()"
+          @click="saveDisplayName"
+        >
+          <Check
+            :size="14"
+            aria-hidden="true"
+          />
+        </button>
+      </div>
+      <button
+        v-else
+        class="workspace-sign-out"
+        data-action="edit-display-name"
+        type="button"
+        @click="startEditingName"
+      >
+        <Pencil
+          :size="14"
+          aria-hidden="true"
+        />
+        <span>编辑昵称</span>
+      </button>
       <button
         class="workspace-sign-out"
         data-action="auth-sign-out"
@@ -117,6 +166,28 @@ async function signOut() {
   margin: 0;
   color: var(--bb-text-muted);
   font-size: 11px;
+}
+
+.workspace-user span,
+.workspace-user small {
+  display: block;
+}
+
+.workspace-user span {
+  color: var(--bb-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.workspace-name-editor {
+  display: grid;
+  grid-template-columns: 1fr 32px;
+  gap: 6px;
+}
+
+.workspace-name-editor input,
+.workspace-name-editor button {
+  min-height: 30px;
 }
 
 .workspace-sign-out {

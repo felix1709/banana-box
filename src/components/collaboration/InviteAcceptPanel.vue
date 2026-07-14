@@ -2,9 +2,11 @@
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMembersStore } from '@/stores/members'
+import { useWorkspacesStore } from '@/stores/workspaces'
 
 const auth = useAuthStore()
 const members = useMembersStore()
+const workspaces = useWorkspacesStore()
 const token = ref('')
 const status = ref('')
 const error = ref('')
@@ -18,12 +20,26 @@ function normalizeInviteToken(value: string) {
   }
 }
 
+function displayNameFromEmail(email: string | undefined) {
+  return email?.split('@')[0] || 'Banana Box User'
+}
+
 async function acceptInvite() {
   if (!auth.client || !auth.user || !token.value.trim()) return
   status.value = ''
   error.value = ''
   try {
-    await members.acceptInvite(auth.client, normalizeInviteToken(token.value))
+    const accepted = await members.acceptInvite(auth.client, normalizeInviteToken(token.value))
+    if (accepted.projectId) {
+      workspaces.addSharedWorkspace(accepted.workspaceId)
+    } else {
+      await workspaces.loadMembershipsOrCreateDefault(
+        auth.client,
+        auth.user.id,
+        displayNameFromEmail(auth.user.email),
+      )
+      workspaces.setActiveWorkspace(accepted.workspaceId)
+    }
     token.value = ''
     status.value = '已加入'
   } catch (err) {

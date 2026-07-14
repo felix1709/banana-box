@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Pencil, Plus, UserPlus } from '@lucide/vue'
+import { Pencil, Plus, Users, UserPlus } from '@lucide/vue'
 import { STAGE_DEFINITIONS, type Project, type StageKey } from '@/domain/production'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
@@ -23,6 +23,15 @@ const selectedProject = computed(
     projects.filteredProjects.find((project) => project.id === selectedProjectId.value) ??
     projects.filteredProjects[0] ??
     null,
+)
+const selectedProjectOwnedByCurrentUser = computed(
+  () => Boolean(auth.user && selectedProject.value?.ownerUserId === auth.user.id),
+)
+const selectedProjectCanEditMetadata = computed(
+  () => Boolean(selectedProject.value && (!auth.user || !selectedProject.value.ownerUserId || selectedProjectOwnedByCurrentUser.value)),
+)
+const selectedProjectCanInvite = computed(
+  () => Boolean(selectedProjectOwnedByCurrentUser.value && selectedProject.value?.isPublic),
 )
 
 watch(
@@ -54,6 +63,7 @@ function openSelectedProject() {
 }
 
 function editProject(project: Project) {
+  if (auth.user && project.ownerUserId && project.ownerUserId !== auth.user.id) return
   selectedProjectId.value = project.id
   projects.openEditor(project.id)
 }
@@ -76,6 +86,11 @@ async function positionInvitePopover() {
 async function toggleInvitePopover() {
   inviteOpen.value = !inviteOpen.value
   if (inviteOpen.value) await positionInvitePopover()
+}
+
+async function toggleSelectedProjectPublic() {
+  if (!selectedProject.value || !selectedProjectOwnedByCurrentUser.value) return
+  await projects.setPublic(selectedProject.value.id, !selectedProject.value.isPublic)
 }
 
 function closeInviteWhenClickingOutside(event: MouseEvent) {
@@ -104,7 +119,7 @@ onBeforeUnmount(() => {
         <div class="project-title-row">
           <h2>项目管理</h2>
           <button
-            v-if="auth.user"
+            v-if="auth.user && selectedProjectCanInvite"
             ref="inviteTrigger"
             class="project-toolbar-icon"
             data-action="project-invite-menu"
@@ -150,7 +165,7 @@ onBeforeUnmount(() => {
           type="date"
         >
         <button
-          v-if="selectedProject"
+          v-if="selectedProject && selectedProjectCanEditMetadata"
           class="project-toolbar-icon"
           data-action="edit-selected-project"
           type="button"
@@ -162,6 +177,20 @@ onBeforeUnmount(() => {
             :size="15"
             aria-hidden="true"
           />
+        </button>
+        <button
+          v-if="selectedProject && selectedProjectOwnedByCurrentUser"
+          class="project-public-toggle"
+          type="button"
+          data-action="toggle-project-public"
+          :aria-pressed="selectedProject.isPublic"
+          @click="toggleSelectedProjectPublic"
+        >
+          <Users
+            :size="15"
+            aria-hidden="true"
+          />
+          {{ selectedProject.isPublic ? '公共项目' : '个人项目' }}
         </button>
         <button
           class="new-project-button"
@@ -180,7 +209,7 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <section
-        v-if="auth.user && inviteOpen"
+        v-if="auth.user && inviteOpen && selectedProjectCanInvite"
         ref="invitePopover"
         class="project-invite-popover"
         aria-label="协作邀请"
@@ -190,7 +219,10 @@ onBeforeUnmount(() => {
           <strong>协作邀请</strong>
           <span>{{ selectedProject ? selectedProject.code : '全部项目' }}</span>
         </header>
-        <InviteDialog :project-id="selectedProject?.id ?? null" />
+        <InviteDialog
+          :project-id="selectedProject?.id ?? null"
+          :can-invite="selectedProjectCanInvite"
+        />
       </section>
     </Teleport>
 
@@ -218,6 +250,18 @@ onBeforeUnmount(() => {
           @dblclick.stop="editProject(project)"
         >
           <span
+            v-if="project.isPublic"
+            class="project-note-public-badge"
+            :data-project-public-badge="project.id"
+            title="公共协作项目"
+            aria-label="公共协作项目"
+          >
+            <Users
+              :size="13"
+              aria-hidden="true"
+            />
+          </span>
+          <span
             class="project-note-stage"
             :style="{
               '--stage-color': stageDefinition(project.mainStageKey).color,
@@ -230,6 +274,12 @@ onBeforeUnmount(() => {
           <span class="project-note-version">{{ project.version }}</span>
           <strong>{{ project.name }}</strong>
           <span class="project-note-release">{{ project.releaseDate }}</span>
+          <span
+            v-if="project.lastActivitySummary"
+            class="project-note-activity"
+          >
+            {{ project.lastActivityActorName ? `${project.lastActivityActorName}：` : '' }}{{ project.lastActivitySummary }}
+          </span>
         </button>
         <p
           v-if="!projects.loading && projects.filteredProjects.length === 0"
@@ -336,6 +386,15 @@ onBeforeUnmount(() => {
   padding: 0;
 }
 
+.project-public-toggle {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
 .new-project-button:hover:not(:disabled) {
   background: var(--bb-primary-strong);
 }
@@ -412,6 +471,20 @@ onBeforeUnmount(() => {
   box-shadow: var(--bb-shadow-card);
 }
 
+.project-note-public-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 24px;
+  min-height: 24px;
+  place-items: center;
+  border: 1px solid rgba(102, 247, 211, 0.66);
+  border-radius: var(--bb-radius-xs);
+  background: rgba(102, 247, 211, 0.16);
+  color: var(--bb-primary-strong);
+}
+
 .project-note:hover,
 .project-note.selected {
   border-color: rgba(123, 255, 226, 0.42);
@@ -453,6 +526,14 @@ onBeforeUnmount(() => {
 .project-note-release {
   margin-top: auto;
   color: var(--bb-text-soft);
+}
+
+.project-note-activity {
+  overflow: hidden;
+  color: var(--bb-text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-note-empty {

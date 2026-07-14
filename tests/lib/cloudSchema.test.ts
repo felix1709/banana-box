@@ -113,6 +113,19 @@ describe('cloud collaboration schema', () => {
     expect(sql).toContain("add column if not exists reminder_content text not null default ''")
   })
 
+  it('adds project-level collaboration without granting whole-workspace membership', () => {
+    const sql = readMigration('0007_project_level_collaboration.sql')
+
+    expect(sql).toContain('alter table public.projects')
+    expect(sql).toContain('add column if not exists owner_user_id uuid')
+    expect(sql).toContain('add column if not exists is_public boolean not null default false')
+    expect(sql).toContain('create table if not exists public.project_activity_log')
+    expect(sql).toContain('create or replace function public.project_role')
+    expect(sql).toContain('matching_invite.scope_type = \'workspace\'')
+    expect(sql).toContain('matching_invite.scope_type = \'project\'')
+    expect(sql).toContain('insert into public.project_members')
+  })
+
   it('makes copied RLS policies safe to run more than once', () => {
     for (const migration of [
       '0001_auth_workspaces.sql',

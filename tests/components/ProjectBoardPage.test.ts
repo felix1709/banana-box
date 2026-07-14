@@ -14,6 +14,7 @@ vi.mock('@/lib/productionIpc', () => ({
   deleteProject: vi.fn(),
   listProjects: vi.fn().mockResolvedValue([]),
   saveProjectWithStages: vi.fn(),
+  setProjectPublic: vi.fn(),
   setProjectStage: vi.fn(),
   updateProject: vi.fn(),
 }))
@@ -74,7 +75,7 @@ describe('ProjectBoardPage', () => {
       url: 'banana-box://invite?token=abc',
     }))
     const store = useProjectsStore()
-    store.hydrate([project()])
+    store.hydrate([project({ ownerUserId: 'user-1', isPublic: true })])
     const wrapper = mount(ProjectBoardPage)
 
     expect(wrapper.find('.invite-dialog').exists()).toBe(false)
@@ -91,6 +92,43 @@ describe('ProjectBoardPage', () => {
       scopeType: 'project',
     }))
     expect(document.body.textContent).toContain('banana-box://invite?token=abc')
+  })
+
+  it('shows a public collaboration badge and lets only the creator invite from public projects', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user-1' } as never
+    auth.client = {} as never
+    useWorkspacesStore().activeWorkspaceId = 'workspace-1'
+    const store = useProjectsStore()
+    store.hydrate([project({ ownerUserId: 'user-1', isPublic: true })])
+
+    const wrapper = mount(ProjectBoardPage)
+
+    expect(wrapper.get('[data-project-public-badge="p1"]').exists()).toBe(true)
+    expect(wrapper.get('[data-action="project-invite-menu"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('blocks invite controls for private projects and for non-creators', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user-2' } as never
+    const store = useProjectsStore()
+    store.hydrate([project({ ownerUserId: 'user-1', isPublic: true })])
+
+    const wrapper = mount(ProjectBoardPage)
+
+    expect(wrapper.find('[data-action="project-invite-menu"]').exists()).toBe(false)
+  })
+
+  it('does not show project metadata editing controls to collaborators', () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user-2' } as never
+    const store = useProjectsStore()
+    store.hydrate([project({ ownerUserId: 'user-1', isPublic: true })])
+
+    const wrapper = mount(ProjectBoardPage)
+
+    expect(wrapper.find('[data-action="edit-selected-project"]').exists()).toBe(false)
+    expect(wrapper.find('[data-action="toggle-project-public"]').exists()).toBe(false)
   })
 
   it('orders unfinished project timelines by final release date and hides completed stage bars', async () => {
@@ -118,7 +156,7 @@ describe('ProjectBoardPage', () => {
   })
 })
 
-function project(): Project {
+function project(overrides: Partial<Project> = {}): Project {
   return {
     id: 'p1',
     code: 'L36',
@@ -129,6 +167,10 @@ function project(): Project {
     releaseDate: '2026-07-31',
     mainStageKey: 'storyboard',
     archived: false,
+    ownerUserId: 'user-1',
+    isPublic: false,
+    lastActivitySummary: '',
+    lastActivityActorName: '',
     createdAt: '2026-07-11T08:00:00Z',
     updatedAt: '2026-07-11T08:00:00Z',
     stages: STAGE_DEFINITIONS.map((stage, position) => ({
@@ -140,5 +182,6 @@ function project(): Project {
       progress: stage.key === 'storyboard' ? 65 : 0,
       updatedAt: '2026-07-11T08:00:00Z',
     })),
+    ...overrides,
   }
 }

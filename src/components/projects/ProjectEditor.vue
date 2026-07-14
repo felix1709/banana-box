@@ -7,9 +7,11 @@ import {
   type ProjectStageInput,
   type SaveProjectWithStagesInput,
 } from '@/domain/production'
+import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
 
 const projects = useProjectsStore()
+const auth = useAuthStore()
 const saving = ref(false)
 const error = ref('')
 
@@ -93,6 +95,7 @@ async function save() {
         name: form.name.trim(),
         filePath: form.filePath.trim(),
         releaseDate: form.releaseDate,
+        ownerUserId: auth.user?.id ?? '',
         stages: form.stages.map(({ stageKey, startDate, endDate }) => ({
           stageKey,
           startDate,

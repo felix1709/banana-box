@@ -1,6 +1,6 @@
 use super::model::{
     apply_schedule_progress, main_stage_for_project_stages, main_stage_for_schedule,
-    progress_for_schedule, validate_and_sort_stages, validate_project_fields, validate_project_id,
+    validate_and_sort_stages, validate_project_fields, validate_project_id,
     validate_stage_values, CreateProjectInput, ProjectDto, ProjectStageDto, SaveProjectStageInput,
     SaveProjectWithStagesInput, SetProjectStageInput, StageKey, UpdateProjectInput,
 };
@@ -46,8 +46,8 @@ pub fn create_project(db: &Database, input: CreateProjectInput) -> Result<Projec
         transaction
             .execute(
                 "INSERT INTO projects
-                 (id, code, version, name, file_path, release_date, main_stage_key, archived, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?8)",
+                 (id, code, version, name, file_path, release_date, main_stage_key, archived, owner_user_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?9)",
                 params![
                     project_id,
                     input.code.trim(),
@@ -56,6 +56,7 @@ pub fn create_project(db: &Database, input: CreateProjectInput) -> Result<Projec
                     input.file_path.trim(),
                     input.release_date,
                     main_stage_key.as_str(),
+                    input.owner_user_id.trim(),
                     now,
                 ],
             )
@@ -100,6 +101,32 @@ pub fn update_project(db: &Database, input: UpdateProjectInput) -> Result<Projec
             return Err("PROJECT_NOT_FOUND".into());
         }
         read_project(transaction, &input.project_id)
+    })
+}
+
+pub fn set_project_public(
+    db: &Database,
+    project_id: &str,
+    is_public: bool,
+) -> Result<ProjectDto, String> {
+    validate_project_id(project_id)?;
+    let now = timestamp();
+    let summary = if is_public { "设为公共项目" } else { "设为个人项目" };
+
+    db.with_transaction(|transaction| {
+        let changed = transaction
+            .execute(
+                "UPDATE projects
+                 SET is_public = ?1, last_activity_summary = ?2, updated_at = ?3
+                 WHERE id = ?4",
+                params![i64::from(is_public), summary, now, project_id],
+            )
+            .map_err(|error| error.to_string())?;
+        if changed == 0 {
+            return Err("PROJECT_NOT_FOUND".into());
+        }
+        insert_activity(transaction, project_id, "", "", summary, &now)?;
+        read_project(transaction, project_id)
     })
 }
 
@@ -156,10 +183,17 @@ pub fn save_project_with_stages(
 pub fn set_project_stage(db: &Database, input: SetProjectStageInput) -> Result<ProjectDto, String> {
     validate_project_id(&input.project_id)?;
     validate_stage_values(&input.start_date, &input.end_date, input.progress)?;
-    let progress = progress_for_schedule(&input.start_date, &input.end_date, schedule_date())?;
+    let progress = input.progress;
     let now = timestamp();
 
     db.with_transaction(|transaction| {
+        let previous_progress = transaction
+            .query_row(
+                "SELECT progress FROM project_stages WHERE project_id = ?1 AND stage_key = ?2",
+                params![input.project_id, input.stage_key.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| error.to_string())?;
         let changed = transaction
             .execute(
                 "UPDATE project_stages
@@ -178,6 +212,28 @@ pub fn set_project_stage(db: &Database, input: SetProjectStageInput) -> Result<P
         if changed == 0 {
             return Err("PROJECT_STAGE_NOT_FOUND".into());
         }
+        let summary = format!(
+            "修改了 {} 进度 {}% -> {}%",
+            input.stage_key.as_str(),
+            previous_progress,
+            progress,
+        );
+        transaction
+            .execute(
+                "UPDATE projects
+                 SET last_activity_summary = ?1, last_activity_actor_name = ?2, updated_at = ?3
+                 WHERE id = ?4",
+                params![summary, input.actor_name.trim(), now, input.project_id],
+            )
+            .map_err(|error| error.to_string())?;
+        insert_activity(
+            transaction,
+            &input.project_id,
+            input.actor_user_id.trim(),
+            input.actor_name.trim(),
+            &summary,
+            &now,
+        )?;
         read_project(transaction, &input.project_id)
     })
 }
@@ -280,7 +336,22 @@ fn upsert_stages(
 }
 
 fn read_project(connection: &Connection, project_id: &str) -> Result<ProjectDto, String> {
-    let (id, code, version, name, file_path, release_date, main_stage_key, archived, created_at, updated_at): (
+    let (
+        id,
+        code,
+        version,
+        name,
+        file_path,
+        release_date,
+        main_stage_key,
+        archived,
+        owner_user_id,
+        is_public,
+        last_activity_summary,
+        last_activity_actor_name,
+        created_at,
+        updated_at,
+    ): (
         String,
         String,
         String,
@@ -290,10 +361,16 @@ fn read_project(connection: &Connection, project_id: &str) -> Result<ProjectDto,
         String,
         i64,
         String,
+        i64,
+        String,
+        String,
+        String,
         String,
     ) = connection
         .query_row(
-            "SELECT id, code, version, name, file_path, release_date, main_stage_key, archived, created_at, updated_at
+            "SELECT id, code, version, name, file_path, release_date, main_stage_key, archived,
+                    owner_user_id, is_public, last_activity_summary, last_activity_actor_name,
+                    created_at, updated_at
              FROM projects WHERE id = ?1",
             [project_id],
             |row| {
@@ -308,6 +385,10 @@ fn read_project(connection: &Connection, project_id: &str) -> Result<ProjectDto,
                     row.get(7)?,
                     row.get(8)?,
                     row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                    row.get(12)?,
+                    row.get(13)?,
                 ))
             },
         )
@@ -334,7 +415,7 @@ fn read_project(connection: &Connection, project_id: &str) -> Result<ProjectDto,
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
-    let mut stages = raw_stages
+    let stages = raw_stages
         .into_iter()
         .map(
             |(id, stage_key, position, start_date, end_date, progress, updated_at)| {
@@ -351,11 +432,7 @@ fn read_project(connection: &Connection, project_id: &str) -> Result<ProjectDto,
         )
         .collect::<Result<Vec<_>, String>>()?;
     StageKey::from_db(&main_stage_key)?;
-    let today = schedule_date();
-    for stage in &mut stages {
-        stage.progress = progress_for_schedule(&stage.start_date, &stage.end_date, today)?;
-    }
-    let main_stage_key = main_stage_for_project_stages(&stages, today)?;
+    let main_stage_key = main_stage_for_project_stages(&stages, schedule_date())?;
 
     Ok(ProjectDto {
         id,
@@ -367,10 +444,40 @@ fn read_project(connection: &Connection, project_id: &str) -> Result<ProjectDto,
         release_date,
         main_stage_key,
         archived: archived != 0,
+        owner_user_id,
+        is_public: is_public != 0,
+        last_activity_summary,
+        last_activity_actor_name,
         created_at,
         updated_at,
         stages,
     })
+}
+
+fn insert_activity(
+    connection: &Connection,
+    project_id: &str,
+    actor_user_id: &str,
+    actor_name: &str,
+    summary: &str,
+    now: &str,
+) -> Result<(), String> {
+    connection
+        .execute(
+            "INSERT INTO project_activity_log
+             (id, project_id, actor_user_id, actor_name, summary, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                project_id,
+                actor_user_id,
+                actor_name,
+                summary,
+                now,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn map_sql_error(error: rusqlite::Error) -> String {

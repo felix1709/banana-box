@@ -151,6 +151,34 @@ export const useWorkspacesStore = defineStore('workspaces', {
         this.activeWorkspaceId = workspaceId
       }
     },
+    addSharedWorkspace(workspaceId: string) {
+      if (!this.workspaces.some((workspace) => workspace.id === workspaceId)) {
+        const now = new Date().toISOString()
+        this.workspaces.push({
+          id: workspaceId,
+          name: '协作项目空间',
+          ownerId: '',
+          createdAt: now,
+          updatedAt: now,
+        })
+      }
+      this.activeWorkspaceId = workspaceId
+    },
+    async updateDisplayName(client: WorkspaceSupabaseClient, displayName: string) {
+      const normalized = displayName.trim()
+      if (!this.profile || !normalized) return
+      this.error = ''
+      const response = await client
+        .from('profiles')
+        .update({ display_name: normalized })
+        .eq('id', this.profile.id)
+        .single()
+      if (response.error) {
+        this.error = response.error.message
+        return
+      }
+      this.profile = mapProfile(response.data as ProfileRow)
+    },
     clear() {
       this.profile = null
       this.workspaces = []

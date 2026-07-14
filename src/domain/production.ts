@@ -44,6 +44,10 @@ export interface Project {
   releaseDate: string
   mainStageKey: StageKey
   archived: boolean
+  ownerUserId: string
+  isPublic: boolean
+  lastActivitySummary: string
+  lastActivityActorName: string
   createdAt: string
   updatedAt: string
   stages: ProjectStage[]
@@ -62,6 +66,7 @@ export interface CreateProjectInput {
   name: string
   filePath: string
   releaseDate: string
+  ownerUserId?: string
   stages: ProjectStageInput[]
 }
 
@@ -71,6 +76,8 @@ export interface UpdateProjectInput extends Omit<CreateProjectInput, 'stages'> {
 
 export interface SetProjectStageInput extends ProjectStageInput {
   projectId: string
+  actorUserId?: string
+  actorName?: string
 }
 
 export interface SaveProjectWithStagesInput extends Omit<CreateProjectInput, 'stages'> {

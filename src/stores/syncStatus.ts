@@ -13,6 +13,7 @@ const SYNC_TABLES = [
   'daily_task_groups',
   'daily_tasks',
   'comments',
+  'project_activity_log',
 ] as const
 
 export const useSyncStatusStore = defineStore('syncStatus', {

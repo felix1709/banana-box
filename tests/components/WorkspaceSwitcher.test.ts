@@ -48,6 +48,42 @@ describe('WorkspaceSwitcher', () => {
     expect(wrapper.text()).not.toContain('a@example.com')
   })
 
+  it('shows and edits the collaboration nickname', async () => {
+    const auth = useAuthStore()
+    auth.cloudAvailable = true
+    auth.client = {} as never
+    auth.user = { id: 'user-1', email: '000001@banana-box.local' } as never
+    const workspaces = useWorkspacesStore()
+    workspaces.profile = {
+      id: 'user-1',
+      email: '000001@banana-box.local',
+      displayName: '导演',
+      avatarUrl: null,
+      createdAt: 'now',
+      updatedAt: 'now',
+    }
+    workspaces.updateDisplayName = vi.fn(async () => {
+      if (workspaces.profile) workspaces.profile.displayName = '制片'
+    })
+    workspaces.workspaces = [{
+      id: 'workspace-1',
+      name: '000001 的个人空间',
+      ownerId: 'user-1',
+      createdAt: 'now',
+      updatedAt: 'now',
+    }]
+    workspaces.activeWorkspaceId = 'workspace-1'
+
+    const wrapper = mount(WorkspaceSwitcher)
+    expect(wrapper.text()).toContain('导演')
+
+    await wrapper.get('[data-action="edit-display-name"]').trigger('click')
+    await wrapper.get('[data-field="display-name"]').setValue('制片')
+    await wrapper.get('[data-action="save-display-name"]').trigger('click')
+
+    expect(workspaces.updateDisplayName).toHaveBeenCalledWith({}, '制片')
+  })
+
   it('falls back to a readable workspace name when stored text is corrupted', () => {
     const auth = useAuthStore()
     auth.cloudAvailable = true

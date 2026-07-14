@@ -12,6 +12,7 @@ function tableMock(result: unknown) {
     maybeSingle: vi.fn(async () => result),
     insert: vi.fn(() => query),
     upsert: vi.fn(() => query),
+    update: vi.fn(() => query),
     order: vi.fn(async () => result),
   }
   return query
@@ -113,4 +114,33 @@ describe('workspaces store', () => {
     expect(store.loading).toBe(false)
     expect(store.error).toBe('permission denied')
   })
+
+  it('updates the current profile display name', async () => {
+    const profileQuery = tableMock({ data: { ...profileRow(), display_name: '小明' }, error: null })
+    const client = {
+      from: vi.fn((table: string) => {
+        expect(table).toBe('profiles')
+        return profileQuery
+      }),
+      rpc: vi.fn(),
+    }
+    const store = useWorkspacesStore()
+    store.profile = mapProfileForTest(profileRow())
+
+    await store.updateDisplayName(client as never, '小明')
+
+    expect(profileQuery.update).toHaveBeenCalledWith({ display_name: '小明' })
+    expect(store.profile?.displayName).toBe('小明')
+  })
 })
+
+function mapProfileForTest(row: ReturnType<typeof profileRow>) {
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    avatarUrl: row.avatar_url,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}

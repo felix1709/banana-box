@@ -7,15 +7,15 @@ describe('members store', () => {
     setActivePinia(createPinia())
   })
 
-  it('creates a workspace invite link with the selected role', async () => {
+  it('creates a project invite link with the selected role', async () => {
     const store = useMembersStore()
     const client = clientMock()
 
     const invite = await store.createInvite(client as never, {
       appOrigin: 'banana-box://invite',
       workspaceId: 'workspace-1',
-      projectId: null,
-      scopeType: 'workspace',
+      projectId: 'project-1',
+      scopeType: 'project',
       role: 'commenter',
       email: 'friend@example.com',
       userId: 'user-1',
@@ -24,6 +24,7 @@ describe('members store', () => {
 
     expect(invite.url).toContain('token-123')
     expect(invite.role).toBe('commenter')
+    expect(invite.scopeType).toBe('project')
     expect(client.from).toHaveBeenCalledWith('invites')
   })
 

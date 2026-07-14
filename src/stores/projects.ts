@@ -14,6 +14,7 @@ import {
   deleteProject,
   listProjects,
   saveProjectWithStages,
+  setProjectPublic,
   setProjectStage,
 } from '@/lib/productionIpc'
 
@@ -119,6 +120,12 @@ export const useProjectsStore = defineStore('projects', {
 
     async setStage(input: SetProjectStageInput) {
       const project = await setProjectStage(input)
+      this.replaceProject(project)
+      return project
+    },
+
+    async setPublic(projectId: string, isPublic: boolean) {
+      const project = await setProjectPublic(projectId, isPublic)
       this.replaceProject(project)
       return project
     },

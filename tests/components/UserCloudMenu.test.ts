@@ -72,7 +72,7 @@ describe('UserCloudMenu', () => {
     expect(document.body.querySelector('[data-action="auth-sign-out"]')).toBeTruthy()
   })
 
-  it('shows only account exit and sync state for a non-admin signed-in user', async () => {
+  it('lets a non-admin signed-in user accept an invite without admin tools', async () => {
     const auth = useAuthStore()
     auth.cloudAvailable = true
     auth.user = { id: 'user-2', email: '000002@banana-box.local' } as never
@@ -95,7 +95,7 @@ describe('UserCloudMenu', () => {
     expect(document.body.textContent).toContain('000002 的个人空间')
     expect(document.body.textContent).toContain('已同步')
     expect(document.body.querySelector('[data-action="auth-sign-out"]')).toBeTruthy()
-    expect(document.body.querySelector('.invite-accept-panel')).toBeNull()
+    expect(document.body.querySelector('.invite-accept-panel')).toBeTruthy()
     expect(document.body.querySelector('.notifications-menu')).toBeNull()
   })
 

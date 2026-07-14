@@ -28,10 +28,28 @@ describe('InviteDialog', () => {
       url: 'banana-box://invite?token=abc',
     }))
 
-    const wrapper = mount(InviteDialog, { props: { projectId: null } })
+    const wrapper = mount(InviteDialog, { props: { projectId: 'p1', canInvite: true } })
     await wrapper.get('[data-action="create-invite"]').trigger('click')
 
-    expect(members.createInvite).toHaveBeenCalled()
+    expect(members.createInvite).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      projectId: 'p1',
+      scopeType: 'project',
+    }))
     expect(wrapper.text()).toContain('banana-box://invite?token=abc')
+  })
+
+  it('does not create an invite when the selected project is not public', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user-1' } as never
+    auth.client = {} as never
+    useWorkspacesStore().activeWorkspaceId = 'workspace-1'
+    const members = useMembersStore()
+    members.createInvite = vi.fn()
+
+    const wrapper = mount(InviteDialog, { props: { projectId: 'p1', canInvite: false } })
+    await wrapper.get('[data-action="create-invite"]').trigger('click')
+
+    expect(members.createInvite).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('先设为公共项目')
   })
 })

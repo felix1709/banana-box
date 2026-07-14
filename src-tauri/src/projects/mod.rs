@@ -45,6 +45,13 @@ pub struct SetProjectStageCommandArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetProjectPublicCommandArgs {
+    project_id: String,
+    is_public: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ArchiveProjectCommandArgs {
     project_id: String,
     archived: bool,
@@ -135,6 +142,20 @@ pub async fn set_project_stage(
     let (db, _permit) = ready_services(&window, &gate)?;
     let input = args.0.input;
     run_db(db, move |db| repository::set_project_stage(db, input)).await
+}
+
+#[tauri::command]
+pub async fn set_project_public(
+    window: tauri::WebviewWindow,
+    gate: tauri::State<'_, StartupGate>,
+    args: MainArgs<SetProjectPublicCommandArgs>,
+) -> Result<ProjectDto, String> {
+    let (db, _permit) = ready_services(&window, &gate)?;
+    let SetProjectPublicCommandArgs {
+        project_id,
+        is_public,
+    } = args.0;
+    run_db(db, move |db| repository::set_project_public(db, &project_id, is_public)).await
 }
 
 #[tauri::command]

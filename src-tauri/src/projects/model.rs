@@ -90,6 +90,10 @@ pub struct ProjectDto {
     pub release_date: String,
     pub main_stage_key: StageKey,
     pub archived: bool,
+    pub owner_user_id: String,
+    pub is_public: bool,
+    pub last_activity_summary: String,
+    pub last_activity_actor_name: String,
     pub created_at: String,
     pub updated_at: String,
     pub stages: Vec<ProjectStageDto>,
@@ -103,6 +107,8 @@ pub struct CreateProjectInput {
     pub name: String,
     pub file_path: String,
     pub release_date: String,
+    #[serde(default)]
+    pub owner_user_id: String,
     pub stages: Vec<SaveProjectStageInput>,
 }
 
@@ -125,6 +131,10 @@ pub struct SetProjectStageInput {
     pub start_date: String,
     pub end_date: String,
     pub progress: i64,
+    #[serde(default)]
+    pub actor_user_id: String,
+    #[serde(default)]
+    pub actor_name: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

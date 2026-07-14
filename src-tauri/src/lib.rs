@@ -176,6 +176,7 @@ pub fn run() {
             projects::update_project,
             projects::save_project_with_stages,
             projects::set_project_stage,
+            projects::set_project_public,
             projects::archive_project,
             projects::delete_project,
             daily_tasks::load_daily_task_day,

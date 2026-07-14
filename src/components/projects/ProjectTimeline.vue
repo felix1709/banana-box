@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { STAGE_DEFINITIONS, type Project, type ProjectStage } from '@/domain/production'
+import { useAuthStore } from '@/stores/auth'
+import { useProjectsStore } from '@/stores/projects'
+import { useWorkspacesStore } from '@/stores/workspaces'
 
 const props = defineProps<{
   project: Project
 }>()
 
+const auth = useAuthStore()
+const projects = useProjectsStore()
+const workspaces = useWorkspacesStore()
 const DAY = 24 * 60 * 60 * 1000
 
 function dateValue(value: string) {
@@ -64,6 +70,23 @@ function markerStyle(stage: ProjectStage | undefined) {
 const todayStyle = computed(() => ({
   left: `${percentage(new Date().toISOString().slice(0, 10))}%`,
 }))
+
+const actorName = computed(
+  () => workspaces.profile?.displayName || auth.user?.email?.split('@')[0] || '',
+)
+
+async function updateStageProgress(stage: ProjectStage | undefined, progress: number) {
+  if (!stage) return
+  await projects.setStage({
+    projectId: props.project.id,
+    stageKey: stage.stageKey,
+    startDate: stage.startDate,
+    endDate: stage.endDate,
+    progress,
+    actorUserId: auth.user?.id ?? '',
+    actorName: actorName.value,
+  })
+}
 </script>
 
 <template>
@@ -127,6 +150,18 @@ const todayStyle = computed(() => ({
             >{{ item.stage.progress }}%</span>
           </div>
         </div>
+        <label class="timeline-progress-editor">
+          <input
+            :value="item.stage?.progress ?? 0"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            data-field="project-stage-progress"
+            :aria-label="`${item.definition.label}进度`"
+            @change="updateStageProgress(item.stage, Number(($event.target as HTMLInputElement).value))"
+          >
+        </label>
       </div>
     </div>
   </section>
@@ -199,10 +234,16 @@ const todayStyle = computed(() => ({
 
 .timeline-row {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-columns: 58px minmax(0, 1fr) 120px;
   gap: 8px;
   min-height: 24px;
   align-items: center;
+}
+
+.timeline-progress-editor input {
+  width: 100%;
+  min-height: 20px;
+  padding: 0;
 }
 
 .timeline-stage-label {
@@ -276,6 +317,14 @@ const todayStyle = computed(() => ({
 @media (max-width: 720px) {
   .project-timeline {
     padding-inline: 12px;
+  }
+
+  .timeline-row {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .timeline-progress-editor {
+    grid-column: 2;
   }
 }
 </style>

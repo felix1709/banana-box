@@ -25,6 +25,9 @@ export const saveProjectWithStages = (input: SaveProjectWithStagesInput) =>
 export const setProjectStage = (input: SetProjectStageInput) =>
   invoke<Project>('set_project_stage', { input })
 
+export const setProjectPublic = (projectId: string, isPublic: boolean) =>
+  invoke<Project>('set_project_public', { projectId, isPublic })
+
 export const archiveProject = (projectId: string, archived: boolean) =>
   invoke<Project>('archive_project', { projectId, archived })
 

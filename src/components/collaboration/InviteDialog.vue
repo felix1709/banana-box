@@ -7,6 +7,7 @@ import { useWorkspacesStore } from '@/stores/workspaces'
 
 const props = defineProps<{
   projectId: string | null
+  canInvite?: boolean
 }>()
 
 const auth = useAuthStore()
@@ -19,13 +20,17 @@ const error = ref('')
 
 async function createInvite() {
   if (!auth.client || !auth.user || !workspaces.activeWorkspaceId) return
+  if (!props.projectId || props.canInvite === false) {
+    error.value = '先设为公共项目'
+    return
+  }
   error.value = ''
   try {
     const invite = await members.createInvite(auth.client, {
       appOrigin: 'banana-box://invite',
       workspaceId: workspaces.activeWorkspaceId,
       projectId: props.projectId,
-      scopeType: props.projectId ? 'project' : 'workspace',
+      scopeType: 'project',
       role: role.value,
       email: email.value.trim() || null,
       userId: auth.user.id,

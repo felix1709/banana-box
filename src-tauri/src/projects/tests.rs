@@ -79,6 +79,20 @@ fn project_codes_may_repeat_ignoring_ascii_case() {
 }
 
 #[test]
+fn projects_default_private_and_can_be_marked_public() {
+    let db = test_database();
+    let project = repository::create_project(&db, create_input("L36")).unwrap();
+
+    assert!(!project.is_public);
+    assert_eq!(project.owner_user_id, "user-1");
+
+    let public_project = repository::set_project_public(&db, &project.id, true).unwrap();
+
+    assert!(public_project.is_public);
+    assert_eq!(public_project.last_activity_summary, "设为公共项目");
+}
+
+#[test]
 fn stages_may_overlap_but_each_stage_must_have_a_valid_range() {
     let db = test_database();
     let project = repository::create_project(&db, create_input("L36")).unwrap();
@@ -127,6 +141,7 @@ fn create_input(code: &str) -> CreateProjectInput {
         name: "Project".to_string(),
         file_path: r"C:\work\L36".to_string(),
         release_date: "2026-07-31".to_string(),
+        owner_user_id: "user-1".to_string(),
         stages: STAGE_KEYS
             .iter()
             .enumerate()
@@ -156,6 +171,8 @@ fn set_range(
             start_date: start_date.to_string(),
             end_date: end_date.to_string(),
             progress,
+            actor_user_id: "user-1".to_string(),
+            actor_name: "导演".to_string(),
         },
     )
 }

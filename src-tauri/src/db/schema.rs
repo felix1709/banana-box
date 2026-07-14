@@ -1,7 +1,7 @@
 use rusqlite::{Connection, TransactionBehavior};
 use sha2::{Digest, Sha256};
 
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 pub const DATABASE_SCHEMA_INVALID: &str = "DATABASE_SCHEMA_INVALID";
 const MIGRATION_V1: &str = include_str!("../../migrations/0001_v1.sql");
 const MIGRATION_V2: &str = include_str!("../../migrations/0002_allow_duplicate_project_codes.sql");
@@ -9,6 +9,7 @@ const MIGRATION_V3: &str = include_str!("../../migrations/0003_storyboard_agent.
 const MIGRATION_V4: &str = include_str!("../../migrations/0004_cloud_foundation.sql");
 const MIGRATION_V5: &str = include_str!("../../migrations/0005_workspace_sync_foundation.sql");
 const MIGRATION_V6: &str = include_str!("../../migrations/0006_daily_task_reminders.sql");
+const MIGRATION_V7: &str = include_str!("../../migrations/0007_project_collaboration.sql");
 const V1_SCHEMA_FINGERPRINT: &str =
     "9efed7e5f33c46abefdd4cfe98a19a7374c2f08c81ed7f55f7eac1ced5bba1e4";
 const V2_SCHEMA_FINGERPRINT: &str =
@@ -21,6 +22,8 @@ const V5_SCHEMA_FINGERPRINT: &str =
     "36f288ab2feb0a4764f158a1ac03bf7e86eab62f7eb55fa40baa2d8c632da6c8";
 const V6_SCHEMA_FINGERPRINT: &str =
     "1fc20a884699cd7529cf3c587c340f4d0fc9b85aa51f1ee36babef4c6d135570";
+const V7_SCHEMA_FINGERPRINT: &str =
+    "895ae7ce3ba999e8decaa188297f04215143dd37133af40d4923123e1fcb338c";
 const REQUIRED_TABLES_PRE_V3: [&str; 15] = [
     "schema_migrations",
     "ai_providers",
@@ -75,7 +78,7 @@ const REQUIRED_TABLES_PRE_V5: [&str; 17] = [
     "reminder_log",
     "cloud_config",
 ];
-const REQUIRED_TABLES: [&str; 21] = [
+const REQUIRED_TABLES_PRE_V7: [&str; 21] = [
     "schema_migrations",
     "ai_providers",
     "credential_cleanup",
@@ -97,6 +100,30 @@ const REQUIRED_TABLES: [&str; 21] = [
     "sync_outbox",
     "sync_cursors",
     "local_device_bindings",
+];
+const REQUIRED_TABLES: [&str; 22] = [
+    "schema_migrations",
+    "ai_providers",
+    "credential_cleanup",
+    "projects",
+    "project_stages",
+    "daily_task_days",
+    "daily_task_groups",
+    "daily_tasks",
+    "skills",
+    "skill_versions",
+    "storyboard_threads",
+    "agent_requests",
+    "storyboard_messages",
+    "storyboard_message_blocks",
+    "storyboard_thread_skills",
+    "reminder_log",
+    "cloud_config",
+    "local_workspaces",
+    "sync_outbox",
+    "sync_cursors",
+    "local_device_bindings",
+    "project_activity_log",
 ];
 
 pub fn migrate(connection: &mut Connection) -> Result<(), String> {
@@ -203,6 +230,18 @@ pub fn migrate(connection: &mut Connection) -> Result<(), String> {
                 .map_err(|error| error.to_string())?;
             applied_version = 6;
         }
+        if applied_version == 6 {
+            transaction
+                .execute_batch(MIGRATION_V7)
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (7, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+            applied_version = 7;
+        }
         transaction
             .pragma_update(None, "user_version", applied_version)
             .map_err(|error| error.to_string())?;
@@ -234,7 +273,7 @@ pub fn validate(connection: &Connection) -> Result<(), String> {
     validate_migration_records(connection, SCHEMA_VERSION)?;
 
     let fingerprint = schema_fingerprint(connection).map_err(schema_invalid)?;
-    if fingerprint != V6_SCHEMA_FINGERPRINT {
+    if fingerprint != V7_SCHEMA_FINGERPRINT {
         return Err(schema_invalid("schema fingerprint mismatch"));
     }
     validate_database_health(connection)
@@ -252,7 +291,8 @@ pub fn validate_migratable(connection: &Connection) -> Result<(), String> {
         2 => (&REQUIRED_TABLES_PRE_V3[..], V2_SCHEMA_FINGERPRINT),
         3 => (&REQUIRED_TABLES_PRE_V4[..], V3_SCHEMA_FINGERPRINT),
         4 => (&REQUIRED_TABLES_PRE_V5[..], V4_SCHEMA_FINGERPRINT),
-        5 => (&REQUIRED_TABLES[..], V5_SCHEMA_FINGERPRINT),
+        5 => (&REQUIRED_TABLES_PRE_V7[..], V5_SCHEMA_FINGERPRINT),
+        6 => (&REQUIRED_TABLES_PRE_V7[..], V6_SCHEMA_FINGERPRINT),
         _ => {
             return Err(schema_invalid(format!(
                 "expected a migratable user_version, found {version}"
@@ -374,7 +414,7 @@ mod tests {
         migrate, schema_fingerprint, validate, validate_migratable, DATABASE_SCHEMA_INVALID,
         MIGRATION_V1, MIGRATION_V2, MIGRATION_V3, MIGRATION_V4, MIGRATION_V5, SCHEMA_VERSION,
         V1_SCHEMA_FINGERPRINT, V2_SCHEMA_FINGERPRINT, V3_SCHEMA_FINGERPRINT,
-        V4_SCHEMA_FINGERPRINT, V5_SCHEMA_FINGERPRINT, V6_SCHEMA_FINGERPRINT,
+        V4_SCHEMA_FINGERPRINT, V5_SCHEMA_FINGERPRINT, V7_SCHEMA_FINGERPRINT,
     };
     use rusqlite::Connection;
 
@@ -422,7 +462,7 @@ mod tests {
             connection
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
-            6,
+            7,
         );
         for id in ["project-1", "project-2"] {
             assert!(connection
@@ -435,7 +475,7 @@ mod tests {
         }
         assert_eq!(
             schema_fingerprint(&connection).unwrap(),
-            V6_SCHEMA_FINGERPRINT
+            V7_SCHEMA_FINGERPRINT
         );
         validate(&connection).unwrap();
     }
@@ -657,14 +697,14 @@ mod tests {
             connection
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
-            6,
+            7,
         );
         let columns = table_columns(&connection, "daily_tasks");
         assert!(columns.contains(&"reminder_time".to_string()));
         assert!(columns.contains(&"reminder_content".to_string()));
         assert_eq!(
             schema_fingerprint(&connection).unwrap(),
-            V6_SCHEMA_FINGERPRINT
+            V7_SCHEMA_FINGERPRINT
         );
     }
 
