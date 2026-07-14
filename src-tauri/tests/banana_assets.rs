@@ -52,6 +52,7 @@ fn banana_sprite_has_twelve_square_frames_and_transparent_edges() {
             "frame {index} must keep transparent padding on all sides"
         );
         assert_transparent_border(frame);
+        assert_no_near_transparent_white_fringe(frame, index);
         assert_centroid_within(frame, &approved_open, 8.0);
     }
 
@@ -112,6 +113,23 @@ fn assert_transparent_border(image: &RgbaImage) {
         assert_eq!(image.get_pixel(0, coordinate)[3], 0);
         assert_eq!(image.get_pixel(FRAME_SIZE - 1, coordinate)[3], 0);
     }
+}
+
+fn assert_no_near_transparent_white_fringe(image: &RgbaImage, frame_index: usize) {
+    let fringe_pixels = image
+        .pixels()
+        .filter(|pixel| {
+            let alpha = pixel[3];
+            let max_channel = pixel[0].max(pixel[1]).max(pixel[2]);
+            let min_channel = pixel[0].min(pixel[1]).min(pixel[2]);
+            alpha > 0 && alpha < 96 && max_channel >= 225 && max_channel - min_channel <= 35
+        })
+        .count();
+
+    assert_eq!(
+        fringe_pixels, 0,
+        "frame {frame_index} must not contain near-transparent white fringe pixels"
+    );
 }
 
 fn assert_centroid_within(frame: &RgbaImage, endpoint: &RgbaImage, tolerance: f64) {
