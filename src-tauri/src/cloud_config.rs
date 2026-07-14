@@ -2,6 +2,9 @@ use crate::db::Database;
 use chrono::Utc;
 use rusqlite::params;
 
+const DEFAULT_SUPABASE_URL: &str = "https://erovhwtwlrmxusyrwzbc.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY: &str = "sb_publishable_p3TIyl4W0Fxy6wVv74zLwg_8hTMEkIo";
+
 #[derive(Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudConfigDto {
@@ -45,12 +48,7 @@ pub fn load_cloud_config(db: &Database) -> Result<CloudConfigDto, String> {
 
         match result {
             Ok(config) => Ok(config),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(CloudConfigDto {
-                supabase_url: String::new(),
-                has_anon_key: false,
-                cloud_enabled: false,
-                updated_at: None,
-            }),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(default_cloud_config()),
             Err(error) => Err(error.to_string()),
         }
     })
@@ -84,11 +82,7 @@ pub fn load_cloud_runtime_config(db: &Database) -> Result<CloudRuntimeConfigDto,
 
         match result {
             Ok(config) => Ok(config),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(CloudRuntimeConfigDto {
-                supabase_url: String::new(),
-                anon_key: String::new(),
-                cloud_enabled: false,
-            }),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(default_cloud_runtime_config()),
             Err(error) => Err(error.to_string()),
         }
     })
@@ -99,14 +93,15 @@ pub fn save_cloud_config(
     input: SaveCloudConfigInput,
 ) -> Result<CloudConfigDto, String> {
     let existing_anon_key = load_existing_anon_key(db)?;
-    validate_cloud_config(&input, existing_anon_key.is_some())?;
+    let supabase_url = input.supabase_url.trim().trim_end_matches('/').to_string();
+    let can_use_default_key = supabase_url == DEFAULT_SUPABASE_URL;
+    validate_cloud_config(&input, existing_anon_key.is_some() || can_use_default_key)?;
 
     let now = Utc::now().to_rfc3339();
-    let supabase_url = input.supabase_url.trim().trim_end_matches('/').to_string();
     let anon_key = {
         let trimmed = input.anon_key.trim();
         if trimmed.is_empty() {
-            existing_anon_key.unwrap_or_default()
+            existing_anon_key.unwrap_or_else(|| DEFAULT_SUPABASE_ANON_KEY.to_string())
         } else {
             trimmed.to_string()
         }
@@ -130,6 +125,23 @@ pub fn save_cloud_config(
     })?;
 
     load_cloud_config(db)
+}
+
+fn default_cloud_config() -> CloudConfigDto {
+    CloudConfigDto {
+        supabase_url: DEFAULT_SUPABASE_URL.to_string(),
+        has_anon_key: true,
+        cloud_enabled: true,
+        updated_at: None,
+    }
+}
+
+fn default_cloud_runtime_config() -> CloudRuntimeConfigDto {
+    CloudRuntimeConfigDto {
+        supabase_url: DEFAULT_SUPABASE_URL.to_string(),
+        anon_key: DEFAULT_SUPABASE_ANON_KEY.to_string(),
+        cloud_enabled: true,
+    }
 }
 
 fn load_existing_anon_key(db: &Database) -> Result<Option<String>, String> {
@@ -186,14 +198,24 @@ mod tests {
     }
 
     #[test]
-    fn missing_config_loads_as_disabled_local_only() {
+    fn missing_config_loads_default_cloud_for_first_install() {
         let (_dir, db) = test_db();
         let config = load_cloud_config(&db).unwrap();
 
-        assert_eq!(config.supabase_url, "");
-        assert!(!config.has_anon_key);
-        assert!(!config.cloud_enabled);
+        assert_eq!(config.supabase_url, "https://erovhwtwlrmxusyrwzbc.supabase.co");
+        assert!(config.has_anon_key);
+        assert!(config.cloud_enabled);
         assert_eq!(config.updated_at, None);
+    }
+
+    #[test]
+    fn missing_runtime_config_returns_default_cloud_for_first_install() {
+        let (_dir, db) = test_db();
+        let runtime = load_cloud_runtime_config(&db).unwrap();
+
+        assert_eq!(runtime.supabase_url, "https://erovhwtwlrmxusyrwzbc.supabase.co");
+        assert!(!runtime.anon_key.is_empty());
+        assert!(runtime.cloud_enabled);
     }
 
     #[test]
@@ -235,7 +257,14 @@ mod tests {
         };
 
         assert_eq!(error, "CLOUD_SERVICE_ROLE_KEY_BLOCKED");
-        assert!(!load_cloud_config(&db).unwrap().has_anon_key);
+        let persisted_rows = db
+            .with_connection(|connection| {
+                connection
+                    .query_row("SELECT COUNT(*) FROM cloud_config", [], |row| row.get::<_, i64>(0))
+                    .map_err(|error| error.to_string())
+            })
+            .unwrap();
+        assert_eq!(persisted_rows, 0);
     }
 
     #[test]
