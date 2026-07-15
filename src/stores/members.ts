@@ -24,6 +24,18 @@ interface MemberRow {
   created_at: string
 }
 
+interface ProfileLookupRow {
+  id: string
+  email: string
+  display_name: string
+}
+
+interface InviteRecipient {
+  id: string
+  email: string
+  displayName: string
+}
+
 async function tokenHash(token: string) {
   if (typeof crypto !== 'undefined' && crypto.subtle) {
     const bytes = new TextEncoder().encode(token)
@@ -49,6 +61,16 @@ function mapMember(row: MemberRow): WorkspaceMember {
     role: row.role,
     createdAt: row.created_at,
   }
+}
+
+function emailFromInviteIdentity(identity: string) {
+  const trimmed = identity.trim()
+  if (/^\d{6}$/.test(trimmed)) return `${trimmed}@banana-box.local`
+  return trimmed.includes('@') ? trimmed : ''
+}
+
+function escapeSupabaseOrValue(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/,/g, '\\,')
 }
 
 export const useMembersStore = defineStore('members', {
@@ -105,6 +127,31 @@ export const useMembersStore = defineStore('members', {
       }
       this.invites.unshift(invite)
       return invite
+    },
+    async resolveInviteRecipient(client: MemberClient, identity: string): Promise<InviteRecipient> {
+      const trimmed = identity.trim()
+      if (!trimmed) throw new Error('请输入邀请ID或昵称')
+
+      const accountEmail = emailFromInviteIdentity(trimmed)
+      const filters = accountEmail
+        ? `email.eq.${escapeSupabaseOrValue(accountEmail)},display_name.eq.${escapeSupabaseOrValue(trimmed)}`
+        : `display_name.eq.${escapeSupabaseOrValue(trimmed)}`
+      const response = await client
+        .from('profiles')
+        .select('id, email, display_name')
+        .or(filters)
+        .limit(2)
+
+      if (response.error) throw new Error(response.error.message)
+      const rows = (response.data ?? []) as ProfileLookupRow[]
+      if (rows.length === 0) throw new Error('未找到该用户')
+      if (rows.length > 1) throw new Error('找到多个同名用户，请改用 000002 这类账号ID')
+
+      return {
+        id: rows[0].id,
+        email: rows[0].email,
+        displayName: rows[0].display_name,
+      }
     },
     async acceptInvite(client: InviteAcceptClient, token: string) {
       const response = await client.rpc('accept_invite', { invite_token: token.trim() })

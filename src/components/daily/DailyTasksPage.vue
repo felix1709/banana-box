@@ -17,6 +17,10 @@ const reminderTrigger = ref<HTMLButtonElement | null>(null)
 const reminderPopover = ref<HTMLElement | null>(null)
 const reminderPopoverStyle = ref<Record<string, string>>({})
 const reminderDraft = reactive({ time: '', content: '' })
+const createOpen = ref(false)
+const createTrigger = ref<HTMLButtonElement | null>(null)
+const createPopover = ref<HTMLElement | null>(null)
+const createPopoverStyle = ref<Record<string, string>>({})
 const editingTaskId = ref<string | null>(null)
 const editDraft = reactive({ title: '', note: '', reminderTime: '', reminderContent: '' })
 let reportCopyResetTimer: ReturnType<typeof window.setTimeout> | null = null
@@ -34,6 +38,7 @@ async function createTask() {
   if (!draft.code.trim() || !draft.title.trim()) return
   await daily.create({ ...draft, code: draft.code.trim(), title: draft.title.trim(), investedMinutes: 0 })
   Object.assign(draft, { code: '', title: '', progress: 0, note: '' })
+  closeCreatePopover()
 }
 
 function findTask(taskId: string | null) {
@@ -110,6 +115,32 @@ async function positionReminderPopover() {
   }
 }
 
+async function positionCreatePopover() {
+  await nextTick()
+  const rect = createTrigger.value?.getBoundingClientRect()
+  if (!rect) return
+  const width = Math.min(360, window.innerWidth - 24)
+  const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width))
+  createPopoverStyle.value = {
+    position: 'fixed',
+    zIndex: '240',
+    top: `${rect.bottom + 8}px`,
+    left: `${left}px`,
+    width: `${width}px`,
+  }
+}
+
+async function toggleCreatePopover(event: MouseEvent) {
+  createTrigger.value = event.currentTarget as HTMLButtonElement
+  createOpen.value = !createOpen.value
+  if (createOpen.value) await positionCreatePopover()
+}
+
+function closeCreatePopover() {
+  createOpen.value = false
+  createTrigger.value = null
+}
+
 async function openReminder(task: DailyTask, event: MouseEvent) {
   reminderTaskId.value = task.id
   reminderTrigger.value = event.currentTarget as HTMLButtonElement
@@ -142,6 +173,15 @@ function closeReminderWhenClickingOutside(event: MouseEvent) {
   closeReminder()
 }
 
+function closeCreateWhenClickingOutside(event: MouseEvent) {
+  if (!createOpen.value) return
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if (createTrigger.value?.contains(target)) return
+  if (createPopover.value?.contains(target)) return
+  closeCreatePopover()
+}
+
 function openTaskEditor(task: DailyTask) {
   if (daily.day?.settledAt) return
   editingTaskId.value = task.id
@@ -171,10 +211,12 @@ watch(() => daily.selectedDate, resetReportCopied)
 onMounted(() => {
   void daily.selectDate(daily.selectedDate)
   document.addEventListener('click', closeReminderWhenClickingOutside)
+  document.addEventListener('click', closeCreateWhenClickingOutside)
 })
 onBeforeUnmount(() => {
   resetReportCopied()
   document.removeEventListener('click', closeReminderWhenClickingOutside)
+  document.removeEventListener('click', closeCreateWhenClickingOutside)
 })
 </script>
 
@@ -183,7 +225,22 @@ onBeforeUnmount(() => {
     <header class="daily-toolbar">
       <div>
         <p>Daily ledger</p>
-        <h2>当日任务</h2>
+        <div class="daily-title-row">
+          <h2>当日任务</h2>
+          <button
+            v-if="!daily.day?.settledAt"
+            ref="createTrigger"
+            class="daily-title-action"
+            data-action="open-create-daily-task"
+            type="button"
+            title="新增当日任务"
+            aria-label="新增当日任务"
+            :aria-expanded="createOpen"
+            @click="toggleCreatePopover"
+          >
+            <Plus :size="15" />
+          </button>
+        </div>
       </div>
       <div class="date-nav">
         <button
@@ -246,50 +303,6 @@ onBeforeUnmount(() => {
       本日已结算，重新打开结算后才能编辑。
     </div>
 
-    <section
-      v-if="!daily.day?.settledAt"
-      class="daily-create"
-    >
-      <input
-        v-model="draft.code"
-        data-field="new-task-code"
-        placeholder="编号，如 L36"
-      >
-      <input
-        v-model="draft.title"
-        data-field="new-task-title"
-        placeholder="任务名称"
-      >
-      <label class="progress-control">
-        <input
-          v-model.number="draft.progress"
-          class="task-progress-range"
-          data-field="new-task-progress"
-          min="0"
-          max="100"
-          type="range"
-          :style="{ '--task-progress': `${draft.progress}%` }"
-          title="进度百分比"
-        >
-        <output>{{ draft.progress }}%</output>
-      </label>
-      <textarea
-        v-model="draft.note"
-        data-field="new-task-note"
-        placeholder="备注"
-        rows="1"
-      />
-      <button
-        data-action="create-daily-task"
-        type="button"
-        title="添加任务"
-        aria-label="添加任务"
-        @click="createTask"
-      >
-        <Plus :size="16" />
-      </button>
-    </section>
-
     <section class="daily-groups">
       <article
         v-for="group in daily.day?.groups ?? []"
@@ -330,22 +343,21 @@ onBeforeUnmount(() => {
               >
               <output data-progress-value>{{ task.progress }}%</output>
             </label>
-            <button
-              v-if="!daily.day?.settledAt"
-              class="task-reminder-button"
-              data-action="task-reminder"
-              type="button"
-              :class="{ active: task.reminderTime }"
-              title="设置提醒"
-              aria-label="设置提醒"
-              @click.stop="openReminder(task, $event)"
-            >
-              <AlarmClock :size="15" />
-            </button>
             <div
               v-if="!daily.day?.settledAt"
               class="task-card-actions"
             >
+              <button
+                class="task-reminder-button"
+                data-action="task-reminder"
+                type="button"
+                :class="{ active: task.reminderTime }"
+                title="设置提醒"
+                aria-label="设置提醒"
+                @click.stop="openReminder(task, $event)"
+              >
+                <AlarmClock :size="15" />
+              </button>
               <button
                 data-action="delete-task"
                 type="button"
@@ -381,6 +393,57 @@ onBeforeUnmount(() => {
     </section>
 
     <Teleport to="body">
+      <section
+        v-if="createOpen && !daily.day?.settledAt"
+        ref="createPopover"
+        class="daily-create-popover"
+        aria-label="新增当日任务"
+        :style="createPopoverStyle"
+        @click.stop
+      >
+        <header>
+          <strong>新增当日任务</strong>
+          <span>{{ daily.selectedDate }}</span>
+        </header>
+        <input
+          v-model="draft.code"
+          data-field="new-task-code"
+          placeholder="编号，如 L36"
+        >
+        <input
+          v-model="draft.title"
+          data-field="new-task-title"
+          placeholder="任务名称"
+        >
+        <label class="progress-control">
+          <input
+            v-model.number="draft.progress"
+            class="task-progress-range"
+            data-field="new-task-progress"
+            min="0"
+            max="100"
+            type="range"
+            :style="{ '--task-progress': `${draft.progress}%` }"
+            title="进度百分比"
+          >
+          <output>{{ draft.progress }}%</output>
+        </label>
+        <textarea
+          v-model="draft.note"
+          data-field="new-task-note"
+          placeholder="备注"
+          rows="2"
+        />
+        <button
+          class="daily-create-save"
+          data-action="create-daily-task"
+          type="button"
+          @click="createTask"
+        >
+          创建任务
+        </button>
+      </section>
+
       <section
         v-if="reminderTask"
         ref="reminderPopover"
@@ -499,19 +562,19 @@ onBeforeUnmount(() => {
 .daily-toolbar p,.daily-toolbar h2 { margin:0; }
 .daily-toolbar p { color:var(--bb-primary); font:11px var(--bb-mono); letter-spacing:.08em; text-transform:uppercase; }
 .daily-toolbar h2 { margin-top:3px; font-size:20px; }
-.date-nav button,.daily-create button { display:grid; width:30px; min-height:30px; place-items:center; padding:0; }
+.daily-title-row { display:flex; align-items:center; gap:8px; margin-top:3px; }
+.daily-title-action { display:grid; width:24px; min-height:24px; place-items:center; padding:0; }
+.date-nav button { display:grid; width:30px; min-height:30px; place-items:center; padding:0; }
 .date-nav input { min-height:30px; padding:4px 8px; }
 .daily-error,.daily-settled { margin-top:12px; padding:9px 11px; border:1px solid var(--bb-border); border-radius:var(--bb-radius-sm); color:var(--bb-text-muted); background:var(--bb-surface-soft); }
 .daily-error { border-color:var(--bb-danger-border); color:#ffb6c0; background:var(--bb-danger-soft); }
-.daily-create { display:grid; grid-template-columns:90px minmax(160px,1fr) minmax(170px,.9fr) minmax(140px,1fr) 30px; align-items:center; gap:8px; margin:16px 0; }
-.daily-create input,.daily-create textarea,.daily-task input { min-width:0; min-height:30px; padding:5px 8px; }
-.daily-create textarea { resize:vertical; }
+.daily-task input { min-width:0; min-height:30px; padding:5px 8px; }
 .daily-groups { display:grid; gap:16px; }
 .daily-group { display:grid; gap:6px; }
 .daily-group header { justify-content:space-between; padding:0 2px; color:var(--bb-primary-strong); }
 .daily-group header span { color:var(--bb-text-soft); font:11px var(--bb-mono); }
-.daily-task { display:grid; gap:7px; padding:10px; border:1px solid var(--bb-border); border-radius:var(--bb-radius-sm); background:rgba(12,23,33,.66); box-shadow:0 4px 14px rgba(0,0,0,.12); }
-.task-card-main { display:grid; grid-template-columns:auto minmax(120px,1.25fr) minmax(130px,.9fr) 28px 28px; align-items:center; gap:8px; min-width:0; }
+.daily-task { position:relative; display:grid; gap:7px; padding:10px 84px 10px 10px; border:1px solid var(--bb-border); border-radius:var(--bb-radius-sm); background:rgba(12,23,33,.66); box-shadow:0 4px 14px rgba(0,0,0,.12); }
+.task-card-main { display:grid; grid-template-columns:auto minmax(120px,1.25fr) minmax(130px,.9fr); align-items:center; gap:8px; min-width:0; }
 .task-code { color:var(--bb-primary-strong); font:11px var(--bb-mono); white-space:nowrap; }
 .task-title { width:100%; }
 .progress-control { display:flex; align-items:center; min-width:0; gap:6px; color:var(--bb-text-soft); font:11px var(--bb-mono); }
@@ -522,17 +585,18 @@ onBeforeUnmount(() => {
 .progress-control output { min-width:32px; color:var(--bb-text); text-align:right; }
 .task-note,.task-reminder-summary { margin:0; color:var(--bb-text-soft); font-size:11px; line-height:1.45; overflow-wrap:anywhere; }
 .task-reminder-summary { color:var(--bb-primary-strong); font-family:var(--bb-mono); }
+.task-card-actions { position:absolute; top:10px; right:10px; justify-content:end; }
 .task-reminder-button,.task-card-actions button { display:grid; width:26px; min-height:26px; place-items:center; padding:0; }
 .task-reminder-button.active { border-color:rgba(102,247,211,.5); color:var(--bb-primary-strong); }
 .task-card-actions button { color:#ff9aa8; }
 .daily-empty { margin:32px 0; color:var(--bb-text-soft); text-align:center; }
-.task-reminder-popover { display:grid; gap:9px; max-height:min(420px, calc(100vh - 86px)); overflow:auto; padding:10px; border:1px solid var(--bb-border-strong); border-radius:var(--bb-radius-md); background:rgba(5,14,22,.98); box-shadow:var(--bb-shadow-floating); }
-.task-reminder-popover header { display:grid; gap:3px; }
-.task-reminder-popover strong { font-size:13px; }
-.task-reminder-popover header span { overflow:hidden; color:var(--bb-text-soft); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
-.task-reminder-popover label,.task-editor-dialog label { display:grid; gap:5px; color:var(--bb-text-soft); font-size:11px; }
-.task-reminder-popover input,.task-reminder-popover textarea,.task-editor-dialog input,.task-editor-dialog textarea { width:100%; min-width:0; min-height:30px; padding:5px 8px; }
-.task-reminder-save,.task-editor-save { border-color:rgba(102,247,211,.5); background:var(--bb-primary); color:#06231f; font-weight:750; }
+.task-reminder-popover,.daily-create-popover { display:grid; gap:9px; max-height:min(420px, calc(100vh - 86px)); overflow:auto; padding:10px; border:1px solid var(--bb-border-strong); border-radius:var(--bb-radius-md); background:rgba(5,14,22,.98); box-shadow:var(--bb-shadow-floating); }
+.task-reminder-popover header,.daily-create-popover header { display:grid; gap:3px; }
+.task-reminder-popover strong,.daily-create-popover strong { font-size:13px; }
+.task-reminder-popover header span,.daily-create-popover header span { overflow:hidden; color:var(--bb-text-soft); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+.task-reminder-popover label,.daily-create-popover label,.task-editor-dialog label { display:grid; gap:5px; color:var(--bb-text-soft); font-size:11px; }
+.task-reminder-popover input,.task-reminder-popover textarea,.daily-create-popover input,.daily-create-popover textarea,.task-editor-dialog input,.task-editor-dialog textarea { width:100%; min-width:0; min-height:30px; padding:5px 8px; }
+.task-reminder-save,.daily-create-save,.task-editor-save { border-color:rgba(102,247,211,.5); background:var(--bb-primary); color:#06231f; font-weight:750; }
 .mask { position:fixed; inset:0; z-index:30; display:grid; place-items:center; padding:18px; background:rgba(1,5,9,.72); backdrop-filter:blur(6px); }
 .dialog { width:min(420px,100%); display:grid; gap:12px; padding:16px; border:1px solid var(--bb-border-strong); border-radius:var(--bb-radius-md); background:var(--bb-surface); box-shadow:var(--bb-shadow-dialog); }
 .task-editor-dialog header,.task-editor-dialog footer { display:flex; align-items:center; justify-content:space-between; gap:12px; }
@@ -541,5 +605,5 @@ onBeforeUnmount(() => {
 .task-editor-dialog h3 { margin-top:3px; font-size:16px; }
 .task-editor-close { display:grid; width:28px; min-height:28px; place-items:center; padding:0; }
 .task-editor-dialog footer { justify-content:flex-end; }
-@media (max-width:760px) { .daily-page { padding:14px 12px; } .daily-create { grid-template-columns:1fr 1fr; } .daily-create textarea,.daily-create button { grid-column:span 2; } .task-card-main { grid-template-columns:auto minmax(0,1fr) 28px 28px; } .task-progress-control { grid-column:span 4; } .daily-toolbar { align-items:start; } }
+@media (max-width:760px) { .daily-page { padding:14px 12px; } .daily-task { padding-right:76px; } .task-card-main { grid-template-columns:auto minmax(0,1fr); } .task-progress-control { grid-column:span 2; } .daily-toolbar { align-items:start; } }
 </style>

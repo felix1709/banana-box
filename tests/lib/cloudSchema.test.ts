@@ -126,6 +126,16 @@ describe('cloud collaboration schema', () => {
     expect(sql).toContain('insert into public.project_members')
   })
 
+  it('adds project invite notifications and searchable profile lookup', () => {
+    const sql = readMigration('0008_project_invite_notifications.sql')
+
+    expect(sql).toContain('profiles searchable by authenticated users')
+    expect(sql).toContain('create or replace function public.accept_invite_by_id')
+    expect(sql).toContain('recipient_user_id = auth.uid()')
+    expect(sql).toContain('matching_invite.scope_type = \'project\'')
+    expect(sql).toContain('grant execute on function public.accept_invite_by_id(uuid) to authenticated')
+  })
+
   it('makes copied RLS policies safe to run more than once', () => {
     for (const migration of [
       '0001_auth_workspaces.sql',

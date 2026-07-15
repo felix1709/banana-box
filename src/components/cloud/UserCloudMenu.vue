@@ -95,10 +95,11 @@ watch(
         class="user-cloud-popover"
         aria-label="用户与云端"
         :style="popoverStyle"
+        @click.stop
       >
         <header>
           <strong>用户与云端</strong>
-          <NotificationsMenu v-if="auth.user && auth.isCloudAdmin" />
+          <NotificationsMenu v-if="auth.user" />
         </header>
         <WorkspaceSwitcher />
         <SyncStatusIndicator />

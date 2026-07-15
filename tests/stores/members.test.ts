@@ -28,6 +28,33 @@ describe('members store', () => {
     expect(client.from).toHaveBeenCalledWith('invites')
   })
 
+  it('resolves a six digit account or unique nickname before sending an invite notification', async () => {
+    const store = useMembersStore()
+    const client = profileLookupClient([
+      { id: 'user-2', email: '000002@banana-box.local', display_name: '制片' },
+    ])
+
+    const accountRecipient = await store.resolveInviteRecipient(client as never, '000002')
+    const nicknameRecipient = await store.resolveInviteRecipient(client as never, '制片')
+
+    expect(accountRecipient).toEqual({
+      id: 'user-2',
+      email: '000002@banana-box.local',
+      displayName: '制片',
+    })
+    expect(nicknameRecipient.id).toBe('user-2')
+  })
+
+  it('rejects duplicate nickname matches so the creator does not invite the wrong user', async () => {
+    const store = useMembersStore()
+    const client = profileLookupClient([
+      { id: 'user-2', email: '000002@banana-box.local', display_name: '剪辑' },
+      { id: 'user-3', email: '000003@banana-box.local', display_name: '剪辑' },
+    ])
+
+    await expect(store.resolveInviteRecipient(client as never, '剪辑')).rejects.toThrow('找到多个同名用户')
+  })
+
   it('loads workspace members ordered by creation time', async () => {
     const store = useMembersStore()
     const client = {
@@ -70,6 +97,18 @@ function clientMock() {
       insert: vi.fn(() => ({
         select: vi.fn(() => ({
           single: vi.fn(async () => ({ data: { id: 'invite-1' }, error: null })),
+        })),
+      })),
+    })),
+  }
+}
+
+function profileLookupClient(rows: Array<{ id: string, email: string, display_name: string }>) {
+  return {
+    from: vi.fn(() => ({
+      select: vi.fn(() => ({
+        or: vi.fn(() => ({
+          limit: vi.fn(async () => ({ data: rows, error: null })),
         })),
       })),
     })),

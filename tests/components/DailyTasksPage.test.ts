@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import DailyTasksPage from '@/components/daily/DailyTasksPage.vue'
 import type { DailyTaskDay } from '@/domain/production'
@@ -39,17 +40,28 @@ describe('DailyTasksPage', () => {
     expect(selectDate).toHaveBeenLastCalledWith('2026-07-13')
   })
 
-  it('creates a task with the entered code, title, progress, and note without an effort input', async () => {
+  it('opens a secondary create popover and creates a task with the entered code, title, progress, and note', async () => {
     const store = useDailyTasksStore()
     vi.spyOn(store, 'selectDate').mockResolvedValue()
     const create = vi.spyOn(store, 'create').mockResolvedValue()
     const wrapper = mount(DailyTasksPage)
 
-    await wrapper.get('[data-field="new-task-code"]').setValue('L36')
-    await wrapper.get('[data-field="new-task-title"]').setValue('Shot refinement')
-    await wrapper.get('[data-field="new-task-progress"]').setValue(45)
-    await wrapper.get('[data-field="new-task-note"]').setValue('Transition pass')
-    await wrapper.get('[data-action="create-daily-task"]').trigger('click')
+    expect(wrapper.find('.daily-create').exists()).toBe(false)
+
+    await wrapper.get('[data-action="open-create-daily-task"]').trigger('click')
+    expect(document.body.querySelector('.daily-create-popover')).toBeTruthy()
+
+    ;(document.body.querySelector('[data-field="new-task-code"]') as HTMLInputElement).value = 'L36'
+    document.body.querySelector('[data-field="new-task-code"]')?.dispatchEvent(new Event('input', { bubbles: true }))
+    ;(document.body.querySelector('[data-field="new-task-title"]') as HTMLInputElement).value = 'Shot refinement'
+    document.body.querySelector('[data-field="new-task-title"]')?.dispatchEvent(new Event('input', { bubbles: true }))
+    ;(document.body.querySelector('[data-field="new-task-progress"]') as HTMLInputElement).value = '45'
+    document.body.querySelector('[data-field="new-task-progress"]')?.dispatchEvent(new Event('input', { bubbles: true }))
+    ;(document.body.querySelector('[data-field="new-task-note"]') as HTMLTextAreaElement).value = 'Transition pass'
+    document.body.querySelector('[data-field="new-task-note"]')?.dispatchEvent(new Event('input', { bubbles: true }))
+    ;(document.body.querySelector('[data-action="create-daily-task"]') as HTMLButtonElement).click()
+    await Promise.resolve()
+    await wrapper.vm.$nextTick()
 
     expect(create).toHaveBeenCalledWith({
       code: 'L36',
@@ -59,6 +71,7 @@ describe('DailyTasksPage', () => {
       investedMinutes: 0,
     })
     expect(wrapper.find('[data-field="new-task-minutes"]').exists()).toBe(false)
+    expect(document.body.querySelector('.daily-create-popover')).toBeFalsy()
   })
 
   it('auto-saves progress changes, keeps delete action, and hides empty notes', async () => {
@@ -76,6 +89,11 @@ describe('DailyTasksPage', () => {
     const progress = wrapper.get('[data-task-id="t1"] [data-field="task-progress"]')
     expect(progress.attributes('type')).toBe('range')
     expect(wrapper.get('[data-task-id="t1"] .task-card-actions').exists()).toBe(true)
+    expect(wrapper.get('[data-task-id="t1"] .task-card-actions').find('[data-action="task-reminder"]').exists()).toBe(true)
+    expect(wrapper.get('[data-task-id="t1"] .task-card-actions').find('[data-action="delete-task"]').exists()).toBe(true)
+    const source = readFileSync('src/components/daily/DailyTasksPage.vue', 'utf8')
+    expect(source).toMatch(/\.daily-task\s*\{[^}]*position:relative;/s)
+    expect(source).toMatch(/\.task-card-actions\s*\{[^}]*position:absolute;[^}]*top:10px;[^}]*right:10px;/s)
     expect(wrapper.find('[data-task-id="t1"] [data-field="task-note"]').exists()).toBe(false)
     expect(wrapper.find('[data-task-id="t1"] [data-action="save-task"]').exists()).toBe(false)
 

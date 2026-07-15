@@ -4,6 +4,7 @@ import { Pencil, Plus, Users, UserPlus } from '@lucide/vue'
 import { STAGE_DEFINITIONS, type Project, type StageKey } from '@/domain/production'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
+import { useWorkspacesStore } from '@/stores/workspaces'
 import InviteDialog from '@/components/collaboration/InviteDialog.vue'
 import CommentPanel from '@/components/collaboration/CommentPanel.vue'
 import PresenceAvatars from '@/components/collaboration/PresenceAvatars.vue'
@@ -11,12 +12,17 @@ import ProjectTimeline from './ProjectTimeline.vue'
 
 const auth = useAuthStore()
 const projects = useProjectsStore()
+const workspaces = useWorkspacesStore()
 const selectedProjectId = ref<string | null>(null)
 const detailOpen = ref(false)
 const inviteOpen = ref(false)
 const inviteTrigger = ref<HTMLButtonElement | null>(null)
 const invitePopover = ref<HTMLElement | null>(null)
 const invitePopoverStyle = ref<Record<string, string>>({})
+const logOpen = ref(false)
+const logTrigger = ref<HTMLButtonElement | null>(null)
+const logPopover = ref<HTMLElement | null>(null)
+const logPopoverStyle = ref<Record<string, string>>({})
 
 const selectedProject = computed(
   () =>
@@ -32,6 +38,17 @@ const selectedProjectCanEditMetadata = computed(
 )
 const selectedProjectCanInvite = computed(
   () => Boolean(selectedProjectOwnedByCurrentUser.value && selectedProject.value?.isPublic),
+)
+const projectLogEntries = computed(() =>
+  projects.filteredProjects
+    .filter((project) => project.lastActivitySummary)
+    .map((project) => ({
+      id: project.id,
+      code: project.code,
+      name: project.name,
+      actorName: project.lastActivityActorName,
+      summary: project.lastActivitySummary,
+    })),
 )
 
 watch(
@@ -68,6 +85,40 @@ function editProject(project: Project) {
   projects.openEditor(project.id)
 }
 
+function projectOwnedByCurrentUser(project: Project) {
+  return Boolean(auth.user && project.ownerUserId === auth.user.id)
+}
+
+function projectCanInvite(project: Project) {
+  return projectOwnedByCurrentUser(project)
+}
+
+async function openProjectInvite(project: Project, event: MouseEvent) {
+  if (!projectCanInvite(project)) return
+  if (!auth.client || !auth.user || !workspaces.activeWorkspaceId) {
+    projects.error = '请先登录并完成云端同步配置'
+    return
+  }
+  selectedProjectId.value = project.id
+  inviteTrigger.value = event.currentTarget as HTMLButtonElement
+  if (!project.isPublic) {
+    try {
+      await projects.setPublic(project.id, true)
+    } catch (error) {
+      projects.error = error instanceof Error ? error.message : String(error)
+      return
+    }
+  }
+  try {
+    await projects.ensureCloudProject(auth.client, workspaces.activeWorkspaceId, auth.user.id, project.id)
+  } catch (error) {
+    projects.error = error instanceof Error ? error.message : String(error)
+    return
+  }
+  inviteOpen.value = true
+  await positionInvitePopover()
+}
+
 async function positionInvitePopover() {
   await nextTick()
   const rect = inviteTrigger.value?.getBoundingClientRect()
@@ -88,6 +139,26 @@ async function toggleInvitePopover() {
   if (inviteOpen.value) await positionInvitePopover()
 }
 
+async function positionLogPopover() {
+  await nextTick()
+  const rect = logTrigger.value?.getBoundingClientRect()
+  if (!rect) return
+  const width = Math.min(360, window.innerWidth - 24)
+  const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.left))
+  logPopoverStyle.value = {
+    position: 'fixed',
+    zIndex: '240',
+    top: `${rect.bottom + 8}px`,
+    left: `${left}px`,
+    width: `${width}px`,
+  }
+}
+
+async function toggleLogPopover() {
+  logOpen.value = !logOpen.value
+  if (logOpen.value) await positionLogPopover()
+}
+
 async function toggleSelectedProjectPublic() {
   if (!selectedProject.value || !selectedProjectOwnedByCurrentUser.value) return
   await projects.setPublic(selectedProject.value.id, !selectedProject.value.isPublic)
@@ -102,12 +173,23 @@ function closeInviteWhenClickingOutside(event: MouseEvent) {
   inviteOpen.value = false
 }
 
+function closeLogWhenClickingOutside(event: MouseEvent) {
+  if (!logOpen.value) return
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if (logTrigger.value?.contains(target)) return
+  if (logPopover.value?.contains(target)) return
+  logOpen.value = false
+}
+
 onMounted(() => {
   document.addEventListener('click', closeInviteWhenClickingOutside)
+  document.addEventListener('click', closeLogWhenClickingOutside)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', closeInviteWhenClickingOutside)
+  document.removeEventListener('click', closeLogWhenClickingOutside)
 })
 </script>
 
@@ -118,6 +200,16 @@ onBeforeUnmount(() => {
         <p>Production</p>
         <div class="project-title-row">
           <h2>项目管理</h2>
+          <button
+            ref="logTrigger"
+            class="project-log-trigger"
+            data-action="project-log-menu"
+            type="button"
+            :aria-expanded="logOpen"
+            @click="toggleLogPopover"
+          >
+            项目日志
+          </button>
           <button
             v-if="auth.user && selectedProjectCanInvite"
             ref="inviteTrigger"
@@ -209,6 +301,32 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <section
+        v-if="logOpen"
+        ref="logPopover"
+        class="project-log-popover"
+        aria-label="项目日志"
+        :style="logPopoverStyle"
+        @click.stop
+      >
+        <header>
+          <strong>项目日志</strong>
+          <span>{{ projectLogEntries.length }} 条</span>
+        </header>
+        <ul v-if="projectLogEntries.length">
+          <li
+            v-for="entry in projectLogEntries"
+            :key="entry.id"
+          >
+            <small>{{ entry.code }} · {{ entry.name }}</small>
+            <span>{{ entry.actorName ? `${entry.actorName}：` : '' }}{{ entry.summary }}</span>
+          </li>
+        </ul>
+        <p v-else>
+          暂无修改记录
+        </p>
+      </section>
+
+      <section
         v-if="auth.user && inviteOpen && selectedProjectCanInvite"
         ref="invitePopover"
         class="project-invite-popover"
@@ -239,27 +357,41 @@ onBeforeUnmount(() => {
         class="project-note-grid"
         aria-label="项目便签"
       >
-        <button
+        <article
           v-for="project in projects.filteredProjects"
           :key="project.id"
           class="project-note"
           :class="{ selected: selectedProject?.id === project.id && detailOpen }"
           :data-project-note="project.id"
-          type="button"
+          role="button"
+          tabindex="0"
           @click="selectProject(project)"
+          @keydown.enter.prevent="selectProject(project)"
+          @keydown.space.prevent="selectProject(project)"
           @dblclick.stop="editProject(project)"
         >
-          <span
-            v-if="project.isPublic"
-            class="project-note-public-badge"
-            :data-project-public-badge="project.id"
-            title="公共协作项目"
-            aria-label="公共协作项目"
-          >
-            <Users
-              :size="13"
-              aria-hidden="true"
-            />
+          <span class="project-note-badges">
+            <span
+              v-if="auth.user && project.ownerUserId"
+              class="project-note-owner-badge"
+              :class="{ collaborator: !projectOwnedByCurrentUser(project) }"
+              :data-project-owner-badge="project.id"
+              :title="projectOwnedByCurrentUser(project) ? '项目发起人，最高权限' : '项目协作成员'"
+            >
+              {{ projectOwnedByCurrentUser(project) ? '发起人' : '协作' }}
+            </span>
+            <span
+              v-if="project.isPublic"
+              class="project-note-public-badge"
+              :data-project-public-badge="project.id"
+              title="公共协作项目"
+              aria-label="公共协作项目"
+            >
+              <Users
+                :size="13"
+                aria-hidden="true"
+              />
+            </span>
           </span>
           <span
             class="project-note-stage"
@@ -274,13 +406,23 @@ onBeforeUnmount(() => {
           <span class="project-note-version">{{ project.version }}</span>
           <strong>{{ project.name }}</strong>
           <span class="project-note-release">{{ project.releaseDate }}</span>
-          <span
-            v-if="project.lastActivitySummary"
-            class="project-note-activity"
+          <button
+            v-if="projectCanInvite(project)"
+            class="project-note-invite"
+            data-action="card-project-invite"
+            :data-project-invite="project.id"
+            type="button"
+            title="添加协作用户"
+            aria-label="添加协作用户"
+            @click.stop="openProjectInvite(project, $event)"
           >
-            {{ project.lastActivityActorName ? `${project.lastActivityActorName}：` : '' }}{{ project.lastActivitySummary }}
-          </span>
-        </button>
+            <UserPlus
+              :size="13"
+              aria-hidden="true"
+            />
+            添加协作用户
+          </button>
+        </article>
         <p
           v-if="!projects.loading && projects.filteredProjects.length === 0"
           class="project-note-empty"
@@ -349,6 +491,21 @@ onBeforeUnmount(() => {
   font-weight: 650;
 }
 
+.project-log-trigger {
+  min-height: 22px;
+  padding: 0 7px;
+  border-color: rgba(123, 255, 226, 0.18);
+  background: rgba(4, 12, 18, 0.34);
+  color: var(--bb-text-soft);
+  font-size: 11px;
+}
+
+.project-log-trigger:hover:not(:disabled),
+.project-log-trigger[aria-expanded='true'] {
+  border-color: rgba(123, 255, 226, 0.42);
+  color: var(--bb-primary);
+}
+
 .project-board-controls {
   display: flex;
   flex-wrap: wrap;
@@ -413,6 +570,69 @@ onBeforeUnmount(() => {
   box-shadow: var(--bb-shadow-floating);
 }
 
+.project-log-popover {
+  position: fixed;
+  z-index: 240;
+  max-height: min(360px, calc(100vh - 86px));
+  overflow: auto;
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--bb-border-strong);
+  border-radius: var(--bb-radius-md);
+  background: rgba(5, 14, 22, 0.98);
+  box-shadow: var(--bb-shadow-floating);
+}
+
+.project-log-popover > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.project-log-popover strong {
+  font-size: 13px;
+}
+
+.project-log-popover header span,
+.project-log-popover small {
+  color: var(--bb-text-soft);
+  font-family: var(--bb-mono);
+  font-size: 10px;
+}
+
+.project-log-popover ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-log-popover li {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid rgba(123, 255, 226, 0.12);
+  border-radius: var(--bb-radius-sm);
+  background: rgba(102, 247, 211, 0.05);
+}
+
+.project-log-popover li span {
+  overflow-wrap: anywhere;
+  color: var(--bb-text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.project-log-popover p {
+  margin: 2px 0;
+  color: var(--bb-text-soft);
+  font-size: 12px;
+}
+
 .project-invite-popover > header {
   display: flex;
   align-items: center;
@@ -467,14 +687,27 @@ onBeforeUnmount(() => {
   background:
     linear-gradient(180deg, rgba(20, 35, 47, 0.96), rgba(9, 21, 31, 0.96));
   color: var(--bb-text);
+  cursor: pointer;
+  font: inherit;
   text-align: left;
   box-shadow: var(--bb-shadow-card);
 }
 
-.project-note-public-badge {
+.project-note:focus-visible {
+  outline: 2px solid rgba(123, 255, 226, 0.72);
+  outline-offset: 2px;
+}
+
+.project-note-badges {
   position: absolute;
   top: 8px;
   right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.project-note-public-badge {
   display: grid;
   width: 24px;
   min-height: 24px;
@@ -483,6 +716,26 @@ onBeforeUnmount(() => {
   border-radius: var(--bb-radius-xs);
   background: rgba(102, 247, 211, 0.16);
   color: var(--bb-primary-strong);
+}
+
+.project-note-owner-badge {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 206, 84, 0.48);
+  border-radius: var(--bb-radius-xs);
+  background: rgba(255, 206, 84, 0.14);
+  color: #ffd978;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.project-note-owner-badge.collaborator {
+  border-color: rgba(123, 255, 226, 0.28);
+  background: rgba(123, 255, 226, 0.08);
+  color: var(--bb-text-soft);
 }
 
 .project-note:hover,
@@ -528,12 +781,26 @@ onBeforeUnmount(() => {
   color: var(--bb-text-soft);
 }
 
-.project-note-activity {
-  overflow: hidden;
-  color: var(--bb-text-muted);
+.project-note-invite {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 2px;
+  padding: 0 8px;
+  border-color: rgba(123, 255, 226, 0.28);
+  background: rgba(123, 255, 226, 0.08);
+  color: var(--bb-primary);
   font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 650;
+}
+
+.project-note-invite:hover:not(:disabled),
+.project-note-invite:focus-visible {
+  border-color: rgba(123, 255, 226, 0.52);
+  background: rgba(123, 255, 226, 0.14);
+  color: var(--bb-primary-strong);
 }
 
 .project-note-empty {

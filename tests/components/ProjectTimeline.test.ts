@@ -1,24 +1,53 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { STAGE_DEFINITIONS, type Project } from '@/domain/production'
 import ProjectTimeline from '@/components/projects/ProjectTimeline.vue'
 
 describe('ProjectTimeline', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-14T08:00:00Z'))
   })
 
-  it('renders overlapping stage bars with separate progress markers', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('renders read-only stage bars without extra progress tick marks', () => {
     const wrapper = mount(ProjectTimeline, { props: { project: project() } })
 
+    expect(wrapper.findAll('[data-stage-row]')).toHaveLength(STAGE_DEFINITIONS.length)
     expect(wrapper.find('[data-stage-bar="storyboard"]').exists()).toBe(true)
     expect(wrapper.find('[data-stage-bar="first_cut"]').exists()).toBe(true)
+    expect(wrapper.find('[data-stage-bar="effects"]').exists()).toBe(false)
     expect(wrapper.find('[data-today-line]').exists()).toBe(true)
-    const markers = wrapper.findAll('[data-progress-marker]')
-    expect(markers).toHaveLength(8)
-    expect(wrapper.findAll('[data-field="project-stage-progress"]')).toHaveLength(8)
-    expect(markers[0].attributes('style')).not.toBe(markers[1].attributes('style'))
+    expect(wrapper.find('[data-today-line]').text()).toContain('7.14')
+    expect(wrapper.get('[data-axis-boundary="start"]').text()).toContain('7月1日')
+    expect(wrapper.get('[data-axis-boundary="release"]').text()).toContain('7月31日')
+    expect(wrapper.get('[data-axis-boundary="start"]').classes()).toContain('boundary')
+    expect(wrapper.get('[data-axis-boundary="release"]').classes()).toContain('boundary')
+    expect(wrapper.findAll('[data-progress-marker]')).toHaveLength(0)
+    expect(wrapper.findAll('[data-field="project-stage-progress"]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('100%')
+  })
+
+  it('pins the today line to the last day for completed projects and supports horizontal drag panning', async () => {
+    vi.setSystemTime(new Date('2026-08-20T08:00:00Z'))
+    const wrapper = mount(ProjectTimeline, { props: { project: project() } })
+    const scroll = wrapper.get('[data-timeline-scroll]').element as HTMLElement
+
+    expect(wrapper.find('[data-today-line]').text()).toContain('7.31')
+    expect(wrapper.findAll('[data-stage-row]')).toHaveLength(STAGE_DEFINITIONS.length)
+    expect(wrapper.findAll('[data-stage-bar]')).toHaveLength(STAGE_DEFINITIONS.length)
+
+    scroll.scrollLeft = 40
+    await wrapper.get('[data-timeline-scroll]').trigger('mousedown', { clientX: 200 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 160 }))
+    window.dispatchEvent(new MouseEvent('mouseup'))
+
+    expect(scroll.scrollLeft).toBeGreaterThan(40)
   })
 })
 
@@ -43,8 +72,8 @@ function project(): Project {
       id: stage.key,
       stageKey: stage.key,
       position,
-      startDate: position === 0 ? '2026-07-01' : position === 1 ? '2026-07-05' : '2026-07-10',
-      endDate: position === 0 ? '2026-07-10' : position === 1 ? '2026-07-14' : '2026-07-16',
+      startDate: position === 0 ? '2026-07-01' : position === 1 ? '2026-07-05' : `2026-07-${String(18 + position).padStart(2, '0')}`,
+      endDate: position === 0 ? '2026-07-10' : position === 1 ? '2026-07-14' : `2026-07-${String(19 + position).padStart(2, '0')}`,
       progress: position === 0 ? 80 : position === 1 ? 30 : 0,
       updatedAt: '2026-07-11T08:00:00Z',
     })),

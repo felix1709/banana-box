@@ -1,7 +1,7 @@
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import UserCloudMenu from '@/components/cloud/UserCloudMenu.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSyncStatusStore } from '@/stores/syncStatus'
@@ -72,7 +72,69 @@ describe('UserCloudMenu', () => {
     expect(document.body.querySelector('[data-action="auth-sign-out"]')).toBeTruthy()
   })
 
-  it('lets a non-admin signed-in user accept an invite without admin tools', async () => {
+  it('keeps the popover open when switching into nickname editing', async () => {
+    const auth = useAuthStore()
+    auth.cloudAvailable = true
+    auth.user = { id: 'user-1', email: '000001@banana-box.local' } as never
+    const workspaces = useWorkspacesStore()
+    workspaces.profile = {
+      id: 'user-1',
+      email: '000001@banana-box.local',
+      displayName: '导演',
+      avatarUrl: null,
+      createdAt: 'now',
+      updatedAt: 'now',
+    }
+    workspaces.workspaces = [{
+      id: 'workspace-1',
+      name: '000001 的个人空间',
+      ownerId: 'user-1',
+      createdAt: 'now',
+      updatedAt: 'now',
+    }]
+    workspaces.activeWorkspaceId = 'workspace-1'
+
+    const wrapper = mountMenu()
+    await wrapper.get('[data-action="user-cloud-menu"]').trigger('click')
+    const editButton = document.body.querySelector('[data-action="edit-display-name"]') as HTMLButtonElement
+    expect(editButton).toBeTruthy()
+
+    editButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await nextTick()
+
+    expect(document.body.querySelector('.user-cloud-popover')).toBeTruthy()
+    expect(document.body.querySelector('[data-field="display-name"]')).toBeTruthy()
+  })
+
+  it('does not let popover clicks bubble into document outside-click handlers', async () => {
+    const auth = useAuthStore()
+    auth.cloudAvailable = true
+    auth.user = { id: 'user-1', email: '000001@banana-box.local' } as never
+    const workspaces = useWorkspacesStore()
+    workspaces.profile = {
+      id: 'user-1',
+      email: '000001@banana-box.local',
+      displayName: '导演',
+      avatarUrl: null,
+      createdAt: 'now',
+      updatedAt: 'now',
+    }
+
+    const wrapper = mountMenu()
+    await wrapper.get('[data-action="user-cloud-menu"]').trigger('click')
+    const documentClick = vi.fn()
+    document.addEventListener('click', documentClick)
+
+    const editButton = document.body.querySelector('[data-action="edit-display-name"]') as HTMLButtonElement
+    editButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await nextTick()
+
+    document.removeEventListener('click', documentClick)
+    expect(documentClick).not.toHaveBeenCalled()
+    expect(document.body.querySelector('.user-cloud-popover')).toBeTruthy()
+  })
+
+  it('lets a non-admin signed-in user accept an invite and see notifications without admin tools', async () => {
     const auth = useAuthStore()
     auth.cloudAvailable = true
     auth.user = { id: 'user-2', email: '000002@banana-box.local' } as never
@@ -96,7 +158,7 @@ describe('UserCloudMenu', () => {
     expect(document.body.textContent).toContain('已同步')
     expect(document.body.querySelector('[data-action="auth-sign-out"]')).toBeTruthy()
     expect(document.body.querySelector('.invite-accept-panel')).toBeTruthy()
-    expect(document.body.querySelector('.notifications-menu')).toBeNull()
+    expect(document.body.querySelector('.notifications-menu')).toBeTruthy()
   })
 
   it('closes the popover after a successful login', async () => {

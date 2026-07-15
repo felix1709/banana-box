@@ -130,6 +130,7 @@ describe('workspaces store', () => {
     await store.updateDisplayName(client as never, '小明')
 
     expect(profileQuery.update).toHaveBeenCalledWith({ display_name: '小明' })
+    expect(profileQuery.select).toHaveBeenCalledWith('id, email, display_name, avatar_url, created_at, updated_at')
     expect(store.profile?.displayName).toBe('小明')
   })
 })

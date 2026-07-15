@@ -8,10 +8,14 @@ import {
   type SaveProjectWithStagesInput,
 } from '@/domain/production'
 import { useAuthStore } from '@/stores/auth'
+import { useMembersStore } from '@/stores/members'
 import { useProjectsStore } from '@/stores/projects'
+import { useWorkspacesStore } from '@/stores/workspaces'
 
 const projects = useProjectsStore()
 const auth = useAuthStore()
+const members = useMembersStore()
+const workspaces = useWorkspacesStore()
 const saving = ref(false)
 const error = ref('')
 
@@ -24,6 +28,8 @@ interface EditorForm {
   filePath: string
   releaseDate: string
   archived: boolean
+  shareMode: 'personal' | 'public'
+  inviteIdentity: string
   stages: EditorStage[]
 }
 
@@ -51,6 +57,8 @@ function formFromProject(project: Project | null): EditorForm {
     filePath: project?.filePath ?? '',
     releaseDate: project?.releaseDate ?? today(),
     archived: project?.archived ?? false,
+    shareMode: project?.isPublic ? 'public' : 'personal',
+    inviteIdentity: '',
     stages: initialStages(project),
   }
 }
@@ -71,6 +79,7 @@ async function save() {
   saving.value = true
   error.value = ''
   try {
+    let savedProject: Project
     if (projects.editingProject) {
       const input: SaveProjectWithStagesInput = {
         projectId: projects.editingProject.id,
@@ -87,9 +96,9 @@ async function save() {
           progress: 0,
         })),
       }
-      await projects.saveEditor(input)
+      savedProject = await projects.saveEditor(input)
     } else {
-      await projects.create({
+      savedProject = await projects.create({
         code: form.code.trim(),
         version: form.version.trim(),
         name: form.name.trim(),
@@ -103,6 +112,40 @@ async function save() {
           progress: 0,
         })),
       })
+    }
+    if (form.shareMode === 'public') {
+      if (!auth.client || !auth.user || !workspaces.activeWorkspaceId) {
+        throw new Error('请先登录云端账号，再创建公共项目')
+      }
+      if (!savedProject.isPublic) {
+        savedProject = await projects.setPublic(savedProject.id, true)
+      }
+      await projects.ensureCloudProject(auth.client, workspaces.activeWorkspaceId, auth.user.id, savedProject.id)
+
+      const identity = form.inviteIdentity.trim()
+      if (identity) {
+        const recipient = await members.resolveInviteRecipient(auth.client, identity)
+        const invite = await members.createInvite(auth.client, {
+          appOrigin: 'banana-box://invite',
+          workspaceId: workspaces.activeWorkspaceId,
+          projectId: savedProject.id,
+          scopeType: 'project',
+          role: 'editor',
+          email: recipient.email,
+          userId: auth.user.id,
+        })
+        const notificationResponse = await auth.client.from('notifications').insert({
+          workspace_id: workspaces.activeWorkspaceId,
+          recipient_user_id: recipient.id,
+          actor_user_id: auth.user.id,
+          kind: 'invite',
+          target_type: 'project_invite',
+          target_id: invite.id,
+          created_by: auth.user.id,
+          updated_by: auth.user.id,
+        })
+        if (notificationResponse.error) throw new Error(notificationResponse.error.message)
+      }
     }
     projects.closeEditor()
   } catch (reason) {
@@ -205,6 +248,38 @@ async function save() {
               type="date"
             >
           </label>
+          <fieldset class="project-share-fields wide">
+            <legend>项目权限</legend>
+            <label>
+              <input
+                v-model="form.shareMode"
+                data-field="share-personal"
+                type="radio"
+                value="personal"
+              >
+              <span>个人项目</span>
+            </label>
+            <label>
+              <input
+                v-model="form.shareMode"
+                data-field="share-public"
+                type="radio"
+                value="public"
+              >
+              <span>公共项目</span>
+            </label>
+            <label
+              v-if="form.shareMode === 'public'"
+              class="project-invite-field"
+            >
+              <span>邀请协作用户</span>
+              <input
+                v-model="form.inviteIdentity"
+                data-field="invite-identity"
+                placeholder="000002 或昵称"
+              >
+            </label>
+          </fieldset>
           <label
             v-if="projects.editingProject"
             class="project-archive-toggle"
@@ -391,6 +466,41 @@ async function save() {
 
 .project-fields .wide {
   grid-column: span 2;
+}
+
+.project-share-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 12px;
+  margin: 2px 0 0;
+  padding: 10px;
+  border: 1px solid rgba(148, 179, 188, 0.16);
+  border-radius: var(--bb-radius-sm);
+}
+
+.project-share-fields legend {
+  padding: 0 4px;
+  color: var(--bb-text-muted);
+  font-size: 11px;
+}
+
+.project-share-fields label {
+  display: inline-flex;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-share-fields input[type='radio'] {
+  width: auto;
+  min-height: 0;
+}
+
+.project-invite-field {
+  display: grid !important;
+  min-width: min(260px, 100%);
+  flex: 1;
 }
 
 .project-archive-toggle {

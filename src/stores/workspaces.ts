@@ -172,6 +172,7 @@ export const useWorkspacesStore = defineStore('workspaces', {
         .from('profiles')
         .update({ display_name: normalized })
         .eq('id', this.profile.id)
+        .select('id, email, display_name, avatar_url, created_at, updated_at')
         .single()
       if (response.error) {
         this.error = response.error.message

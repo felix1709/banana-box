@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   STAGE_DEFINITIONS,
   type CreateProjectInput,
@@ -17,6 +18,8 @@ import {
   setProjectPublic,
   setProjectStage,
 } from '@/lib/productionIpc'
+
+type ProjectCloudClient = Pick<SupabaseClient, 'from'>
 
 const emptyFilters = (): ProjectFilter => ({
   query: '',
@@ -127,6 +130,51 @@ export const useProjectsStore = defineStore('projects', {
     async setPublic(projectId: string, isPublic: boolean) {
       const project = await setProjectPublic(projectId, isPublic)
       this.replaceProject(project)
+      return project
+    },
+
+    async ensureCloudProject(client: ProjectCloudClient, workspaceId: string, userId: string, projectId: string) {
+      const project = this.projects.find((item) => item.id === projectId)
+      if (!project) throw new Error('未找到要邀请的项目')
+
+      const projectResponse = await client.from('projects').upsert({
+        id: project.id,
+        workspace_id: workspaceId,
+        code: project.code,
+        version: project.version,
+        name: project.name,
+        file_display_ref: project.filePath,
+        release_date: project.releaseDate,
+        main_stage_key: project.mainStageKey,
+        archived: project.archived,
+        owner_user_id: project.ownerUserId || userId,
+        is_public: project.isPublic,
+        last_activity_summary: project.lastActivitySummary,
+        last_activity_actor_name: project.lastActivityActorName,
+        created_by: userId,
+        updated_by: userId,
+        created_at: project.createdAt,
+        updated_at: project.updatedAt,
+      })
+      if (projectResponse.error) throw new Error(projectResponse.error.message)
+
+      const stageResponse = await client.from('project_stages').upsert(
+        project.stages.map((stage) => ({
+          id: stage.id,
+          workspace_id: workspaceId,
+          project_id: project.id,
+          stage_key: stage.stageKey,
+          position: stage.position,
+          start_date: stage.startDate,
+          end_date: stage.endDate,
+          progress: stage.progress,
+          created_by: userId,
+          updated_by: userId,
+          updated_at: stage.updatedAt,
+        })),
+      )
+      if (stageResponse.error) throw new Error(stageResponse.error.message)
+
       return project
     },
 

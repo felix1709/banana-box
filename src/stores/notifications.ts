@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AppNotification, NotificationKind } from '@/types'
 
 type NotificationsClient = Pick<SupabaseClient, 'from'>
+type InviteNotificationClient = Pick<SupabaseClient, 'from' | 'rpc'>
 
 interface NotificationRow {
   id: string
@@ -55,6 +56,24 @@ export const useNotificationsStore = defineStore('notifications', {
       if (response.error) this.error = response.error.message
       else this.notifications = ((response.data ?? []) as NotificationRow[]).map(mapNotification)
       this.loading = false
+    },
+    async acceptInviteNotification(client: InviteNotificationClient, notificationId: string, inviteId: string) {
+      const response = await client.rpc('accept_invite_by_id', { invite_id: inviteId })
+      if (response.error) throw new Error(response.error.message)
+
+      const readResponse = await client
+        .from('notifications')
+        .update({ read_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', notificationId)
+      if (readResponse.error) throw new Error(readResponse.error.message)
+
+      this.notifications = this.notifications.filter((notification) => notification.id !== notificationId)
+      const data = response.data as { workspace_id: string; project_id: string | null; role: string }
+      return {
+        workspaceId: data.workspace_id,
+        projectId: data.project_id,
+        role: data.role,
+      }
     },
   },
 })
