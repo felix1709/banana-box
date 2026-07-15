@@ -229,6 +229,7 @@ describe('SettingsModal', () => {
     expect(copyToClipboard).toHaveBeenCalledWith(expect.stringContaining('create table if not exists public.profiles'))
     expect(copyToClipboard).toHaveBeenCalledWith(expect.stringContaining('create table if not exists public.prompt_categories'))
     expect(copyToClipboard).toHaveBeenCalledWith(expect.stringContaining('reminder_time text not null default'))
+    expect(copyToClipboard).toHaveBeenCalledWith(expect.stringContaining('notifications insertable by workspace collaborators'))
     expect(wrapper.find('.cloud-status').text()).toContain('SQL')
   })
 

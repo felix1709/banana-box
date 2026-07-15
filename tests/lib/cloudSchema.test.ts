@@ -145,6 +145,17 @@ describe('cloud collaboration schema', () => {
     expect(sql).toContain('grant execute on function public.update_own_profile_display_name(text) to authenticated')
   })
 
+  it('allows workspace collaborators to create notification rows for invites and mentions', () => {
+    const sql = readMigration('0010_notifications_insert_policy.sql')
+
+    expect(sql).toContain('notifications insertable by workspace collaborators')
+    expect(sql).toContain('on public.notifications for insert')
+    expect(sql).toContain('public.can_comment_workspace(workspace_id)')
+    expect(sql).toContain('actor_user_id = auth.uid()')
+    expect(sql).toContain('created_by = auth.uid()')
+    expect(sql).toContain('updated_by = auth.uid()')
+  })
+
   it('makes copied RLS policies safe to run more than once', () => {
     for (const migration of [
       '0001_auth_workspaces.sql',
