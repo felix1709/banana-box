@@ -136,6 +136,15 @@ describe('cloud collaboration schema', () => {
     expect(sql).toContain('grant execute on function public.accept_invite_by_id(uuid) to authenticated')
   })
 
+  it('adds a profile display name RPC for reliable nickname editing', () => {
+    const sql = readMigration('0009_profile_display_name_rpc.sql')
+
+    expect(sql).toContain('create or replace function public.update_own_profile_display_name')
+    expect(sql).toContain('where id = auth.uid()')
+    expect(sql).toContain('DISPLAY_NAME_REQUIRED')
+    expect(sql).toContain('grant execute on function public.update_own_profile_display_name(text) to authenticated')
+  })
+
   it('makes copied RLS policies safe to run more than once', () => {
     for (const migration of [
       '0001_auth_workspaces.sql',

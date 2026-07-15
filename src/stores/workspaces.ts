@@ -168,12 +168,9 @@ export const useWorkspacesStore = defineStore('workspaces', {
       const normalized = displayName.trim()
       if (!this.profile || !normalized) return
       this.error = ''
-      const response = await client
-        .from('profiles')
-        .update({ display_name: normalized })
-        .eq('id', this.profile.id)
-        .select('id, email, display_name, avatar_url, created_at, updated_at')
-        .single()
+      const response = await client.rpc('update_own_profile_display_name', {
+        new_display_name: normalized,
+      })
       if (response.error) {
         this.error = response.error.message
         return

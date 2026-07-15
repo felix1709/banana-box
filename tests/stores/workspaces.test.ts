@@ -116,21 +116,19 @@ describe('workspaces store', () => {
   })
 
   it('updates the current profile display name', async () => {
-    const profileQuery = tableMock({ data: { ...profileRow(), display_name: '小明' }, error: null })
     const client = {
-      from: vi.fn((table: string) => {
-        expect(table).toBe('profiles')
-        return profileQuery
-      }),
-      rpc: vi.fn(),
+      from: vi.fn(),
+      rpc: rpcMock({ data: { ...profileRow(), display_name: '小明' }, error: null }),
     }
     const store = useWorkspacesStore()
     store.profile = mapProfileForTest(profileRow())
 
     await store.updateDisplayName(client as never, '小明')
 
-    expect(profileQuery.update).toHaveBeenCalledWith({ display_name: '小明' })
-    expect(profileQuery.select).toHaveBeenCalledWith('id, email, display_name, avatar_url, created_at, updated_at')
+    expect(client.rpc).toHaveBeenCalledWith('update_own_profile_display_name', {
+      new_display_name: '小明',
+    })
+    expect(client.from).not.toHaveBeenCalled()
     expect(store.profile?.displayName).toBe('小明')
   })
 })

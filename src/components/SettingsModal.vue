@@ -22,6 +22,7 @@ import profileBootstrapFixSql from '../../supabase/migrations/0005_profile_boots
 import dailyTaskRemindersSql from '../../supabase/migrations/0006_daily_task_reminders.sql?raw'
 import projectLevelCollaborationSql from '../../supabase/migrations/0007_project_level_collaboration.sql?raw'
 import projectInviteNotificationsSql from '../../supabase/migrations/0008_project_invite_notifications.sql?raw'
+import profileDisplayNameRpcSql from '../../supabase/migrations/0009_profile_display_name_rpc.sql?raw'
 import { checkAiProviderConnection } from '@/lib/provider-ipc'
 import {
   commitLegacyImport,
@@ -77,7 +78,7 @@ const autostartEnabled = ref(false)
 const loadingAutostart = ref(true)
 const savingAutostart = ref(false)
 const autostartError = ref('')
-const cloudSetupSql = `${authWorkspaceSql.trim()}\n\n${contentCollaborationSql.trim()}\n\n${inviteAcceptanceRealtimeSql.trim()}\n\n${workspaceBootstrapFixSql.trim()}\n\n${profileBootstrapFixSql.trim()}\n\n${dailyTaskRemindersSql.trim()}\n\n${projectLevelCollaborationSql.trim()}\n\n${projectInviteNotificationsSql.trim()}\n`
+const cloudSetupSql = `${authWorkspaceSql.trim()}\n\n${contentCollaborationSql.trim()}\n\n${inviteAcceptanceRealtimeSql.trim()}\n\n${workspaceBootstrapFixSql.trim()}\n\n${profileBootstrapFixSql.trim()}\n\n${dailyTaskRemindersSql.trim()}\n\n${projectLevelCollaborationSql.trim()}\n\n${projectInviteNotificationsSql.trim()}\n\n${profileDisplayNameRpcSql.trim()}\n`
 
 onMounted(async () => {
   await Promise.all([refreshAutostart(), loadApiProviders(), loadCloudSettings()])
