@@ -165,6 +165,15 @@ describe('cloud collaboration schema', () => {
     expect(sql).toContain('grant execute on function public.accept_invite(text) to authenticated')
   })
 
+  it('avoids ambiguous project_id references when accepting project invite notifications', () => {
+    const sql = readMigration('0012_invite_acceptance_conflict_targets.sql')
+
+    expect(sql).toContain('create or replace function public.accept_invite_by_id')
+    expect(sql).toContain('on conflict on constraint project_members_pkey')
+    expect(sql).toContain('on conflict on constraint workspace_members_pkey')
+    expect(sql).not.toContain('on conflict (project_id, user_id)')
+  })
+
   it('makes copied RLS policies safe to run more than once', () => {
     for (const migration of [
       '0001_auth_workspaces.sql',
