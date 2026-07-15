@@ -5,6 +5,12 @@ import type { AppNotification, NotificationKind } from '@/types'
 type NotificationsClient = Pick<SupabaseClient, 'from'>
 type InviteNotificationClient = Pick<SupabaseClient, 'from' | 'rpc'>
 
+interface InviteAcceptanceRow {
+  workspace_id: string
+  project_id: string | null
+  role: string
+}
+
 interface NotificationRow {
   id: string
   workspace_id: string
@@ -29,6 +35,12 @@ function mapNotification(row: NotificationRow): AppNotification {
     readAt: row.read_at,
     createdAt: row.created_at,
   }
+}
+
+function firstInviteAcceptanceRow(data: unknown): InviteAcceptanceRow {
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row || typeof row !== 'object') throw new Error('INVITE_ACCEPTANCE_EMPTY')
+  return row as InviteAcceptanceRow
 }
 
 export const useNotificationsStore = defineStore('notifications', {
@@ -68,7 +80,7 @@ export const useNotificationsStore = defineStore('notifications', {
       if (readResponse.error) throw new Error(readResponse.error.message)
 
       this.notifications = this.notifications.filter((notification) => notification.id !== notificationId)
-      const data = response.data as { workspace_id: string; project_id: string | null; role: string }
+      const data = firstInviteAcceptanceRow(response.data)
       return {
         workspaceId: data.workspace_id,
         projectId: data.project_id,

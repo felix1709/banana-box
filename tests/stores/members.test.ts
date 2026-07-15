@@ -55,6 +55,55 @@ describe('members store', () => {
     await expect(store.resolveInviteRecipient(client as never, '剪辑')).rejects.toThrow('找到多个同名用户')
   })
 
+  it('searches invite recipients by account or nickname and returns selectable matches', async () => {
+    const store = useMembersStore()
+    const client = profileLookupClient([
+      { id: 'user-2', email: '000002@banana-box.local', display_name: '剪辑' },
+      { id: 'user-3', email: '000003@banana-box.local', display_name: '剪辑助理' },
+    ])
+
+    const results = await store.searchInviteRecipients(client as never, '剪辑', 'user-1')
+
+    expect(results).toEqual([
+      { id: 'user-2', email: '000002@banana-box.local', displayName: '剪辑' },
+      { id: 'user-3', email: '000003@banana-box.local', displayName: '剪辑助理' },
+    ])
+  })
+
+  it('creates a project invite and sends a notification to the selected user', async () => {
+    const store = useMembersStore()
+    const client = inviteNotificationClient()
+
+    const invite = await store.createProjectUserInvite(client as never, {
+      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      role: 'editor',
+      recipient: { id: 'user-2', email: '000002@banana-box.local', displayName: '剪辑' },
+      userId: 'user-1',
+    })
+
+    expect(invite.id).toBe('invite-1')
+    expect(client.tables.invites.insert).toHaveBeenCalledWith(expect.objectContaining({
+      workspace_id: 'workspace-1',
+      project_id: 'project-1',
+      scope_type: 'project',
+      role: 'editor',
+      email: '000002@banana-box.local',
+      created_by: 'user-1',
+      updated_by: 'user-1',
+    }))
+    expect(client.tables.notifications.insert).toHaveBeenCalledWith(expect.objectContaining({
+      workspace_id: 'workspace-1',
+      recipient_user_id: 'user-2',
+      actor_user_id: 'user-1',
+      kind: 'invite',
+      target_type: 'project_invite',
+      target_id: 'invite-1',
+      created_by: 'user-1',
+      updated_by: 'user-1',
+    }))
+  })
+
   it('loads workspace members ordered by creation time', async () => {
     const store = useMembersStore()
     const client = {
@@ -89,6 +138,20 @@ describe('members store', () => {
     expect(client.rpc).toHaveBeenCalledWith('accept_invite', { invite_token: 'token-123' })
     expect(result.workspaceId).toBe('workspace-1')
   })
+
+  it('reads invite token acceptance data from Supabase table-returning RPC arrays', async () => {
+    const store = useMembersStore()
+    const client = {
+      rpc: vi.fn(async () => ({
+        data: [{ workspace_id: 'workspace-1', project_id: 'project-1', role: 'editor' }],
+        error: null,
+      })),
+    }
+
+    const result = await store.acceptInvite(client as never, 'token-123')
+
+    expect(result).toEqual({ workspaceId: 'workspace-1', projectId: 'project-1', role: 'editor' })
+  })
 })
 
 function clientMock() {
@@ -112,5 +175,24 @@ function profileLookupClient(rows: Array<{ id: string, email: string, display_na
         })),
       })),
     })),
+  }
+}
+
+function inviteNotificationClient() {
+  const tables = {
+    invites: {
+      insert: vi.fn(() => ({
+        select: vi.fn(() => ({
+          single: vi.fn(async () => ({ data: { id: 'invite-1' }, error: null })),
+        })),
+      })),
+    },
+    notifications: {
+      insert: vi.fn(async () => ({ data: [], error: null })),
+    },
+  }
+  return {
+    tables,
+    from: vi.fn((table: keyof typeof tables) => tables[table]),
   }
 }

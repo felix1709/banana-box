@@ -98,15 +98,18 @@ describe('ProjectBoardPage', () => {
     auth.client = cloudClientMock() as never
     useWorkspacesStore().activeWorkspaceId = 'workspace-1'
     const members = useMembersStore()
-    members.createInvite = vi.fn(async () => ({
+    members.searchInviteRecipients = vi.fn(async () => [
+      { id: 'user-2', email: '000002@banana-box.local', displayName: '剪辑' },
+    ])
+    members.createProjectUserInvite = vi.fn(async () => ({
       id: 'invite-1',
       workspaceId: 'workspace-1',
       projectId: 'p1',
       scopeType: 'project',
       role: 'viewer',
-      email: null,
+      email: '000002@banana-box.local',
       expiresAt: 'tomorrow',
-      url: 'banana-box://invite?token=abc',
+      url: 'banana-box://invite?token=hidden',
     }))
     const store = useProjectsStore()
     store.hydrate([project({ ownerUserId: 'user-1', isPublic: true })])
@@ -117,15 +120,22 @@ describe('ProjectBoardPage', () => {
     await wrapper.get('[data-action="project-invite-menu"]').trigger('click')
     expect(document.body.querySelector('.project-invite-popover')).toBeTruthy()
 
-    const inviteButton = document.body.querySelector('[data-action="create-invite"]') as HTMLButtonElement
-    inviteButton.click()
+    const searchInput = document.body.querySelector('[data-field="invite-search"]') as HTMLInputElement
+    searchInput.value = '剪辑'
+    searchInput.dispatchEvent(new Event('input'))
+    const searchButton = document.body.querySelector('[data-action="search-invite-users"]') as HTMLButtonElement
+    searchButton.click()
     await flushPromises()
 
-    expect(members.createInvite).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    const addButton = document.body.querySelector('[data-action="add-invite-user"][data-user-id="user-2"]') as HTMLButtonElement
+    addButton.click()
+    await flushPromises()
+
+    expect(members.createProjectUserInvite).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       projectId: 'p1',
-      scopeType: 'project',
+      recipient: expect.objectContaining({ id: 'user-2' }),
     }))
-    expect(document.body.textContent).toContain('banana-box://invite?token=abc')
+    expect(document.body.textContent).toContain('已发送')
   })
 
   it('shows a public collaboration badge and lets only the creator invite from public projects', async () => {
@@ -149,15 +159,18 @@ describe('ProjectBoardPage', () => {
     auth.client = client as never
     useWorkspacesStore().activeWorkspaceId = 'workspace-1'
     const members = useMembersStore()
-    members.createInvite = vi.fn(async () => ({
+    members.searchInviteRecipients = vi.fn(async () => [
+      { id: 'user-2', email: '000002@banana-box.local', displayName: '剪辑' },
+    ])
+    members.createProjectUserInvite = vi.fn(async () => ({
       id: 'invite-1',
       workspaceId: 'workspace-1',
       projectId: 'p1',
       scopeType: 'project',
       role: 'editor',
-      email: null,
+      email: '000002@banana-box.local',
       expiresAt: 'tomorrow',
-      url: 'banana-box://invite?token=card',
+      url: 'banana-box://invite?token=hidden',
     }))
     const store = useProjectsStore()
     store.hydrate([project({ ownerUserId: 'user-1', isPublic: true })])
@@ -170,17 +183,24 @@ describe('ProjectBoardPage', () => {
     await flushPromises()
     expect(document.body.querySelector('.project-invite-popover')).toBeTruthy()
 
-    const inviteButton = document.body.querySelector('[data-action="create-invite"]') as HTMLButtonElement
-    inviteButton.click()
+    const searchInput = document.body.querySelector('[data-field="invite-search"]') as HTMLInputElement
+    searchInput.value = '剪辑'
+    searchInput.dispatchEvent(new Event('input'))
+    const searchButton = document.body.querySelector('[data-action="search-invite-users"]') as HTMLButtonElement
+    searchButton.click()
     await flushPromises()
 
-    expect(members.createInvite).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    const addButton = document.body.querySelector('[data-action="add-invite-user"][data-user-id="user-2"]') as HTMLButtonElement
+    addButton.click()
+    await flushPromises()
+
+    expect(members.createProjectUserInvite).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       projectId: 'p1',
-      scopeType: 'project',
+      recipient: expect.objectContaining({ id: 'user-2' }),
     }))
     expect(client.from).toHaveBeenCalledWith('projects')
     expect(client.from).toHaveBeenCalledWith('project_stages')
-    expect(document.body.textContent).toContain('banana-box://invite?token=card')
+    expect(document.body.textContent).toContain('已发送')
   })
 
   it('shows the card invite entry on private projects and publishes before inviting', async () => {

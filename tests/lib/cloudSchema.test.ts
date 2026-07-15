@@ -156,6 +156,15 @@ describe('cloud collaboration schema', () => {
     expect(sql).toContain('updated_by = auth.uid()')
   })
 
+  it('uses the pgcrypto extension schema when accepting invite tokens', () => {
+    const sql = readMigration('0011_invite_digest_extension_path.sql')
+
+    expect(sql).toContain('create extension if not exists pgcrypto with schema extensions')
+    expect(sql).toContain('create or replace function public.accept_invite')
+    expect(sql).toContain("encode(extensions.digest(invite_token, 'sha256'), 'hex')")
+    expect(sql).toContain('grant execute on function public.accept_invite(text) to authenticated')
+  })
+
   it('makes copied RLS policies safe to run more than once', () => {
     for (const migration of [
       '0001_auth_workspaces.sql',

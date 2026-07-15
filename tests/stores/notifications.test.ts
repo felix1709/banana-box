@@ -49,4 +49,23 @@ describe('notifications store', () => {
     expect(client.from).toHaveBeenCalledWith('notifications')
     expect(result).toEqual({ workspaceId: 'workspace-1', projectId: 'project-1', role: 'editor' })
   })
+
+  it('reads invite acceptance data from Supabase table-returning RPC arrays', async () => {
+    const store = useNotificationsStore()
+    const client = {
+      rpc: vi.fn(async () => ({
+        data: [{ workspace_id: 'workspace-1', project_id: 'project-1', role: 'editor' }],
+        error: null,
+      })),
+      from: vi.fn(() => ({
+        update: vi.fn(() => ({
+          eq: vi.fn(async () => ({ data: [], error: null })),
+        })),
+      })),
+    }
+
+    const result = await store.acceptInviteNotification(client as never, 'notification-1', 'invite-1')
+
+    expect(result).toEqual({ workspaceId: 'workspace-1', projectId: 'project-1', role: 'editor' })
+  })
 })

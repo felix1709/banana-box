@@ -17,6 +17,14 @@ interface CreateInviteInput {
   token?: string
 }
 
+interface CreateProjectUserInviteInput {
+  workspaceId: string
+  projectId: string
+  role: InviteRole
+  recipient: InviteRecipient
+  userId: string
+}
+
 interface MemberRow {
   workspace_id: string
   user_id: string
@@ -34,6 +42,12 @@ interface InviteRecipient {
   id: string
   email: string
   displayName: string
+}
+
+interface InviteAcceptanceRow {
+  workspace_id: string
+  project_id: string | null
+  role: InviteRole
 }
 
 async function tokenHash(token: string) {
@@ -71,6 +85,20 @@ function emailFromInviteIdentity(identity: string) {
 
 function escapeSupabaseOrValue(value: string) {
   return value.replace(/\\/g, '\\\\').replace(/,/g, '\\,')
+}
+
+function mapInviteRecipient(row: ProfileLookupRow): InviteRecipient {
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+  }
+}
+
+function firstInviteAcceptanceRow(data: unknown): InviteAcceptanceRow {
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row || typeof row !== 'object') throw new Error('INVITE_ACCEPTANCE_EMPTY')
+  return row as InviteAcceptanceRow
 }
 
 export const useMembersStore = defineStore('members', {
@@ -153,10 +181,53 @@ export const useMembersStore = defineStore('members', {
         displayName: rows[0].display_name,
       }
     },
+    async searchInviteRecipients(client: MemberClient, identity: string, excludeUserId?: string): Promise<InviteRecipient[]> {
+      const trimmed = identity.trim()
+      if (!trimmed) throw new Error('请输入用户昵称或账号')
+
+      const accountEmail = emailFromInviteIdentity(trimmed)
+      const escaped = escapeSupabaseOrValue(trimmed)
+      const filters = accountEmail
+        ? `email.eq.${escapeSupabaseOrValue(accountEmail)},display_name.ilike.*${escaped}*`
+        : `display_name.ilike.*${escaped}*`
+      const response = await client
+        .from('profiles')
+        .select('id, email, display_name')
+        .or(filters)
+        .limit(8)
+
+      if (response.error) throw new Error(response.error.message)
+      return ((response.data ?? []) as ProfileLookupRow[])
+        .filter((row) => row.id !== excludeUserId)
+        .map(mapInviteRecipient)
+    },
+    async createProjectUserInvite(client: MemberClient, input: CreateProjectUserInviteInput) {
+      const invite = await this.createInvite(client, {
+        appOrigin: 'banana-box://invite',
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        scopeType: 'project',
+        role: input.role,
+        email: input.recipient.email,
+        userId: input.userId,
+      })
+      const notificationResponse = await client.from('notifications').insert({
+        workspace_id: input.workspaceId,
+        recipient_user_id: input.recipient.id,
+        actor_user_id: input.userId,
+        kind: 'invite',
+        target_type: 'project_invite',
+        target_id: invite.id,
+        created_by: input.userId,
+        updated_by: input.userId,
+      })
+      if (notificationResponse.error) throw new Error(notificationResponse.error.message)
+      return invite
+    },
     async acceptInvite(client: InviteAcceptClient, token: string) {
       const response = await client.rpc('accept_invite', { invite_token: token.trim() })
       if (response.error) throw new Error(response.error.message)
-      const data = response.data as { workspace_id: string; project_id: string | null; role: InviteRole }
+      const data = firstInviteAcceptanceRow(response.data)
       return {
         workspaceId: data.workspace_id,
         projectId: data.project_id,
