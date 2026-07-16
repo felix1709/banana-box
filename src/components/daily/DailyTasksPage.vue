@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { AlarmClock, Check, ChevronLeft, ChevronRight, Copy, Plus, Trash2, X } from '@lucide/vue'
 import type { DailyTask } from '@/domain/production'
-import { useDailyTasksStore } from '@/stores/dailyTasks'
+import { localToday, useDailyTasksStore } from '@/stores/dailyTasks'
 import { useUiStore } from '@/stores/ui'
 import { getDailyReport } from '@/lib/productionIpc'
 import { copyToClipboard } from '@/lib/ipc'
@@ -24,6 +24,8 @@ const createPopoverStyle = ref<Record<string, string>>({})
 const editingTaskId = ref<string | null>(null)
 const editDraft = reactive({ title: '', note: '', reminderTime: '', reminderContent: '' })
 let reportCopyResetTimer: ReturnType<typeof window.setTimeout> | null = null
+let systemDate = localToday()
+let systemDateTimer: ReturnType<typeof window.setInterval> | null = null
 
 const reminderTask = computed(() => findTask(reminderTaskId.value))
 const editingTask = computed(() => findTask(editingTaskId.value))
@@ -195,6 +197,13 @@ function closeTaskEditor() {
   editingTaskId.value = null
 }
 
+function syncToCurrentSystemDate() {
+  const today = localToday()
+  if (today === systemDate) return
+  systemDate = today
+  void daily.selectDate(today)
+}
+
 async function saveTaskEditor() {
   const task = editingTask.value
   if (!task || !editDraft.title.trim()) return
@@ -209,12 +218,16 @@ async function saveTaskEditor() {
 
 watch(() => daily.selectedDate, resetReportCopied)
 onMounted(() => {
-  void daily.selectDate(daily.selectedDate)
+  systemDate = localToday()
+  void daily.selectDate(systemDate)
+  systemDateTimer = window.setInterval(syncToCurrentSystemDate, 60_000)
   document.addEventListener('click', closeReminderWhenClickingOutside)
   document.addEventListener('click', closeCreateWhenClickingOutside)
 })
 onBeforeUnmount(() => {
   resetReportCopied()
+  if (systemDateTimer !== null) window.clearInterval(systemDateTimer)
+  systemDateTimer = null
   document.removeEventListener('click', closeReminderWhenClickingOutside)
   document.removeEventListener('click', closeCreateWhenClickingOutside)
 })

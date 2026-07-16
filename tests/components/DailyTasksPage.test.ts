@@ -25,6 +25,8 @@ describe('DailyTasksPage', () => {
   })
 
   it('loads the selected date and lets the user move one day at a time', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-12T08:30:00+08:00'))
     const store = useDailyTasksStore()
     store.selectedDate = '2026-07-12'
     const selectDate = vi.spyOn(store, 'selectDate').mockResolvedValue()
@@ -38,6 +40,38 @@ describe('DailyTasksPage', () => {
 
     await wrapper.get('[data-action="next-day"]').trigger('click')
     expect(selectDate).toHaveBeenLastCalledWith('2026-07-13')
+  })
+
+  it('opens on the current system date even when the stored date is stale', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-16T08:30:00+08:00'))
+    const store = useDailyTasksStore()
+    store.selectedDate = '2026-07-15'
+    const selectDate = vi.spyOn(store, 'selectDate').mockImplementation(async (localDate: string) => {
+      store.selectedDate = localDate
+    })
+    const wrapper = mount(DailyTasksPage)
+    await wrapper.vm.$nextTick()
+
+    expect(selectDate).toHaveBeenCalledWith('2026-07-16')
+    expect((wrapper.get('[data-field="daily-date"]').element as HTMLInputElement).value).toBe('2026-07-16')
+  })
+
+  it('switches to the new system date while the daily page stays open across midnight', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-15T23:59:30+08:00'))
+    const store = useDailyTasksStore()
+    const selectDate = vi.spyOn(store, 'selectDate').mockImplementation(async (localDate: string) => {
+      store.selectedDate = localDate
+    })
+    mount(DailyTasksPage)
+
+    expect(selectDate).toHaveBeenCalledWith('2026-07-15')
+
+    vi.setSystemTime(new Date('2026-07-16T00:00:31+08:00'))
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(selectDate).toHaveBeenCalledWith('2026-07-16')
   })
 
   it('opens a secondary create popover and creates a task with the entered code, title, progress, and note', async () => {

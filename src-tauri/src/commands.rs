@@ -415,8 +415,40 @@ fn video_bitrate_kbps(target_mb: f64, duration_secs: f64, audio_kbps: u32) -> u3
     total_kbps.max(audio_kbps as f64 + 100.0).round() as u32 - audio_kbps
 }
 
+fn ffmpeg_tool_filename(tool_name: &str) -> String {
+    if cfg!(windows) {
+        format!("{tool_name}.exe")
+    } else {
+        tool_name.to_string()
+    }
+}
+
+fn default_ffmpeg_bin_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        std::env::var_os("ProgramFiles")
+            .map(PathBuf::from)
+            .map(|path| path.join("ffmpeg").join("bin"))
+    } else {
+        None
+    }
+}
+
+fn resolve_ffmpeg_tool(tool_name: &str, common_bin_dir: Option<&Path>) -> PathBuf {
+    if let Some(dir) = common_bin_dir {
+        let candidate = dir.join(ffmpeg_tool_filename(tool_name));
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    PathBuf::from(tool_name)
+}
+
+fn ffmpeg_tool_path(tool_name: &str) -> PathBuf {
+    resolve_ffmpeg_tool(tool_name, default_ffmpeg_bin_dir().as_deref())
+}
+
 fn ffprobe_duration_secs(source: &Path) -> Result<f64, String> {
-    let output = Command::new("ffprobe")
+    let output = Command::new(ffmpeg_tool_path("ffprobe"))
         .args([
             "-v",
             "error",
@@ -427,7 +459,7 @@ fn ffprobe_duration_secs(source: &Path) -> Result<f64, String> {
         ])
         .arg(source)
         .output()
-        .map_err(|_| "未找到 FFmpeg/ffprobe，请先安装 FFmpeg 并加入 PATH".to_string())?;
+        .map_err(|_| "未找到 ffprobe，请安装完整 FFmpeg（需要 ffmpeg 和 ffprobe）并加入 PATH".to_string())?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
@@ -441,7 +473,7 @@ fn compress_video_with_ffmpeg(source: &Path, output: &Path, target_mb: f64) -> R
     let duration = ffprobe_duration_secs(source)?;
     let audio_kbps = 128_u32;
     let video_kbps = video_bitrate_kbps(target_mb, duration, audio_kbps);
-    let status = Command::new("ffmpeg")
+    let status = Command::new(ffmpeg_tool_path("ffmpeg"))
         .arg("-y")
         .arg("-i")
         .arg(source)
@@ -463,7 +495,7 @@ fn compress_video_with_ffmpeg(source: &Path, output: &Path, target_mb: f64) -> R
         ])
         .arg(output)
         .status()
-        .map_err(|_| "未找到 FFmpeg，请先安装 FFmpeg 并加入 PATH".to_string())?;
+        .map_err(|_| "未找到 ffmpeg，请安装完整 FFmpeg（需要 ffmpeg 和 ffprobe）并加入 PATH".to_string())?;
     if status.success() {
         Ok(())
     } else {
@@ -739,6 +771,25 @@ mod tests {
     #[test]
     fn video_bitrate_uses_target_size_duration_and_audio_budget() {
         assert_eq!(video_bitrate_kbps(10.0, 10.0, 128), 8064);
+    }
+
+    #[test]
+    fn ffmpeg_tool_resolution_uses_common_install_dir_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let tool = dir.path().join(ffmpeg_tool_filename("ffmpeg"));
+        std::fs::write(&tool, b"").unwrap();
+
+        assert_eq!(resolve_ffmpeg_tool("ffmpeg", Some(dir.path())), tool);
+    }
+
+    #[test]
+    fn ffmpeg_tool_resolution_falls_back_to_command_name_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+
+        assert_eq!(
+            resolve_ffmpeg_tool("ffprobe", Some(dir.path())),
+            PathBuf::from("ffprobe")
+        );
     }
 
     #[test]

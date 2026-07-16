@@ -97,4 +97,21 @@ describe('FastCompressionPanel', () => {
 
     expect(wrapper.text()).toContain('movie.mp4')
   })
+
+  it('shows the backend compression error so users know what to fix', async () => {
+    mocks.open.mockResolvedValue('C:\\Users\\admin\\Desktop\\movie.mp4')
+    vi.mocked(suggestCompressedOutputPath).mockResolvedValue(
+      'C:\\Users\\admin\\Desktop\\movie_07010930.mp4',
+    )
+    mocks.save.mockResolvedValue('C:\\Users\\admin\\Desktop\\movie_07010930.mp4')
+    vi.mocked(compressMedia).mockRejectedValue(new Error('未找到 FFmpeg/ffprobe，请先安装 FFmpeg 并加入 PATH'))
+    const wrapper = mount(FastCompressionPanel)
+
+    await wrapper.find('.pick-file-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.find('.compress-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(wrapper.text()).toContain('未找到 FFmpeg/ffprobe')
+  })
 })

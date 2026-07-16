@@ -35,6 +35,12 @@ function resetProgress() {
   progressText.value = ''
 }
 
+function compressionErrorMessage(reason: unknown) {
+  if (reason instanceof Error && reason.message.trim()) return reason.message
+  if (typeof reason === 'string' && reason.trim()) return reason
+  return '压缩失败，请确认文件可用后重试'
+}
+
 async function pickFile() {
   const picked = await open({
     multiple: false,
@@ -82,8 +88,8 @@ async function onCompress() {
     outputPath.value = result.outputPath
     progress.value = 100
     progressText.value = '压缩完成'
-  } catch {
-    error.value = '压缩失败，请确认文件可用后重试'
+  } catch (reason) {
+    error.value = compressionErrorMessage(reason)
     resetProgress()
   } finally {
     loading.value = false
