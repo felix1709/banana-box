@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Pencil, Plus, Users, UserPlus } from '@lucide/vue'
+import { Archive, Pencil, Plus, RotateCcw, Trash2, Users, UserPlus } from '@lucide/vue'
 import { STAGE_DEFINITIONS, type Project, type StageKey } from '@/domain/production'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
@@ -26,6 +26,7 @@ const logTrigger = ref<HTMLButtonElement | null>(null)
 const logPopover = ref<HTMLElement | null>(null)
 const logPopoverStyle = ref<Record<string, string>>({})
 const scheduleRequestStatus = ref('')
+const archiveMode = ref(false)
 
 const selectedProject = computed(
   () =>
@@ -94,6 +95,10 @@ function projectOwnedByCurrentUser(project: Project) {
 
 function projectCanInvite(project: Project) {
   return projectOwnedByCurrentUser(project)
+}
+
+function projectCanManageArchive(project: Project) {
+  return Boolean(!auth.user || !project.ownerUserId || projectOwnedByCurrentUser(project))
 }
 
 function projectCanRequestScheduleChange(project: Project) {
@@ -192,6 +197,41 @@ async function toggleLogPopover() {
   if (logOpen.value) await positionLogPopover()
 }
 
+function toggleArchiveMode() {
+  archiveMode.value = !archiveMode.value
+  projects.filters.archived = archiveMode.value
+  detailOpen.value = false
+}
+
+async function archiveProjectCard(project: Project) {
+  if (!projectCanManageArchive(project)) return
+  try {
+    await projects.setArchived(project.id, true)
+  } catch (error) {
+    projects.error = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function restoreProjectCard(project: Project) {
+  if (!projectCanManageArchive(project)) return
+  try {
+    await projects.setArchived(project.id, false)
+  } catch (error) {
+    projects.error = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function deleteArchivedProjectCard(project: Project) {
+  if (!projectCanManageArchive(project) || !project.archived) return
+  const confirmed = window.confirm('确认永久删除这个归档项目吗？删除后不能恢复。')
+  if (!confirmed) return
+  try {
+    await projects.remove(project.id)
+  } catch (error) {
+    projects.error = error instanceof Error ? error.message : String(error)
+  }
+}
+
 async function toggleSelectedProjectPublic() {
   if (!selectedProject.value || !selectedProjectOwnedByCurrentUser.value) return
   await projects.setPublic(selectedProject.value.id, !selectedProject.value.isPublic)
@@ -216,6 +256,7 @@ function closeLogWhenClickingOutside(event: MouseEvent) {
 }
 
 onMounted(() => {
+  projects.filters.archived = archiveMode.value
   document.addEventListener('click', closeInviteWhenClickingOutside)
   document.addEventListener('click', closeLogWhenClickingOutside)
 })
@@ -289,6 +330,19 @@ onBeforeUnmount(() => {
           aria-label="筛选发布时间"
           type="date"
         >
+        <button
+          class="project-public-toggle"
+          type="button"
+          data-action="toggle-archived-projects"
+          :aria-pressed="archiveMode"
+          @click="toggleArchiveMode"
+        >
+          <Archive
+            :size="15"
+            aria-hidden="true"
+          />
+          {{ archiveMode ? '返回项目' : '归档项目' }}
+        </button>
         <button
           v-if="selectedProject && selectedProjectCanEditMetadata"
           class="project-toolbar-icon"
@@ -439,6 +493,59 @@ onBeforeUnmount(() => {
           <span class="project-note-version">{{ project.version }}</span>
           <strong>{{ project.name }}</strong>
           <span class="project-note-release">{{ project.releaseDate }}</span>
+          <div
+            v-if="projectCanManageArchive(project)"
+            class="project-note-actions"
+          >
+            <button
+              v-if="!project.archived"
+              class="project-note-action"
+              data-action="archive-project"
+              :data-project-id="project.id"
+              type="button"
+              title="归档项目"
+              aria-label="归档项目"
+              @click.stop="archiveProjectCard(project)"
+            >
+              <Archive
+                :size="13"
+                aria-hidden="true"
+              />
+              归档
+            </button>
+            <template v-else>
+              <button
+                class="project-note-action"
+                data-action="restore-project"
+                :data-project-id="project.id"
+                type="button"
+                title="恢复项目"
+                aria-label="恢复项目"
+                @click.stop="restoreProjectCard(project)"
+              >
+                <RotateCcw
+                  :size="13"
+                  aria-hidden="true"
+                />
+                恢复
+              </button>
+              <button
+                class="project-note-action danger"
+                data-action="delete-archived-project"
+                :data-project-id="project.id"
+                type="button"
+                title="永久删除项目"
+                aria-label="永久删除项目"
+                @click.stop="deleteArchivedProjectCard(project)"
+              >
+                <Trash2
+                  :size="13"
+                  aria-hidden="true"
+                />
+                删除
+              </button>
+            </template>
+          </div>
           <button
             v-if="projectCanInvite(project)"
             class="project-note-invite"
@@ -822,6 +929,46 @@ onBeforeUnmount(() => {
 .project-note-release {
   margin-top: auto;
   color: var(--bb-text-soft);
+}
+
+.project-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.project-note-action {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
+  border-color: rgba(148, 179, 188, 0.24);
+  background: rgba(148, 179, 188, 0.08);
+  color: var(--bb-text-soft);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.project-note-action:hover:not(:disabled),
+.project-note-action:focus-visible {
+  border-color: rgba(123, 255, 226, 0.42);
+  background: rgba(123, 255, 226, 0.1);
+  color: var(--bb-primary);
+}
+
+.project-note-action.danger {
+  border-color: rgba(255, 100, 122, 0.28);
+  background: rgba(255, 100, 122, 0.08);
+  color: #ff9cab;
+}
+
+.project-note-action.danger:hover:not(:disabled),
+.project-note-action.danger:focus-visible {
+  border-color: rgba(255, 100, 122, 0.5);
+  background: rgba(255, 100, 122, 0.14);
+  color: #ffc0ca;
 }
 
 .project-note-invite {

@@ -161,6 +161,9 @@ export const useCloudMigrationStore = defineStore('cloudMigration', {
       const library = useLibraryStore()
       const projects = useProjectsStore()
       const daily = useDailyTasksStore()
+      const personalPrompts = library.library.prompts.filter(
+        (prompt) => prompt.sourceType !== 'shared' && !prompt.sharedPromptId,
+      )
 
       try {
         if (library.library.categories.length > 0) {
@@ -178,9 +181,9 @@ export const useCloudMigrationStore = defineStore('cloudMigration', {
           if (response.error) throw new Error(response.error.message)
         }
 
-        if (library.library.prompts.length > 0) {
+        if (personalPrompts.length > 0) {
           const promptResponse = await auth.client.from('prompts').upsert(
-            library.library.prompts.map((prompt) => ({
+            personalPrompts.map((prompt) => ({
               id: prompt.id,
               workspace_id: workspaceId,
               category_id: prompt.categoryId,
@@ -196,7 +199,7 @@ export const useCloudMigrationStore = defineStore('cloudMigration', {
           )
           if (promptResponse.error) throw new Error(promptResponse.error.message)
 
-          const tags = library.library.prompts.flatMap((prompt) =>
+          const tags = personalPrompts.flatMap((prompt) =>
             prompt.tags.map((tag) => ({ prompt_id: prompt.id, tag })),
           )
           if (tags.length > 0) {

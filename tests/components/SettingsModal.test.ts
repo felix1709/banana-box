@@ -232,6 +232,7 @@ describe('SettingsModal', () => {
     expect(copyToClipboard).toHaveBeenCalledWith(expect.stringContaining('notifications insertable by workspace collaborators'))
     expect(copyToClipboard).toHaveBeenCalledWith(expect.stringContaining('extensions.digest(invite_token'))
     expect(copyToClipboard).toHaveBeenCalledWith(expect.stringContaining('on conflict on constraint project_members_pkey'))
+    expect(copyToClipboard).toHaveBeenCalledWith(expect.stringContaining('create table if not exists public.shared_prompts'))
     expect(wrapper.find('.cloud-status').text()).toContain('SQL')
   })
 

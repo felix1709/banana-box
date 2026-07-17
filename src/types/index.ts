@@ -49,6 +49,20 @@ export interface Prompt {
   order: number
   createdAt: number
   updatedAt: number
+  sourceType?: 'local' | 'shared'
+  sharedPromptId?: string | null
+}
+
+export interface SharedPrompt {
+  id: string
+  title: string
+  content: string
+  tags: string[]
+  image: string | null
+  createdBy: string
+  createdByName: string
+  createdAt: string
+  updatedAt: string
 }
 
 export interface Settings {

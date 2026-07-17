@@ -4,6 +4,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PromptCard from '@/components/PromptCard.vue'
 import { useLibraryStore } from '@/stores/library'
+import { useAuthStore } from '@/stores/auth'
+import { useSharedLibraryStore } from '@/stores/sharedLibrary'
 import type { Library, Prompt } from '@/types'
 
 vi.mock('@/lib/ipc', () => ({
@@ -128,6 +130,42 @@ describe('PromptCard', () => {
     await wrapper.trigger('dblclick')
 
     expect(ipc.copyToClipboard).toHaveBeenCalledWith(prompt.content)
+  })
+
+  it('uploads a local prompt to the shared library and asks for a new title when duplicated', async () => {
+    useAuthStore().user = { id: 'user-1', email: '000001@banana-box.local' } as never
+    const shared = useSharedLibraryStore()
+    const upload = vi
+      .spyOn(shared, 'uploadLocalPrompt')
+      .mockResolvedValueOnce({ status: 'duplicate' })
+      .mockResolvedValueOnce({ status: 'uploaded' })
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Prompt A shared')
+    const wrapper = mount(PromptCard, { props: { prompt } })
+
+    await wrapper.get('[data-action="upload-shared-prompt"]').trigger('click')
+
+    expect(upload).toHaveBeenNthCalledWith(1, expect.objectContaining({ id: 'p1' }))
+    expect(promptSpy).toHaveBeenCalled()
+    expect(upload).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'p1' }), 'Prompt A shared')
+  })
+
+  it('disables the shared upload button while uploading', async () => {
+    useAuthStore().user = { id: 'user-1', email: '000001@banana-box.local' } as never
+    const shared = useSharedLibraryStore()
+    let finishUpload: (value: { status: 'uploaded' }) => void = () => {}
+    vi.spyOn(shared, 'uploadLocalPrompt').mockReturnValue(
+      new Promise((resolve) => {
+        finishUpload = resolve
+      }) as ReturnType<typeof shared.uploadLocalPrompt>,
+    )
+    const wrapper = mount(PromptCard, { props: { prompt } })
+
+    await wrapper.get('[data-action="upload-shared-prompt"]').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('[data-action="upload-shared-prompt"]').attributes('disabled')).toBeDefined()
+
+    finishUpload({ status: 'uploaded' })
   })
 
   it('copies on double click and leaves the prompt collapsed', async () => {

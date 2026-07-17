@@ -3,7 +3,7 @@
 
 import { defineStore } from 'pinia'
 import { v4 as uuid } from 'uuid'
-import type { Library, Prompt, Category } from '@/types'
+import type { Library, Prompt, Category, SharedPrompt } from '@/types'
 import * as ipc from '@/lib/ipc'
 
 export const FAVORITES_CATEGORY_ID = '__favorites__'
@@ -22,6 +22,8 @@ function normalizeLibrary(library: Library): Library {
       ...prompt,
       favorite: prompt.favorite ?? false,
       order: prompt.order ?? index,
+      sourceType: prompt.sourceType ?? 'local',
+      sharedPromptId: prompt.sharedPromptId ?? null,
     })),
     settings: normalizeSettings(library.settings),
   }
@@ -96,6 +98,33 @@ export const useLibraryStore = defineStore('library', {
       }
       this.library.prompts.push(p)
       this.persist()
+    },
+    addSharedPromptReference(sharedPrompt: SharedPrompt) {
+      const existing = this.library.prompts.find((prompt) => prompt.sharedPromptId === sharedPrompt.id)
+      if (existing) return existing
+
+      const now = Math.floor(Date.now() / 1000)
+      const nextOrder =
+        this.library.prompts.length === 0
+          ? 0
+          : Math.max(...this.library.prompts.map((prompt) => prompt.order)) + 1
+      const prompt: Prompt = {
+        id: `shared-${sharedPrompt.id}`,
+        title: sharedPrompt.title,
+        content: sharedPrompt.content,
+        categoryId: null,
+        tags: [...sharedPrompt.tags],
+        image: sharedPrompt.image,
+        favorite: false,
+        order: nextOrder,
+        createdAt: now,
+        updatedAt: now,
+        sourceType: 'shared',
+        sharedPromptId: sharedPrompt.id,
+      }
+      this.library.prompts.push(prompt)
+      this.persist()
+      return prompt
     },
     updatePrompt(id: string, patch: Partial<Prompt>) {
       const p = this.library.prompts.find((x) => x.id === id)

@@ -6,6 +6,7 @@ import CategoryTree from '@/components/CategoryTree.vue'
 const ui = useUiStore()
 
 const tools: { id: ActiveTool; label: string }[] = [
+  { id: 'shared-library', label: '共享库' },
   { id: 'prompts', label: '提示词库' },
   { id: 'reverse-image', label: '反推图片' },
   { id: 'compression', label: '快速压缩' },

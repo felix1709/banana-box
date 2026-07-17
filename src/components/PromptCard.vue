@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watchEffect, onMounted, onUnmounted, type CSSProperties } from 'vue'
+import { UploadCloud } from '@lucide/vue'
 import { useLibraryStore } from '@/stores/library'
+import { useAuthStore } from '@/stores/auth'
+import { useSharedLibraryStore } from '@/stores/sharedLibrary'
 import { useUiStore } from '@/stores/ui'
 import { readImageBytes, saveImage } from '@/lib/ipc'
 import type { Prompt } from '@/types'
@@ -21,6 +24,8 @@ const emit = defineEmits<{
   'sort-end': []
 }>()
 const lib = useLibraryStore()
+const auth = useAuthStore()
+const shared = useSharedLibraryStore()
 const ui = useUiStore()
 const url = ref('')
 const localExpanded = ref(false)
@@ -31,6 +36,7 @@ const dragOffsetX = ref(0)
 const dragOffsetY = ref(0)
 const dragFrame = ref<{ left: number; top: number; width: number; height: number } | null>(null)
 const suppressNextClick = ref(false)
+const uploadingShared = ref(false)
 const cardRef = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const isExpanded = computed(() => props.expanded ?? localExpanded.value)
@@ -193,6 +199,28 @@ function onClick(e: MouseEvent) {
 
 function onDoubleClick() {
   void onCopy()
+}
+
+async function onUploadShared() {
+  if (uploadingShared.value) return
+  uploadingShared.value = true
+  try {
+    const result = await shared.uploadLocalPrompt(currentPrompt.value)
+    if (result.status === 'duplicate') {
+      const renamedTitle = window.prompt('共享库里已有同名提示词，请修改标题后再上传。', currentPrompt.value.title)
+      if (!renamedTitle?.trim()) return
+      const retry = await shared.uploadLocalPrompt(currentPrompt.value, renamedTitle.trim())
+      if (retry.status === 'duplicate') {
+        ui.showToast('共享库标题仍重复')
+        return
+      }
+    }
+    ui.showToast('已上传共享库')
+  } catch (error) {
+    ui.showToast(error instanceof Error ? error.message : String(error))
+  } finally {
+    uploadingShared.value = false
+  }
 }
 
 async function onCopy() {
@@ -458,6 +486,22 @@ function onPointerEnter() {
         accept="image/png,image/jpeg,image/webp,image/gif"
         @change="onPickImage"
       >
+      <button
+        v-if="auth.user && currentPrompt.sourceType !== 'shared'"
+        type="button"
+        class="upload-shared-button"
+        data-action="upload-shared-prompt"
+        title="上传共享库"
+        aria-label="上传共享库"
+        :disabled="uploadingShared"
+        @pointerdown.stop
+        @click.stop="onUploadShared"
+      >
+        <UploadCloud
+          :size="14"
+          aria-hidden="true"
+        />
+      </button>
     </div>
 
     <ConfirmDialog
@@ -727,6 +771,28 @@ function onPointerEnter() {
 .file-input {
   display: none;
 }
+
+.upload-shared-button {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  display: grid;
+  width: 28px;
+  min-height: 24px;
+  place-items: center;
+  padding: 0;
+  border-color: rgba(123, 255, 226, 0.28);
+  background: rgba(123, 255, 226, 0.08);
+  color: var(--bb-primary);
+}
+
+.upload-shared-button:hover,
+.upload-shared-button:focus-visible {
+  border-color: rgba(123, 255, 226, 0.52);
+  background: rgba(123, 255, 226, 0.14);
+  color: var(--bb-primary-strong);
+}
+
 .action-panel {
   position: relative;
 }

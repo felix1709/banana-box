@@ -186,6 +186,31 @@ describe('cloud collaboration schema', () => {
     expect(sql).toContain('alter publication supabase_realtime add table public.project_schedule_change_requests')
   })
 
+  it('allows project collaborators to comment and create project-scoped notifications', () => {
+    const sql = readMigration('0014_project_collaboration_rls_fixes.sql')
+
+    expect(sql).toContain('comments readable by project collaborators')
+    expect(sql).toContain('comments insertable by project collaborators')
+    expect(sql).toContain("target_type = 'project'")
+    expect(sql).toContain('public.can_comment_project(target_id)')
+    expect(sql).toContain('notifications insertable by project collaborators')
+    expect(sql).toContain("target_type = 'project_schedule_request'")
+    expect(sql).toContain('public.project_schedule_change_requests r')
+    expect(sql).toContain('public.can_comment_project(r.project_id)')
+  })
+
+  it('adds a global shared prompt library with reference rows instead of duplicate prompt copies', () => {
+    const sql = readMigration('0015_shared_prompt_library.sql')
+
+    expect(sql).toContain('create table if not exists public.shared_prompts')
+    expect(sql).toContain('create table if not exists public.user_prompt_refs')
+    expect(sql).toContain('title_key text not null')
+    expect(sql).toContain('shared prompts readable by authenticated users')
+    expect(sql).toContain('shared prompts insertable by authenticated users')
+    expect(sql).toContain('shared prompt refs owned by users')
+    expect(sql).toContain('shared_prompts_title_key_unique')
+  })
+
   it('makes copied RLS policies safe to run more than once', () => {
     for (const migration of [
       '0001_auth_workspaces.sql',

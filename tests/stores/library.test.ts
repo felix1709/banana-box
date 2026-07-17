@@ -149,4 +149,11 @@ describe('library store', () => {
     expect(s.library.settings).toEqual({ hotkey: 'Ctrl+Shift+B', theme: 'auto' })
     expect(JSON.stringify(s.library.settings)).not.toContain('apiKey')
   })
+
+  it('normalizes old prompts with local source defaults', () => {
+    const s = useLibraryStore()
+
+    expect(s.library.prompts[0].sourceType).toBe('local')
+    expect(s.library.prompts[0].sharedPromptId).toBeNull()
+  })
 })

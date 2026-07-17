@@ -8,7 +8,7 @@ import { useMembersStore } from '@/stores/members'
 import { useProjectsStore } from '@/stores/projects'
 import { useScheduleRequestsStore } from '@/stores/scheduleRequests'
 import { useWorkspacesStore } from '@/stores/workspaces'
-import { setProjectPublic } from '@/lib/productionIpc'
+import { archiveProject, deleteProject, setProjectPublic } from '@/lib/productionIpc'
 
 vi.mock('@/lib/productionIpc', () => ({
   archiveProject: vi.fn(),
@@ -27,6 +27,7 @@ describe('ProjectBoardPage', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     wrappers = []
+    vi.clearAllMocks()
     setActivePinia(createPinia())
   })
 
@@ -304,6 +305,86 @@ describe('ProjectBoardPage', () => {
 
     await wrapper.get('[data-project-note="p-late"]').trigger('click')
     expect(wrapper.find('[data-project-timeline="p-late"]').exists()).toBe(true)
+  })
+
+  it('shows active projects by default and switches to archived project management', async () => {
+    const store = useProjectsStore()
+    store.hydrate([
+      project({ id: 'active-project', code: 'A01', archived: false }),
+      project({ id: 'archived-project', code: 'Z99', archived: true }),
+    ])
+
+    const wrapper = mountBoard()
+
+    expect(wrapper.find('[data-project-note="active-project"]').exists()).toBe(true)
+    expect(wrapper.find('[data-project-note="archived-project"]').exists()).toBe(false)
+
+    await wrapper.get('[data-action="toggle-archived-projects"]').trigger('click')
+
+    expect(store.filters.archived).toBe(true)
+    expect(wrapper.find('[data-project-note="active-project"]').exists()).toBe(false)
+    expect(wrapper.find('[data-project-note="archived-project"]').exists()).toBe(true)
+  })
+
+  it('lets the project creator archive and restore projects from the board', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user-1' } as never
+    const store = useProjectsStore()
+    store.hydrate([project({ id: 'p1', ownerUserId: 'user-1', archived: false })])
+    vi.mocked(archiveProject).mockImplementation(async (projectId, archived) => ({
+      ...store.projects.find((item) => item.id === projectId)!,
+      archived,
+    }))
+    const wrapper = mountBoard()
+
+    await wrapper.get('[data-action="archive-project"][data-project-id="p1"]').trigger('click')
+    await flushPromises()
+
+    expect(archiveProject).toHaveBeenCalledWith('p1', true)
+    expect(store.projects.find((item) => item.id === 'p1')?.archived).toBe(true)
+
+    await wrapper.get('[data-action="toggle-archived-projects"]').trigger('click')
+    await wrapper.get('[data-action="restore-project"][data-project-id="p1"]').trigger('click')
+    await flushPromises()
+
+    expect(archiveProject).toHaveBeenLastCalledWith('p1', false)
+    expect(store.projects.find((item) => item.id === 'p1')?.archived).toBe(false)
+  })
+
+  it('lets only the project creator permanently delete archived projects after confirmation', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user-1' } as never
+    const store = useProjectsStore()
+    store.hydrate([project({ id: 'p1', ownerUserId: 'user-1', archived: true })])
+    vi.mocked(deleteProject).mockResolvedValue(undefined)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mountBoard()
+
+    await wrapper.get('[data-action="toggle-archived-projects"]').trigger('click')
+    await wrapper.get('[data-action="delete-archived-project"][data-project-id="p1"]').trigger('click')
+    await flushPromises()
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(deleteProject).toHaveBeenCalledWith('p1')
+    expect(store.projects.find((item) => item.id === 'p1')).toBeUndefined()
+  })
+
+  it('does not show archive or delete controls to collaborators', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user-2' } as never
+    const store = useProjectsStore()
+    store.hydrate([
+      project({ id: 'active-project', ownerUserId: 'user-1', archived: false, isPublic: true }),
+      project({ id: 'archived-project', ownerUserId: 'user-1', archived: true, isPublic: true }),
+    ])
+    const wrapper = mountBoard()
+
+    expect(wrapper.find('[data-action="archive-project"]').exists()).toBe(false)
+
+    await wrapper.get('[data-action="toggle-archived-projects"]').trigger('click')
+
+    expect(wrapper.find('[data-action="restore-project"]').exists()).toBe(false)
+    expect(wrapper.find('[data-action="delete-archived-project"]').exists()).toBe(false)
   })
 })
 

@@ -18,6 +18,11 @@ describe('AppSidebar', () => {
     expect(wrapper.text()).toContain('反推图片')
     expect(wrapper.text()).toContain('快速压缩')
 
+    expect(wrapper.findAll('.tool-button')[0].attributes('data-tool')).toBe('shared-library')
+
+    await wrapper.find('[data-tool="shared-library"]').trigger('click')
+    expect(ui.activeTool).toBe('shared-library')
+
     await wrapper.find('[data-tool="reverse-image"]').trigger('click')
     expect(ui.activeTool).toBe('reverse-image')
 

@@ -27,6 +27,8 @@ import notificationsInsertPolicySql from '../../supabase/migrations/0010_notific
 import inviteDigestExtensionPathSql from '../../supabase/migrations/0011_invite_digest_extension_path.sql?raw'
 import inviteAcceptanceConflictTargetsSql from '../../supabase/migrations/0012_invite_acceptance_conflict_targets.sql?raw'
 import projectScheduleChangeRequestsSql from '../../supabase/migrations/0013_project_schedule_change_requests.sql?raw'
+import projectCollaborationRlsFixesSql from '../../supabase/migrations/0014_project_collaboration_rls_fixes.sql?raw'
+import sharedPromptLibrarySql from '../../supabase/migrations/0015_shared_prompt_library.sql?raw'
 import { checkAiProviderConnection } from '@/lib/provider-ipc'
 import {
   commitLegacyImport,
@@ -82,7 +84,7 @@ const autostartEnabled = ref(false)
 const loadingAutostart = ref(true)
 const savingAutostart = ref(false)
 const autostartError = ref('')
-const cloudSetupSql = `${authWorkspaceSql.trim()}\n\n${contentCollaborationSql.trim()}\n\n${inviteAcceptanceRealtimeSql.trim()}\n\n${workspaceBootstrapFixSql.trim()}\n\n${profileBootstrapFixSql.trim()}\n\n${dailyTaskRemindersSql.trim()}\n\n${projectLevelCollaborationSql.trim()}\n\n${projectInviteNotificationsSql.trim()}\n\n${profileDisplayNameRpcSql.trim()}\n\n${notificationsInsertPolicySql.trim()}\n\n${inviteDigestExtensionPathSql.trim()}\n\n${inviteAcceptanceConflictTargetsSql.trim()}\n\n${projectScheduleChangeRequestsSql.trim()}\n`
+const cloudSetupSql = `${authWorkspaceSql.trim()}\n\n${contentCollaborationSql.trim()}\n\n${inviteAcceptanceRealtimeSql.trim()}\n\n${workspaceBootstrapFixSql.trim()}\n\n${profileBootstrapFixSql.trim()}\n\n${dailyTaskRemindersSql.trim()}\n\n${projectLevelCollaborationSql.trim()}\n\n${projectInviteNotificationsSql.trim()}\n\n${profileDisplayNameRpcSql.trim()}\n\n${notificationsInsertPolicySql.trim()}\n\n${inviteDigestExtensionPathSql.trim()}\n\n${inviteAcceptanceConflictTargetsSql.trim()}\n\n${projectScheduleChangeRequestsSql.trim()}\n\n${projectCollaborationRlsFixesSql.trim()}\n\n${sharedPromptLibrarySql.trim()}\n`
 
 onMounted(async () => {
   await Promise.all([refreshAutostart(), loadApiProviders(), loadCloudSettings()])

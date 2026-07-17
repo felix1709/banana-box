@@ -31,6 +31,7 @@ import DailyTasksPage from '@/components/daily/DailyTasksPage.vue'
 import StoryboardPage from '@/components/storyboard/StoryboardPage.vue'
 import CloudMigrationDialog from '@/components/cloud/CloudMigrationDialog.vue'
 import UserCloudMenu from '@/components/cloud/UserCloudMenu.vue'
+import SharedLibraryPage from '@/components/shared/SharedLibraryPage.vue'
 
 const lib = useLibraryStore()
 const projects = useProjectsStore()
@@ -548,8 +549,9 @@ watchEffect(async () => {
         <AppSidebar />
       </aside>
       <main class="content">
+        <SharedLibraryPage v-if="ui.activeTool === 'shared-library'" />
         <section
-          v-if="ui.activeTool === 'prompts'"
+          v-else-if="ui.activeTool === 'prompts'"
           class="prompt-library"
         >
           <TransitionGroup
