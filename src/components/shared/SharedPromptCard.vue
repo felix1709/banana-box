@@ -231,6 +231,14 @@ async function deletePrompt() {
   box-shadow: var(--bb-shadow-floating);
 }
 
+.card.flow-expanded-card {
+  height: auto;
+  min-height: 104px;
+  max-height: none;
+  align-self: stretch;
+  flex: 0 0 auto;
+}
+
 .card:hover,
 .card:focus-visible {
   border-color: rgba(123, 255, 226, 0.34);
@@ -248,9 +256,16 @@ async function deletePrompt() {
   min-height: 100%;
 }
 
+.card.expanded .card-main {
+  height: auto;
+  min-height: 0;
+  align-items: start;
+}
+
 .card-main.flow-card-main {
   height: auto;
   min-height: auto;
+  align-items: start;
   grid-auto-rows: max-content;
 }
 
@@ -299,8 +314,10 @@ async function deletePrompt() {
 .card.expanded .content {
   display: block;
   height: auto;
+  min-height: 0;
   max-height: none;
   overflow: visible;
+  position: static;
   -webkit-line-clamp: unset;
 }
 

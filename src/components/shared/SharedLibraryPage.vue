@@ -143,11 +143,13 @@ function downloadPrompt(prompt: SharedPrompt) {
 }
 
 .shared-library-list {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   min-height: 0;
   flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 14px;
 }
 

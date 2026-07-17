@@ -29,7 +29,13 @@ describe('SharedPromptCard', () => {
 
     expect(wrapper.classes()).toContain('expanded')
     expect(wrapper.classes()).toContain('expanded-auto-height-card')
+    expect(wrapper.classes()).toContain('flow-expanded-card')
+    expect(wrapper.classes()).not.toContain('fixed-size-prompt-card')
+    expect(wrapper.find('.card-main').classes()).toContain('flow-card-main')
+    expect(wrapper.find('.text-pane').classes()).toContain('flow-text-pane')
     expect(wrapper.find('.content').classes()).toContain('full-content')
+    expect(wrapper.find('.content').classes()).toContain('flow-content')
+    expect(wrapper.find('.tags').classes()).toContain('full-tags')
     expect(wrapper.find('.actions').exists()).toBe(true)
   })
 
