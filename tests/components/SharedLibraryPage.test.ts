@@ -52,6 +52,7 @@ describe('SharedLibraryPage', () => {
     const wrapper = mount(SharedLibraryPage)
     await flushPromises()
 
+    await wrapper.get('[data-shared-prompt-card="shared-1"]').trigger('click')
     await wrapper.get('[data-action="download-shared-prompt"][data-shared-prompt-id="shared-1"]').trigger('click')
 
     expect(useLibraryStore().library.prompts).toHaveLength(1)
@@ -109,6 +110,7 @@ describe('SharedLibraryPage', () => {
     const wrapper = mount(SharedLibraryPage)
     await flushPromises()
 
+    await wrapper.get('[data-shared-prompt-card="shared-1"]').trigger('click')
     const downloadButton = wrapper.get('[data-action="download-shared-prompt"][data-shared-prompt-id="shared-1"]')
     expect(downloadButton.attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-shared-prompt-card="shared-1"]').text()).toContain('已下载')

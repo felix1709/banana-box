@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
-import { Copy, Download, RefreshCw } from '@lucide/vue'
+import { RefreshCw } from '@lucide/vue'
 import { useSharedLibraryStore } from '@/stores/sharedLibrary'
 import { useUiStore } from '@/stores/ui'
+import SharedPromptCard from '@/components/shared/SharedPromptCard.vue'
 import type { SharedPrompt } from '@/types'
 
 const shared = useSharedLibraryStore()
@@ -62,65 +63,13 @@ function downloadPrompt(prompt: SharedPrompt) {
     </p>
 
     <div class="shared-library-list scrollable-panel">
-      <article
+      <SharedPromptCard
         v-for="prompt in shared.filteredPrompts"
         :key="prompt.id"
-        class="shared-prompt-card"
-        :data-shared-prompt-card="prompt.id"
-        tabindex="0"
-        @dblclick="copyPrompt(prompt)"
-        @keydown.enter.prevent="copyPrompt(prompt)"
-      >
-        <div class="shared-prompt-main">
-          <strong>{{ prompt.title }}</strong>
-          <p>{{ prompt.content }}</p>
-          <div class="shared-prompt-tags">
-            <span
-              v-for="tag in prompt.tags"
-              :key="tag"
-            >
-              {{ tag }}
-            </span>
-          </div>
-          <small>{{ prompt.createdByName || '共享用户' }}</small>
-          <span
-            v-if="shared.hasLocalReference(prompt.id)"
-            class="shared-prompt-downloaded"
-          >
-            已下载
-          </span>
-        </div>
-
-        <div class="shared-prompt-actions">
-          <button
-            type="button"
-            title="复制"
-            aria-label="复制"
-            data-action="copy-shared-prompt"
-            :data-shared-prompt-id="prompt.id"
-            @click.stop="copyPrompt(prompt)"
-          >
-            <Copy
-              :size="14"
-              aria-hidden="true"
-            />
-          </button>
-          <button
-            type="button"
-            title="下载到本地"
-            aria-label="下载到本地"
-            data-action="download-shared-prompt"
-            :data-shared-prompt-id="prompt.id"
-            :disabled="shared.hasLocalReference(prompt.id)"
-            @click.stop="downloadPrompt(prompt)"
-          >
-            <Download
-              :size="14"
-              aria-hidden="true"
-            />
-          </button>
-        </div>
-      </article>
+        :prompt="prompt"
+        @copy="copyPrompt"
+        @download="downloadPrompt"
+      />
 
       <p
         v-if="!shared.loading && shared.filteredPrompts.length === 0"
@@ -200,106 +149,6 @@ function downloadPrompt(prompt: SharedPrompt) {
   min-height: 0;
   flex: 1;
   padding: 14px;
-}
-
-.shared-prompt-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  min-height: 104px;
-  padding: 11px;
-  border: 1px solid rgba(148, 179, 188, 0.18);
-  border-radius: var(--bb-radius-sm);
-  background:
-    linear-gradient(180deg, rgba(20, 35, 47, 0.96), rgba(9, 21, 31, 0.96));
-  box-shadow: var(--bb-shadow-card);
-  cursor: pointer;
-}
-
-.shared-prompt-card:hover,
-.shared-prompt-card:focus-visible {
-  border-color: rgba(123, 255, 226, 0.42);
-  outline: none;
-  box-shadow: var(--bb-shadow-floating);
-}
-
-.shared-prompt-main {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
-.shared-prompt-main strong {
-  overflow: hidden;
-  color: var(--bb-text);
-  font-size: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shared-prompt-main p {
-  display: -webkit-box;
-  height: 4.05em;
-  margin: 0;
-  overflow: hidden;
-  color: var(--bb-text-muted);
-  font-size: 11px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-.shared-prompt-main small {
-  color: var(--bb-text-soft);
-  font-family: var(--bb-mono);
-  font-size: 10px;
-}
-
-.shared-prompt-downloaded {
-  justify-self: start;
-  padding: 2px 7px;
-  border: 1px solid rgba(123, 255, 226, 0.3);
-  border-radius: var(--bb-radius-xs);
-  background: rgba(123, 255, 226, 0.08);
-  color: var(--bb-primary);
-  font-size: 10px;
-  font-weight: 650;
-}
-
-.shared-prompt-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  min-width: 0;
-}
-
-.shared-prompt-tags span {
-  max-width: 100%;
-  overflow: hidden;
-  padding: 1px 6px;
-  border: 1px solid rgba(102, 247, 211, 0.16);
-  border-radius: 999px;
-  background: rgba(102, 247, 211, 0.08);
-  color: #b5d3dc;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shared-prompt-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.shared-prompt-actions button {
-  display: grid;
-  width: 28px;
-  min-height: 28px;
-  place-items: center;
-  padding: 0;
 }
 
 .shared-library-empty {

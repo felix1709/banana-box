@@ -152,5 +152,22 @@ export const useSharedLibraryStore = defineStore('sharedLibrary', {
       if (!prompt) return
       await copyToClipboard(prompt.content)
     },
+
+    async deleteSharedPrompt(promptId: string) {
+      const auth = useAuthStore()
+      if (!auth.client || !auth.user) throw new Error('请先登录后再删除共享提示词')
+      if (!auth.isCloudAdmin) throw new Error('只有管理员可以删除共享提示词')
+
+      const response = await auth.client
+        .from('shared_prompts')
+        .update({
+          deleted_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          updated_by: auth.user.id,
+        })
+        .eq('id', promptId)
+      if (response.error) throw new Error(response.error.message)
+      this.prompts = this.prompts.filter((prompt) => prompt.id !== promptId)
+    },
   },
 })

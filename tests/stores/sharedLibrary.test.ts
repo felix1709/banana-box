@@ -119,6 +119,23 @@ describe('shared library store', () => {
 
     expect(shared.hasLocalReference('shared-1')).toBe(true)
   })
+
+  it('soft deletes shared prompts from the cloud and local list', async () => {
+    const auth = useAuthStore()
+    const client = sharedClientMock({ duplicate: false })
+    auth.user = { id: 'admin', email: '000001@banana-box.local' } as never
+    auth.client = client as never
+    const shared = useSharedLibraryStore()
+    shared.hydrate([sharedPrompt()])
+
+    await shared.deleteSharedPrompt('shared-1')
+
+    expect(client.updatedRows[0]).toMatchObject({
+      updated_by: 'admin',
+    })
+    expect(client.updatedRows[0]).toHaveProperty('deleted_at')
+    expect(shared.prompts).toHaveLength(0)
+  })
 })
 
 function localPrompt(overrides: Partial<Prompt> = {}): Prompt {
@@ -154,8 +171,10 @@ function sharedPrompt(overrides: Partial<SharedPrompt> = {}): SharedPrompt {
 
 function sharedClientMock(options: { duplicate: boolean }) {
   const insertedRows: unknown[] = []
+  const updatedRows: unknown[] = []
   return {
     insertedRows,
+    updatedRows,
     from: vi.fn(() => ({
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
@@ -176,6 +195,12 @@ function sharedClientMock(options: { duplicate: boolean }) {
               error: null,
             })),
           })),
+        }
+      }),
+      update: vi.fn((row: unknown) => {
+        updatedRows.push(row)
+        return {
+          eq: vi.fn(async () => ({ data: [], error: null })),
         }
       }),
     })),

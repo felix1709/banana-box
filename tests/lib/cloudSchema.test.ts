@@ -211,6 +211,14 @@ describe('cloud collaboration schema', () => {
     expect(sql).toContain('shared_prompts_title_key_unique')
   })
 
+  it('allows the 000001 administrator to moderate shared prompts', () => {
+    const sql = readMigration('0016_shared_prompt_admin_delete.sql')
+
+    expect(sql).toContain('shared prompts editable by authors and admin')
+    expect(sql).toContain("lower(p.email) = '000001@banana-box.local'")
+    expect(sql).toContain('deleted_at')
+  })
+
   it('makes copied RLS policies safe to run more than once', () => {
     for (const migration of [
       '0001_auth_workspaces.sql',
