@@ -4,6 +4,7 @@ import { Pencil, Plus, Users, UserPlus } from '@lucide/vue'
 import { STAGE_DEFINITIONS, type Project, type StageKey } from '@/domain/production'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
+import { useScheduleRequestsStore } from '@/stores/scheduleRequests'
 import { useWorkspacesStore } from '@/stores/workspaces'
 import InviteDialog from '@/components/collaboration/InviteDialog.vue'
 import CommentPanel from '@/components/collaboration/CommentPanel.vue'
@@ -12,6 +13,7 @@ import ProjectTimeline from './ProjectTimeline.vue'
 
 const auth = useAuthStore()
 const projects = useProjectsStore()
+const scheduleRequests = useScheduleRequestsStore()
 const workspaces = useWorkspacesStore()
 const selectedProjectId = ref<string | null>(null)
 const detailOpen = ref(false)
@@ -23,6 +25,7 @@ const logOpen = ref(false)
 const logTrigger = ref<HTMLButtonElement | null>(null)
 const logPopover = ref<HTMLElement | null>(null)
 const logPopoverStyle = ref<Record<string, string>>({})
+const scheduleRequestStatus = ref('')
 
 const selectedProject = computed(
   () =>
@@ -91,6 +94,36 @@ function projectOwnedByCurrentUser(project: Project) {
 
 function projectCanInvite(project: Project) {
   return projectOwnedByCurrentUser(project)
+}
+
+function projectCanRequestScheduleChange(project: Project) {
+  return Boolean(auth.user && project.isPublic && project.ownerUserId && project.ownerUserId !== auth.user.id)
+}
+
+async function submitScheduleChangeRequest(input: {
+  stageKey: StageKey
+  requestedStartDate: string
+  requestedEndDate: string
+  reason: string
+}) {
+  const project = selectedProject.value
+  scheduleRequestStatus.value = ''
+  if (!project || !auth.client || !auth.user || !workspaces.activeWorkspaceId || !project.ownerUserId) {
+    projects.error = '请先登录并完成云端同步'
+    return
+  }
+  try {
+    await scheduleRequests.createRequest(auth.client, {
+      workspaceId: workspaces.activeWorkspaceId,
+      projectId: project.id,
+      projectOwnerUserId: project.ownerUserId,
+      requesterUserId: auth.user.id,
+      ...input,
+    })
+    scheduleRequestStatus.value = '申请已提交'
+  } catch (error) {
+    projects.error = error instanceof Error ? error.message : String(error)
+  }
 }
 
 async function openProjectInvite(project: Project, event: MouseEvent) {
@@ -436,7 +469,17 @@ onBeforeUnmount(() => {
         class="project-detail-panel"
         aria-label="项目具体排期进度"
       >
-        <ProjectTimeline :project="selectedProject" />
+        <ProjectTimeline
+          :project="selectedProject"
+          :can-request-schedule-change="projectCanRequestScheduleChange(selectedProject)"
+          @request-schedule-change="submitScheduleChangeRequest"
+        />
+        <p
+          v-if="scheduleRequestStatus"
+          class="project-request-status"
+        >
+          {{ scheduleRequestStatus }}
+        </p>
         <CommentPanel
           v-if="auth.user"
           target-type="project"
@@ -812,6 +855,12 @@ onBeforeUnmount(() => {
 
 .project-detail-panel {
   border-top: 1px solid var(--bb-border);
+}
+
+.project-request-status {
+  margin: -6px 20px 12px;
+  color: var(--bb-primary);
+  font-size: 12px;
 }
 
 @media (max-width: 760px) {

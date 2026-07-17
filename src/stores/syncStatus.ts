@@ -44,6 +44,7 @@ const SYNC_TABLES = [
   'daily_tasks',
   'comments',
   'project_activity_log',
+  'project_schedule_change_requests',
 ] as const
 
 function cloudStageToProjectStage(row: CloudProjectStageRow): ProjectStage {
@@ -138,7 +139,7 @@ export const useSyncStatusStore = defineStore('syncStatus', {
       }
 
       const projects = mapCloudProjects(this.snapshots)
-      if (projects.length > 0) useProjectsStore().hydrate(projects)
+      if (projects.length > 0) useProjectsStore().mergeProjects(projects)
 
       this.lastSyncedAt = new Date().toISOString()
       this.state = this.conflicts.length > 0 ? 'conflict' : 'synced'

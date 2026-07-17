@@ -29,6 +29,7 @@ describe('sync status store', () => {
     expect(store.lastSyncedAt).not.toBe('')
     expect(client.from).toHaveBeenCalledWith('projects')
     expect(client.from).toHaveBeenCalledWith('comments')
+    expect(client.from).toHaveBeenCalledWith('project_schedule_change_requests')
   })
 
   it('turns a failed pull into an actionable sync error', async () => {
@@ -94,6 +95,51 @@ describe('sync status store', () => {
       stageKey: 'storyboard',
       progress: 65,
     })
+  })
+
+  it('keeps local private projects when pulling a shared public workspace', async () => {
+    const store = useSyncStatusStore()
+    const projects = useProjectsStore()
+    projects.hydrate([{
+      id: 'private-project',
+      code: 'P01',
+      version: 'v1',
+      name: 'Private project',
+      filePath: 'local/private',
+      fileExists: true,
+      releaseDate: '2026-07-20',
+      mainStageKey: 'storyboard',
+      archived: false,
+      ownerUserId: 'user-2',
+      isPublic: false,
+      lastActivitySummary: '',
+      lastActivityActorName: '',
+      createdAt: '2026-07-10T08:00:00Z',
+      updatedAt: '2026-07-10T08:00:00Z',
+      stages: [],
+    }])
+    const client = tableClientMock({
+      projects: [{
+        id: 'shared-project',
+        code: 'S01',
+        version: 'v1',
+        name: 'Shared project',
+        file_display_ref: 'cloud/shared',
+        release_date: '2026-07-31',
+        main_stage_key: 'storyboard',
+        archived: false,
+        owner_user_id: 'user-1',
+        is_public: true,
+        last_activity_summary: '',
+        last_activity_actor_name: '',
+        created_at: '2026-07-11T08:00:00Z',
+        updated_at: '2026-07-12T08:00:00Z',
+      }],
+    })
+
+    await store.pullWorkspace(client as never, 'shared-workspace')
+
+    expect(projects.projects.map((project) => project.id)).toEqual(['private-project', 'shared-project'])
   })
 })
 

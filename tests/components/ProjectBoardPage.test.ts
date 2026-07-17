@@ -6,6 +6,7 @@ import ProjectBoardPage from '@/components/projects/ProjectBoardPage.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMembersStore } from '@/stores/members'
 import { useProjectsStore } from '@/stores/projects'
+import { useScheduleRequestsStore } from '@/stores/scheduleRequests'
 import { useWorkspacesStore } from '@/stores/workspaces'
 import { setProjectPublic } from '@/lib/productionIpc'
 
@@ -247,6 +248,39 @@ describe('ProjectBoardPage', () => {
     expect(wrapper.find('[data-action="toggle-project-public"]').exists()).toBe(false)
   })
 
+  it('lets collaborators submit a schedule change request instead of editing project metadata', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user-2' } as never
+    auth.client = cloudClientMock() as never
+    useWorkspacesStore().activeWorkspaceId = 'workspace-1'
+    const requests = useScheduleRequestsStore()
+    requests.createRequest = vi.fn(async () => ({ id: 'request-1' }))
+    const store = useProjectsStore()
+    store.hydrate([project({ ownerUserId: 'user-1', isPublic: true })])
+
+    const wrapper = mountBoard()
+
+    await wrapper.get('[data-project-note="p1"]').trigger('click')
+    await wrapper.get('[data-action="open-schedule-request"]').trigger('click')
+    await wrapper.get('[data-field="schedule-request-stage"]').setValue('storyboard')
+    await wrapper.get('[data-field="schedule-request-start"]').setValue('2026-07-03')
+    await wrapper.get('[data-field="schedule-request-end"]').setValue('2026-07-12')
+    await wrapper.get('[data-field="schedule-request-reason"]').setValue('分镜素材比预期晚两天到齐')
+    await wrapper.get('[data-action="submit-schedule-request"]').trigger('submit')
+    await flushPromises()
+
+    expect(requests.createRequest).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      workspaceId: 'workspace-1',
+      projectId: 'p1',
+      projectOwnerUserId: 'user-1',
+      requesterUserId: 'user-2',
+      stageKey: 'storyboard',
+      requestedStartDate: '2026-07-03',
+      requestedEndDate: '2026-07-12',
+    }))
+    expect(wrapper.text()).toContain('申请已提交')
+  })
+
   it('orders unfinished project timelines by final release date and shows elapsed stage bars', async () => {
     const store = useProjectsStore()
     const early = project()
@@ -305,8 +339,24 @@ function project(overrides: Partial<Project> = {}): Project {
 
 function cloudClientMock() {
   return {
-    from: vi.fn(() => ({
+    from: vi.fn((table: string) => ({
       upsert: vi.fn(async () => ({ data: [], error: null })),
+      insert: vi.fn(() => ({
+        select: vi.fn(() => ({
+          single: vi.fn(async () => ({ data: { id: 'request-1' }, error: null })),
+        })),
+      })),
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({ data: [], error: null })),
+            })),
+            order: vi.fn(async () => ({ data: [], error: null })),
+          })),
+          order: vi.fn(async () => ({ data: [], error: null })),
+        })),
+      })),
     })),
   }
 }

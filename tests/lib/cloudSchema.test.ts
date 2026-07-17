@@ -174,6 +174,18 @@ describe('cloud collaboration schema', () => {
     expect(sql).not.toContain('on conflict (project_id, user_id)')
   })
 
+  it('adds project schedule change requests for owner approval', () => {
+    const sql = readMigration('0013_project_schedule_change_requests.sql')
+
+    expect(sql).toContain('create table if not exists public.project_schedule_change_requests')
+    expect(sql).toContain("status text not null default 'pending'")
+    expect(sql).toContain('requested_start_date date not null')
+    expect(sql).toContain('requested_end_date date not null')
+    expect(sql).toContain('project schedule requests insertable by project members')
+    expect(sql).toContain('project schedule requests decidable by project owners')
+    expect(sql).toContain('alter publication supabase_realtime add table public.project_schedule_change_requests')
+  })
+
   it('makes copied RLS policies safe to run more than once', () => {
     for (const migration of [
       '0001_auth_workspaces.sql',

@@ -109,6 +109,12 @@ export const useProjectsStore = defineStore('projects', {
       this.projects = sortProjects(projects)
     },
 
+    mergeProjects(projects: Project[]) {
+      const merged = new Map(this.projects.map((project) => [project.id, project]))
+      for (const project of projects) merged.set(project.id, project)
+      this.projects = sortProjects([...merged.values()])
+    },
+
     async saveEditor(input: SaveProjectWithStagesInput) {
       const project = await saveProjectWithStages(input)
       this.replaceProject(project)

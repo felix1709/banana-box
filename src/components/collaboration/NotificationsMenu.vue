@@ -3,16 +3,20 @@ import { ref } from 'vue'
 import { Bell } from '@lucide/vue'
 import { useAuthStore } from '@/stores/auth'
 import { useNotificationsStore } from '@/stores/notifications'
+import { useScheduleRequestsStore } from '@/stores/scheduleRequests'
 import { useSyncStatusStore } from '@/stores/syncStatus'
 import { useWorkspacesStore } from '@/stores/workspaces'
 
 const auth = useAuthStore()
 const notifications = useNotificationsStore()
+const scheduleRequests = useScheduleRequestsStore()
 const sync = useSyncStatusStore()
 const workspaces = useWorkspacesStore()
 const open = ref(false)
 const status = ref('')
 const error = ref('')
+const activeScheduleNotificationId = ref('')
+const decisionNote = ref('')
 
 async function refresh() {
   if (!auth.client || !auth.user) return
@@ -33,6 +37,48 @@ async function acceptProjectInvite(notificationId: string, inviteId: string) {
     workspaces.addSharedWorkspace(accepted.workspaceId)
     await sync.pullWorkspace(auth.client, accepted.workspaceId)
     status.value = '已加入项目'
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : String(reason)
+  }
+}
+
+async function viewScheduleRequest(notificationId: string, requestId: string) {
+  if (!auth.client) return
+  status.value = ''
+  error.value = ''
+  activeScheduleNotificationId.value = notificationId
+  decisionNote.value = ''
+  try {
+    await scheduleRequests.loadRequest(auth.client, requestId)
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : String(reason)
+  }
+}
+
+function actorName() {
+  return workspaces.profile?.displayName || auth.user?.email?.split('@')[0] || '项目创建人'
+}
+
+async function decideScheduleRequest(decision: 'approve' | 'reject') {
+  if (!auth.client || !auth.user || !scheduleRequests.activeRequest) return
+  status.value = ''
+  error.value = ''
+  try {
+    const input = {
+      requestId: scheduleRequests.activeRequest.id,
+      notificationId: activeScheduleNotificationId.value,
+      actorUserId: auth.user.id,
+      actorName: actorName(),
+      decisionNote: decisionNote.value,
+    }
+    const result = decision === 'approve'
+      ? await scheduleRequests.approveRequest(auth.client, input)
+      : await scheduleRequests.rejectRequest(auth.client, input)
+    await sync.pullWorkspace(auth.client, result.workspaceId)
+    notifications.notifications = notifications.notifications.filter((item) => item.id !== activeScheduleNotificationId.value)
+    activeScheduleNotificationId.value = ''
+    decisionNote.value = ''
+    status.value = decision === 'approve' ? '已同意调整' : '已拒绝调整'
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : String(reason)
   }
@@ -76,7 +122,50 @@ async function acceptProjectInvite(notificationId: string, inviteId: string) {
         >
           接受
         </button>
+        <button
+          v-if="notification.targetType === 'project_schedule_request'"
+          data-action="view-schedule-request"
+          type="button"
+          @click="viewScheduleRequest(notification.id, notification.targetId)"
+        >
+          查看
+        </button>
       </article>
+      <section
+        v-if="scheduleRequests.activeRequest && activeScheduleNotificationId"
+        class="schedule-request-review"
+      >
+        <strong>时间调整申请</strong>
+        <span>
+          {{ scheduleRequests.activeRequest.stageKey }}
+          {{ scheduleRequests.activeRequest.requestedStartDate }}
+          -
+          {{ scheduleRequests.activeRequest.requestedEndDate }}
+        </span>
+        <p>{{ scheduleRequests.activeRequest.reason }}</p>
+        <textarea
+          v-model="decisionNote"
+          data-field="schedule-decision-note"
+          rows="2"
+          placeholder="批复说明"
+        />
+        <div>
+          <button
+            data-action="approve-schedule-request"
+            type="button"
+            @click="decideScheduleRequest('approve')"
+          >
+            同意
+          </button>
+          <button
+            data-action="reject-schedule-request"
+            type="button"
+            @click="decideScheduleRequest('reject')"
+          >
+            拒绝
+          </button>
+        </div>
+      </section>
       <p
         v-if="status"
         class="notification-status"
@@ -151,6 +240,44 @@ async function acceptProjectInvite(notificationId: string, inviteId: string) {
 .notification-item button {
   min-height: 26px;
   justify-self: start;
+  padding: 0 8px;
+}
+
+.schedule-request-review {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(244, 196, 48, 0.32);
+  border-radius: var(--bb-radius-xs);
+  background: rgba(244, 196, 48, 0.08);
+}
+
+.schedule-request-review strong {
+  font-size: 12px;
+}
+
+.schedule-request-review span,
+.schedule-request-review p {
+  margin: 0;
+  color: var(--bb-text-soft);
+  font-size: 11px;
+}
+
+.schedule-request-review textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 6px;
+  resize: vertical;
+}
+
+.schedule-request-review div {
+  display: flex;
+  gap: 6px;
+}
+
+.schedule-request-review button {
+  min-height: 26px;
   padding: 0 8px;
 }
 

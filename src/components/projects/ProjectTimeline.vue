@@ -1,13 +1,31 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
-import { STAGE_DEFINITIONS, type Project, type ProjectStage } from '@/domain/production'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { STAGE_DEFINITIONS, type Project, type ProjectStage, type StageKey } from '@/domain/production'
 
 const props = defineProps<{
   project: Project
+  canRequestScheduleChange?: boolean
+}>()
+
+const emit = defineEmits<{
+  'request-schedule-change': [{
+    stageKey: StageKey
+    requestedStartDate: string
+    requestedEndDate: string
+    reason: string
+  }]
 }>()
 
 const DAY = 24 * 60 * 60 * 1000
 const scrollEl = ref<HTMLElement | null>(null)
+const requestOpen = ref(false)
+const requestError = ref('')
+const requestForm = reactive({
+  stageKey: STAGE_DEFINITIONS[0].key as StageKey,
+  requestedStartDate: '',
+  requestedEndDate: '',
+  reason: '',
+})
 let dragStartX = 0
 let dragStartScrollLeft = 0
 let dragging = false
@@ -34,6 +52,16 @@ const stageItems = computed(() =>
     definition,
     stage: props.project.stages.find((stage) => stage.stageKey === definition.key),
   })),
+)
+
+watch(
+  () => props.project.id,
+  () => {
+    requestOpen.value = false
+    requestError.value = ''
+    hydrateRequestForm(STAGE_DEFINITIONS[0].key)
+  },
+  { immediate: true },
 )
 
 const projectRange = computed(() => {
@@ -87,6 +115,45 @@ function stageStyle(stage: ProjectStage | undefined) {
   }
 }
 
+function hydrateRequestForm(stageKey: StageKey) {
+  const stage = props.project.stages.find((item) => item.stageKey === stageKey)
+  requestForm.stageKey = stageKey
+  requestForm.requestedStartDate = stage?.startDate ?? props.project.releaseDate
+  requestForm.requestedEndDate = stage?.endDate ?? props.project.releaseDate
+  requestForm.reason = ''
+}
+
+function openScheduleRequest() {
+  hydrateRequestForm(requestForm.stageKey)
+  requestOpen.value = true
+  requestError.value = ''
+}
+
+function onRequestStageChange() {
+  hydrateRequestForm(requestForm.stageKey)
+}
+
+function submitScheduleRequest() {
+  const reason = requestForm.reason.trim()
+  requestError.value = ''
+  if (!reason) {
+    requestError.value = '请填写申请理由'
+    return
+  }
+  if (requestForm.requestedStartDate > requestForm.requestedEndDate) {
+    requestError.value = '开始时间不能晚于结束时间'
+    return
+  }
+  emit('request-schedule-change', {
+    stageKey: requestForm.stageKey,
+    requestedStartDate: requestForm.requestedStartDate,
+    requestedEndDate: requestForm.requestedEndDate,
+    reason,
+  })
+  requestOpen.value = false
+  requestForm.reason = ''
+}
+
 const todayStyle = computed(() => ({
   left: `${todayPercentage()}%`,
 }))
@@ -124,8 +191,78 @@ onBeforeUnmount(stopTimelineDrag)
         <p>项目时间条</p>
         <h3>{{ project.code }} · {{ project.name }}</h3>
       </div>
-      <span>{{ project.releaseDate }}</span>
+      <div class="timeline-heading-actions">
+        <button
+          v-if="canRequestScheduleChange"
+          data-action="open-schedule-request"
+          type="button"
+          @click="openScheduleRequest"
+        >
+          申请调整
+        </button>
+        <span>{{ project.releaseDate }}</span>
+      </div>
     </div>
+
+    <form
+      v-if="requestOpen"
+      class="schedule-request-panel"
+      data-schedule-request-panel
+      @submit.prevent="submitScheduleRequest"
+    >
+      <label>
+        阶段
+        <select
+          v-model="requestForm.stageKey"
+          data-field="schedule-request-stage"
+          @change="onRequestStageChange"
+        >
+          <option
+            v-for="item in stageItems"
+            :key="item.definition.key"
+            :value="item.definition.key"
+          >
+            {{ item.definition.label }}
+          </option>
+        </select>
+      </label>
+      <label>
+        开始
+        <input
+          v-model="requestForm.requestedStartDate"
+          data-field="schedule-request-start"
+          type="date"
+        >
+      </label>
+      <label>
+        结束
+        <input
+          v-model="requestForm.requestedEndDate"
+          data-field="schedule-request-end"
+          type="date"
+        >
+      </label>
+      <label class="schedule-request-reason">
+        理由
+        <textarea
+          v-model="requestForm.reason"
+          data-field="schedule-request-reason"
+          rows="2"
+        />
+      </label>
+      <p
+        v-if="requestError"
+        role="alert"
+      >
+        {{ requestError }}
+      </p>
+      <button
+        data-action="submit-schedule-request"
+        type="submit"
+      >
+        提交申请
+      </button>
+    </form>
 
     <div
       ref="scrollEl"
@@ -224,6 +361,71 @@ onBeforeUnmount(stopTimelineDrag)
   color: var(--bb-text-muted);
   font-family: var(--bb-mono);
   font-size: 11px;
+}
+
+.timeline-heading-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeline-heading-actions button {
+  min-height: 28px;
+  padding: 0 9px;
+  border-color: rgba(123, 255, 226, 0.28);
+  background: rgba(123, 255, 226, 0.08);
+  color: var(--bb-primary);
+  font-size: 12px;
+}
+
+.timeline-heading-actions span {
+  color: var(--bb-text-muted);
+  font-family: var(--bb-mono);
+  font-size: 11px;
+}
+
+.schedule-request-panel {
+  display: grid;
+  grid-template-columns: minmax(104px, 0.8fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(180px, 1.5fr) auto;
+  gap: 8px;
+  align-items: end;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid rgba(123, 255, 226, 0.16);
+  border-radius: var(--bb-radius-sm);
+  background: rgba(4, 12, 18, 0.48);
+}
+
+.schedule-request-panel label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--bb-text-soft);
+  font-size: 11px;
+}
+
+.schedule-request-panel input,
+.schedule-request-panel select,
+.schedule-request-panel textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 7px;
+}
+
+.schedule-request-panel textarea {
+  resize: vertical;
+}
+
+.schedule-request-panel p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #ffb6c0;
+  font-size: 12px;
+}
+
+.schedule-request-panel button {
+  min-height: 30px;
+  padding: 0 10px;
 }
 
 .timeline-scroll {
@@ -350,6 +552,10 @@ onBeforeUnmount(stopTimelineDrag)
 
   .timeline-canvas {
     min-width: 680px;
+  }
+
+  .schedule-request-panel {
+    grid-template-columns: 1fr;
   }
 }
 </style>

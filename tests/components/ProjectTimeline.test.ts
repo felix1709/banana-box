@@ -49,6 +49,29 @@ describe('ProjectTimeline', () => {
 
     expect(scroll.scrollLeft).toBeGreaterThan(40)
   })
+
+  it('lets a collaborator request a stage schedule change with a reason', async () => {
+    const wrapper = mount(ProjectTimeline, {
+      props: {
+        project: project(),
+        canRequestScheduleChange: true,
+      },
+    })
+
+    await wrapper.get('[data-action="open-schedule-request"]').trigger('click')
+    await wrapper.get('[data-field="schedule-request-stage"]').setValue('storyboard')
+    await wrapper.get('[data-field="schedule-request-start"]').setValue('2026-07-03')
+    await wrapper.get('[data-field="schedule-request-end"]').setValue('2026-07-12')
+    await wrapper.get('[data-field="schedule-request-reason"]').setValue('分镜素材比预期晚两天到齐')
+    await wrapper.get('[data-action="submit-schedule-request"]').trigger('submit')
+
+    expect(wrapper.emitted('request-schedule-change')?.[0]).toEqual([{
+      stageKey: 'storyboard',
+      requestedStartDate: '2026-07-03',
+      requestedEndDate: '2026-07-12',
+      reason: '分镜素材比预期晚两天到齐',
+    }])
+  })
 })
 
 function project(): Project {
