@@ -497,17 +497,19 @@ async function delayDailyTaskReviewTask(payload: DailyTaskReviewActionPayload) {
 
 async function copyDailyTaskReviewReport(payload: DailyTaskReviewActionPayload) {
   if (!activeDailyTaskReview || payload.sessionId !== activeDailyTaskReview.sessionId) return
+  const sessionId = activeDailyTaskReview.sessionId
+  const localDate = activeDailyTaskReview.localDate
 
   try {
-    const report = await getDailyReport(activeDailyTaskReview.localDate)
+    const report = await getDailyReport(localDate)
     await copyToClipboard(report.text)
     await emitTo('floatbtn', 'daily-task-review-close', {
-      sessionId: activeDailyTaskReview.sessionId,
+      sessionId,
     })
     activeDailyTaskReview = null
   } catch {
     await emitTo('floatbtn', 'daily-task-review-error', {
-      sessionId: activeDailyTaskReview.sessionId,
+      sessionId,
       message: '复制日报失败，请重试',
     })
   }
