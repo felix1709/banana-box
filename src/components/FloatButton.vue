@@ -15,6 +15,9 @@ const win = getCurrentWindow()
 const panelOpen = ref(false)
 const panelGeneration = ref(0)
 const activeReminder = ref<DailyTaskReminderPayload | null>(null)
+const activeDailyReview = ref<FloatingDailyTaskReviewPayload | null>(null)
+const reviewComplete = ref<FloatingDailyTaskReviewCompletePayload | null>(null)
+const reviewError = ref('')
 const reminderExpanded = ref(false)
 let acknowledgedGeneration = -1
 let compactPosition: { x: number, y: number } | null = null
@@ -25,6 +28,11 @@ let unlistenDragDrop: UnlistenFn | null = null
 let unlistenPanelTarget: UnlistenFn | null = null
 let unlistenPanelVisibility: UnlistenFn | null = null
 let unlistenDailyReminder: UnlistenFn | null = null
+let unlistenDailyReviewStart: UnlistenFn | null = null
+let unlistenDailyReviewUpdate: UnlistenFn | null = null
+let unlistenDailyReviewComplete: UnlistenFn | null = null
+let unlistenDailyReviewError: UnlistenFn | null = null
+let unlistenDailyReviewClose: UnlistenFn | null = null
 
 type DroppedFileType = 'image' | 'video'
 
@@ -33,6 +41,27 @@ interface DailyTaskReminderPayload {
   title: string
   body: string
   time: string
+  localDate: string
+}
+
+interface FloatingDailyTaskReviewItem {
+  taskId: string
+  code: string
+  title: string
+  progress: number
+  note: string
+}
+
+interface FloatingDailyTaskReviewPayload {
+  sessionId: string
+  localDate: string
+  index: number
+  total: number
+  task: FloatingDailyTaskReviewItem
+}
+
+interface FloatingDailyTaskReviewCompletePayload {
+  sessionId: string
   localDate: string
 }
 
@@ -101,11 +130,45 @@ function isDailyTaskReminderPayload(value: unknown): value is DailyTaskReminderP
   )
 }
 
+function isFloatingDailyTaskReviewPayload(value: unknown): value is FloatingDailyTaskReviewPayload {
+  if (!value || typeof value !== 'object') return false
+  const payload = value as Partial<FloatingDailyTaskReviewPayload>
+  const task = payload.task as Partial<FloatingDailyTaskReviewItem> | undefined
+  return (
+    typeof payload.sessionId === 'string' &&
+    typeof payload.localDate === 'string' &&
+    typeof payload.index === 'number' &&
+    typeof payload.total === 'number' &&
+    !!task &&
+    typeof task.taskId === 'string' &&
+    typeof task.code === 'string' &&
+    typeof task.title === 'string' &&
+    typeof task.progress === 'number' &&
+    typeof task.note === 'string'
+  )
+}
+
+function isFloatingDailyTaskReviewCompletePayload(
+  value: unknown,
+): value is FloatingDailyTaskReviewCompletePayload {
+  if (!value || typeof value !== 'object') return false
+  const payload = value as Partial<FloatingDailyTaskReviewCompletePayload>
+  return typeof payload.sessionId === 'string' && typeof payload.localDate === 'string'
+}
+
 async function expandForReminder() {
   const position = await win.outerPosition()
   compactPosition = { x: position.x, y: position.y }
   await win.setSize(new LogicalSize(360, 180))
   await win.setPosition(new PhysicalPosition(position.x - 296, position.y))
+  reminderExpanded.value = true
+}
+
+async function expandForDailyReview() {
+  const position = await win.outerPosition()
+  compactPosition = { x: position.x, y: position.y }
+  await win.setSize(new LogicalSize(380, 220))
+  await win.setPosition(new PhysicalPosition(position.x - 316, position.y))
   reminderExpanded.value = true
 }
 
@@ -120,6 +183,9 @@ async function restoreReminderSize() {
 
 async function showReminder(payload: DailyTaskReminderPayload) {
   activeReminder.value = payload
+  activeDailyReview.value = null
+  reviewComplete.value = null
+  reviewError.value = ''
   try {
     await expandForReminder()
   } catch {
@@ -127,8 +193,64 @@ async function showReminder(payload: DailyTaskReminderPayload) {
   }
 }
 
+async function showDailyReview(payload: FloatingDailyTaskReviewPayload) {
+  activeReminder.value = null
+  activeDailyReview.value = payload
+  reviewComplete.value = null
+  reviewError.value = ''
+  try {
+    await expandForDailyReview()
+  } catch {
+    // The review content still renders in browser tests or if native resizing is unavailable.
+  }
+}
+
+async function showDailyReviewComplete(payload: FloatingDailyTaskReviewCompletePayload) {
+  activeReminder.value = null
+  activeDailyReview.value = null
+  reviewComplete.value = payload
+  reviewError.value = ''
+  try {
+    await expandForDailyReview()
+  } catch {
+    // The review content still renders in browser tests or if native resizing is unavailable.
+  }
+}
+
 async function dismissReminder() {
   activeReminder.value = null
+  try {
+    await restoreReminderSize()
+  } catch {
+    // Keep the UI responsive even if the native window rejects a resize.
+  }
+}
+
+async function closeDailyReview() {
+  const sessionId = activeDailyReview.value?.sessionId ?? reviewComplete.value?.sessionId
+  activeDailyReview.value = null
+  reviewComplete.value = null
+  reviewError.value = ''
+  if (sessionId) {
+    await emitTo('main', 'daily-task-review-dismiss', { sessionId })
+  }
+  try {
+    await restoreReminderSize()
+  } catch {
+    // Keep the UI responsive even if the native window rejects a resize.
+  }
+}
+
+async function clearDailyReviewFromMain(sessionId: string) {
+  if (
+    activeDailyReview.value?.sessionId !== sessionId &&
+    reviewComplete.value?.sessionId !== sessionId
+  ) {
+    return
+  }
+  activeDailyReview.value = null
+  reviewComplete.value = null
+  reviewError.value = ''
   try {
     await restoreReminderSize()
   } catch {
@@ -144,6 +266,29 @@ async function snoozeReminder(minutes: 10 | 60) {
     minutes,
   })
   await dismissReminder()
+}
+
+async function completeReviewTask() {
+  if (!activeDailyReview.value) return
+  await emitTo('main', 'daily-task-review-complete-task', {
+    sessionId: activeDailyReview.value.sessionId,
+    taskId: activeDailyReview.value.task.taskId,
+  })
+}
+
+async function delayReviewTask() {
+  if (!activeDailyReview.value) return
+  await emitTo('main', 'daily-task-review-delay-task', {
+    sessionId: activeDailyReview.value.sessionId,
+    taskId: activeDailyReview.value.task.taskId,
+  })
+}
+
+async function copyDailyReviewReport() {
+  if (!reviewComplete.value) return
+  await emitTo('main', 'daily-task-review-copy-report', {
+    sessionId: reviewComplete.value.sessionId,
+  })
 }
 
 async function openReminderTask() {
@@ -199,7 +344,17 @@ async function onDrop(event: DragEvent) {
 }
 
 onMounted(async () => {
-  ;[unlistenPanelTarget, unlistenPanelVisibility, unlistenDailyReminder, unlistenDragDrop] = await Promise.all([
+  ;[
+    unlistenPanelTarget,
+    unlistenPanelVisibility,
+    unlistenDailyReminder,
+    unlistenDailyReviewStart,
+    unlistenDailyReviewUpdate,
+    unlistenDailyReviewComplete,
+    unlistenDailyReviewError,
+    unlistenDailyReviewClose,
+    unlistenDragDrop,
+  ] = await Promise.all([
     listen<PanelTargetChanged>('panel-target-changed', (event) => applyPanelTarget(event.payload)),
     listen<PanelVisibilityChanged>('panel-visibility-changed', (event) =>
       applyPanelVisibility(event.payload),
@@ -207,6 +362,27 @@ onMounted(async () => {
     listen('daily-task-reminder', (event) => {
       if (!isDailyTaskReminderPayload(event.payload)) return
       void showReminder(event.payload)
+    }),
+    listen('daily-task-review-start', (event) => {
+      if (!isFloatingDailyTaskReviewPayload(event.payload)) return
+      void showDailyReview(event.payload)
+    }),
+    listen('daily-task-review-update', (event) => {
+      if (!isFloatingDailyTaskReviewPayload(event.payload)) return
+      void showDailyReview(event.payload)
+    }),
+    listen('daily-task-review-complete', (event) => {
+      if (!isFloatingDailyTaskReviewCompletePayload(event.payload)) return
+      void showDailyReviewComplete(event.payload)
+    }),
+    listen('daily-task-review-error', (event) => {
+      const payload = event.payload as { message?: unknown }
+      reviewError.value = typeof payload.message === 'string' ? payload.message : '操作失败，请重试'
+    }),
+    listen('daily-task-review-close', (event) => {
+      const payload = event.payload as { sessionId?: unknown }
+      if (typeof payload.sessionId !== 'string') return
+      void clearDailyReviewFromMain(payload.sessionId)
     }),
     win.onDragDropEvent((event) => {
       if (event.payload.type !== 'drop') return
@@ -230,10 +406,20 @@ onUnmounted(() => {
   unlistenPanelTarget?.()
   unlistenPanelVisibility?.()
   unlistenDailyReminder?.()
+  unlistenDailyReviewStart?.()
+  unlistenDailyReviewUpdate?.()
+  unlistenDailyReviewComplete?.()
+  unlistenDailyReviewError?.()
+  unlistenDailyReviewClose?.()
   unlistenDragDrop = null
   unlistenPanelTarget = null
   unlistenPanelVisibility = null
   unlistenDailyReminder = null
+  unlistenDailyReviewStart = null
+  unlistenDailyReviewUpdate = null
+  unlistenDailyReviewComplete = null
+  unlistenDailyReviewError = null
+  unlistenDailyReviewClose = null
 })
 </script>
 
@@ -300,6 +486,91 @@ onUnmounted(() => {
         </button>
       </footer>
     </section>
+    <section
+      v-if="activeDailyReview || reviewComplete"
+      class="floating-reminder floating-daily-review"
+      data-floating-daily-review
+      role="alertdialog"
+      aria-live="assertive"
+      @mousedown.stop
+      @click.stop
+    >
+      <template v-if="activeDailyReview">
+        <header>
+          <p>{{ activeDailyReview.localDate }} {{ activeDailyReview.index + 1 }} / {{ activeDailyReview.total }}</p>
+          <h2>每日任务确认</h2>
+        </header>
+        <div class="daily-review-task">
+          <strong>{{ activeDailyReview.task.title }}</strong>
+          <span>#{{ activeDailyReview.task.code }} {{ activeDailyReview.task.progress }}%</span>
+          <p v-if="activeDailyReview.task.note.trim()">
+            {{ activeDailyReview.task.note }}
+          </p>
+        </div>
+        <p
+          v-if="reviewError"
+          class="floating-review-error"
+          role="alert"
+        >
+          {{ reviewError }}
+        </p>
+        <footer>
+          <button
+            class="primary"
+            type="button"
+            data-action="daily-review-complete"
+            @click="completeReviewTask"
+          >
+            完成
+          </button>
+          <button
+            type="button"
+            data-action="daily-review-delay"
+            @click="delayReviewTask"
+          >
+            延后
+          </button>
+          <button
+            type="button"
+            data-action="daily-review-close"
+            @click="closeDailyReview"
+          >
+            关闭
+          </button>
+        </footer>
+      </template>
+      <template v-else-if="reviewComplete">
+        <header>
+          <p>{{ reviewComplete.localDate }}</p>
+          <h2>全部确认完成</h2>
+        </header>
+        <p>可以复制今天的日报。</p>
+        <p
+          v-if="reviewError"
+          class="floating-review-error"
+          role="alert"
+        >
+          {{ reviewError }}
+        </p>
+        <footer>
+          <button
+            class="primary"
+            type="button"
+            data-action="daily-review-copy-report"
+            @click="copyDailyReviewReport"
+          >
+            复制日报
+          </button>
+          <button
+            type="button"
+            data-action="daily-review-close"
+            @click="closeDailyReview"
+          >
+            关闭
+          </button>
+        </footer>
+      </template>
+    </section>
   </div>
 </template>
 
@@ -337,6 +608,11 @@ onUnmounted(() => {
   width: 360px;
   height: 180px;
   background: transparent;
+}
+
+.floating-shell.is-reminder-expanded {
+  width: 380px;
+  height: 220px;
 }
 
 .floating-shell.is-reminder-expanded .float-btn {
@@ -403,5 +679,44 @@ onUnmounted(() => {
   background: var(--bb-primary);
   color: #06231f;
   font-weight: 750;
+}
+
+.floating-daily-review {
+  width: 296px;
+  max-height: 204px;
+}
+
+.daily-review-task {
+  display: grid;
+  gap: 4px;
+}
+
+.daily-review-task strong {
+  color: var(--bb-text);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.daily-review-task span {
+  color: var(--bb-primary);
+  font: 10px var(--bb-mono);
+}
+
+.daily-review-task p,
+.floating-review-error {
+  margin: 0;
+  color: var(--bb-text-soft);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.floating-review-error {
+  color: #ffb6c0;
+}
+
+.floating-daily-review footer {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 </style>

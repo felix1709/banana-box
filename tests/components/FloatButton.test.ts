@@ -222,4 +222,100 @@ describe('FloatButton', () => {
     expect(wrapper.find('[data-floating-reminder]').exists()).toBe(false)
     expect(mocks.setSize).toHaveBeenLastCalledWith(expect.objectContaining({ width: 64, height: 64 }))
   })
+
+  it('shows the daily task review card in the floating window', async () => {
+    const wrapper = mount(FloatButton)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    eventHandlers['daily-task-review-start']?.({
+      payload: reviewPayload(),
+    })
+    await wrapper.vm.$nextTick()
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(wrapper.get('[data-floating-daily-review]').text()).toContain('每日任务确认')
+    expect(wrapper.get('[data-floating-daily-review]').text()).toContain('1 / 2')
+    expect(wrapper.get('[data-floating-daily-review]').text()).toContain('Shot refinement')
+    expect(wrapper.get('[data-floating-daily-review]').text()).toContain('45%')
+    expect(mocks.setSize).toHaveBeenCalled()
+    expect(mocks.setPosition).toHaveBeenCalled()
+  })
+
+  it('emits complete and delay actions from the daily task review card', async () => {
+    const wrapper = mount(FloatButton)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    eventHandlers['daily-task-review-start']?.({
+      payload: reviewPayload(),
+    })
+    await wrapper.vm.$nextTick()
+
+    await wrapper.get('[data-action="daily-review-complete"]').trigger('click')
+    await wrapper.get('[data-action="daily-review-delay"]').trigger('click')
+
+    expect(mocks.emitTo).toHaveBeenCalledWith('main', 'daily-task-review-complete-task', {
+      sessionId: 'session-1',
+      taskId: 'task-1',
+    })
+    expect(mocks.emitTo).toHaveBeenCalledWith('main', 'daily-task-review-delay-task', {
+      sessionId: 'session-1',
+      taskId: 'task-1',
+    })
+  })
+
+  it('shows the daily report copy action after review completion', async () => {
+    const wrapper = mount(FloatButton)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    eventHandlers['daily-task-review-complete']?.({
+      payload: { sessionId: 'session-1', localDate: '2026-07-20' },
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('[data-floating-daily-review]').text()).toContain('全部确认完成')
+
+    await wrapper.get('[data-action="daily-review-copy-report"]').trigger('click')
+
+    expect(mocks.emitTo).toHaveBeenCalledWith('main', 'daily-task-review-copy-report', {
+      sessionId: 'session-1',
+    })
+  })
+
+  it('closes the daily task review card when the main window confirms close', async () => {
+    const wrapper = mount(FloatButton)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    eventHandlers['daily-task-review-start']?.({
+      payload: reviewPayload(),
+    })
+    await wrapper.vm.$nextTick()
+
+    eventHandlers['daily-task-review-close']?.({
+      payload: { sessionId: 'session-1' },
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-floating-daily-review]').exists()).toBe(false)
+    expect(mocks.setSize).toHaveBeenLastCalledWith(expect.objectContaining({ width: 64, height: 64 }))
+  })
 })
+
+function reviewPayload() {
+  return {
+    sessionId: 'session-1',
+    localDate: '2026-07-20',
+    index: 0,
+    total: 2,
+    task: {
+      taskId: 'task-1',
+      code: 'L36',
+      projectId: null,
+      title: 'Shot refinement',
+      progress: 45,
+      note: 'Check final color',
+      investedMinutes: 20,
+      reminderTime: '',
+      reminderContent: '',
+    },
+  }
+}
