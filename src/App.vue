@@ -15,7 +15,20 @@ import { useWorkspacesStore } from '@/stores/workspaces'
 import { useSyncStatusStore } from '@/stores/syncStatus'
 import { useNotificationsStore } from '@/stores/notifications'
 import { usePresenceStore } from '@/stores/presence'
-import { readImageBytes } from '@/lib/ipc'
+import { copyToClipboard, readImageBytes } from '@/lib/ipc'
+import {
+  addLocalDays,
+  buildDailyTaskReviewItems,
+  hasExactTitle,
+  nextWorkdayReviewDelay,
+  type DailyTaskReviewItem,
+} from '@/lib/dailyTaskReview'
+import {
+  createDailyTask as createDailyTaskDirect,
+  getDailyReport,
+  loadDailyTaskDay,
+  updateDailyTask as updateDailyTaskDirect,
+} from '@/lib/productionIpc'
 import { subscribeWorkspaceRealtime, type WorkspaceRealtimeSubscription } from '@/lib/realtime/workspaceRealtime'
 import SearchBar from '@/components/SearchBar.vue'
 import AppSidebar from '@/components/AppSidebar.vue'
@@ -52,9 +65,21 @@ const fullscreen = ref(false)
 let unlistenFloatingDrop: UnlistenFn | null = null
 let unlistenReminderOpenTask: UnlistenFn | null = null
 let unlistenReminderSnooze: UnlistenFn | null = null
+let unlistenReviewCompleteTask: UnlistenFn | null = null
+let unlistenReviewDelayTask: UnlistenFn | null = null
+let unlistenReviewCopyReport: UnlistenFn | null = null
+let unlistenReviewDismiss: UnlistenFn | null = null
 let workspaceRealtime: WorkspaceRealtimeSubscription | null = null
 let dailyReminderTimer: ReturnType<typeof window.setTimeout> | null = null
+let dailyTaskReviewTimer: ReturnType<typeof window.setTimeout> | null = null
+let activeDailyTaskReview: {
+  sessionId: string
+  localDate: string
+  tasks: DailyTaskReviewItem[]
+  index: number
+} | null = null
 const firedDailyReminders = new Set<string>()
+const firedDailyTaskReviewDates = new Set<string>()
 
 interface DailyReminder {
   key: string
@@ -70,6 +95,11 @@ interface DailyReminderSnoozePayload {
   taskId: string
   localDate: string
   minutes: 10 | 60
+}
+
+interface DailyTaskReviewActionPayload {
+  sessionId: string
+  taskId?: string
 }
 
 type ResizeDirection =
@@ -234,6 +264,15 @@ function isDailyReminderSnoozePayload(value: unknown): value is DailyReminderSno
   )
 }
 
+function isDailyTaskReviewActionPayload(value: unknown): value is DailyTaskReviewActionPayload {
+  if (!value || typeof value !== 'object') return false
+  const payload = value as Partial<DailyTaskReviewActionPayload>
+  return (
+    typeof payload.sessionId === 'string' &&
+    (payload.taskId === undefined || typeof payload.taskId === 'string')
+  )
+}
+
 function findDailyTask(taskId: string) {
   for (const group of daily.day?.groups ?? []) {
     const task = group.tasks.find((item) => item.id === taskId)
@@ -324,6 +363,161 @@ async function snoozeDailyReminderFromFloat(payload: DailyReminderSnoozePayload)
   }
 }
 
+function clearDailyTaskReviewTimer() {
+  if (dailyTaskReviewTimer !== null) {
+    window.clearTimeout(dailyTaskReviewTimer)
+    dailyTaskReviewTimer = null
+  }
+}
+
+function scheduleDailyTaskReview() {
+  clearDailyTaskReviewTimer()
+  const next = nextWorkdayReviewDelay(new Date())
+  const delay = Math.max(0, Math.min(next.delayMs, 2_147_483_647))
+  dailyTaskReviewTimer = window.setTimeout(() => {
+    void startDailyTaskReview(next.localDate)
+  }, delay)
+}
+
+function createDailyTaskReviewSessionId() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  return `daily-review-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+async function startDailyTaskReview(localDate: string) {
+  scheduleDailyTaskReview()
+  if (firedDailyTaskReviewDates.has(localDate)) return
+  firedDailyTaskReviewDates.add(localDate)
+
+  try {
+    const day = await loadDailyTaskDay(localDate)
+    const tasks = buildDailyTaskReviewItems(day)
+    if (tasks.length === 0) return
+
+    activeDailyTaskReview = {
+      sessionId: createDailyTaskReviewSessionId(),
+      localDate,
+      tasks,
+      index: 0,
+    }
+    await emitDailyTaskReview('daily-task-review-start')
+  } catch {
+    ui.showToast('每日任务确认启动失败')
+  }
+}
+
+async function emitDailyTaskReview(eventName = 'daily-task-review-update') {
+  if (!activeDailyTaskReview) return
+  const task = activeDailyTaskReview.tasks[activeDailyTaskReview.index]
+  if (!task) {
+    await emitTo('floatbtn', 'daily-task-review-complete', {
+      sessionId: activeDailyTaskReview.sessionId,
+      localDate: activeDailyTaskReview.localDate,
+    })
+    return
+  }
+
+  await emitTo('floatbtn', eventName, {
+    sessionId: activeDailyTaskReview.sessionId,
+    localDate: activeDailyTaskReview.localDate,
+    index: activeDailyTaskReview.index,
+    total: activeDailyTaskReview.tasks.length,
+    task,
+  })
+}
+
+function getActiveDailyTaskReviewItem(payload: DailyTaskReviewActionPayload) {
+  if (!activeDailyTaskReview || payload.sessionId !== activeDailyTaskReview.sessionId) return null
+  const task = activeDailyTaskReview.tasks[activeDailyTaskReview.index]
+  if (!task || (payload.taskId && payload.taskId !== task.taskId)) return null
+  return task
+}
+
+async function advanceDailyTaskReview() {
+  if (!activeDailyTaskReview) return
+  activeDailyTaskReview.index += 1
+  await emitDailyTaskReview()
+}
+
+async function completeDailyTaskReviewTask(payload: DailyTaskReviewActionPayload) {
+  const task = getActiveDailyTaskReviewItem(payload)
+  if (!task || !activeDailyTaskReview) return
+
+  try {
+    const updatedDay = await updateDailyTaskDirect({
+      taskId: task.taskId,
+      title: task.title,
+      progress: 100,
+      note: task.note,
+      investedMinutes: task.investedMinutes,
+      reminderTime: task.reminderTime,
+      reminderContent: task.reminderContent,
+    })
+    if (daily.selectedDate === activeDailyTaskReview.localDate) daily.day = updatedDay
+    await advanceDailyTaskReview()
+  } catch {
+    await emitTo('floatbtn', 'daily-task-review-error', {
+      sessionId: activeDailyTaskReview.sessionId,
+      message: '任务更新失败，请重试',
+    })
+  }
+}
+
+async function delayDailyTaskReviewTask(payload: DailyTaskReviewActionPayload) {
+  const task = getActiveDailyTaskReviewItem(payload)
+  if (!task || !activeDailyTaskReview) return
+  const nextDate = addLocalDays(activeDailyTaskReview.localDate, 1)
+
+  try {
+    const nextDay = await loadDailyTaskDay(nextDate)
+    if (!hasExactTitle(nextDay, task.title)) {
+      const updatedNextDay = await createDailyTaskDirect({
+        localDate: nextDate,
+        code: task.code,
+        projectId: task.projectId,
+        title: task.title,
+        progress: task.progress,
+        note: task.note,
+        investedMinutes: task.investedMinutes,
+        reminderTime: task.reminderTime,
+        reminderContent: task.reminderContent,
+      })
+      if (daily.selectedDate === nextDate) daily.day = updatedNextDay
+    }
+    await advanceDailyTaskReview()
+  } catch {
+    await emitTo('floatbtn', 'daily-task-review-error', {
+      sessionId: activeDailyTaskReview.sessionId,
+      message: '延后任务失败，请重试',
+    })
+  }
+}
+
+async function copyDailyTaskReviewReport(payload: DailyTaskReviewActionPayload) {
+  if (!activeDailyTaskReview || payload.sessionId !== activeDailyTaskReview.sessionId) return
+
+  try {
+    const report = await getDailyReport(activeDailyTaskReview.localDate)
+    await copyToClipboard(report.text)
+    await emitTo('floatbtn', 'daily-task-review-close', {
+      sessionId: activeDailyTaskReview.sessionId,
+    })
+    activeDailyTaskReview = null
+  } catch {
+    await emitTo('floatbtn', 'daily-task-review-error', {
+      sessionId: activeDailyTaskReview.sessionId,
+      message: '复制日报失败，请重试',
+    })
+  }
+}
+
+function dismissDailyTaskReview(payload: DailyTaskReviewActionPayload) {
+  if (!activeDailyTaskReview || payload.sessionId !== activeDailyTaskReview.sessionId) return
+  activeDailyTaskReview = null
+}
+
 onMounted(async () => {
   await Promise.all([lib.load(), projects.load(), cloud.load()])
   await auth.initialize()
@@ -345,17 +539,45 @@ onMounted(async () => {
     if (!isDailyReminderSnoozePayload(event.payload)) return
     void snoozeDailyReminderFromFloat(event.payload)
   })
+  unlistenReviewCompleteTask = await listen('daily-task-review-complete-task', (event) => {
+    if (!isDailyTaskReviewActionPayload(event.payload)) return
+    void completeDailyTaskReviewTask(event.payload)
+  })
+  unlistenReviewDelayTask = await listen('daily-task-review-delay-task', (event) => {
+    if (!isDailyTaskReviewActionPayload(event.payload)) return
+    void delayDailyTaskReviewTask(event.payload)
+  })
+  unlistenReviewCopyReport = await listen('daily-task-review-copy-report', (event) => {
+    if (!isDailyTaskReviewActionPayload(event.payload)) return
+    void copyDailyTaskReviewReport(event.payload)
+  })
+  unlistenReviewDismiss = await listen('daily-task-review-dismiss', (event) => {
+    if (!isDailyTaskReviewActionPayload(event.payload)) return
+    dismissDailyTaskReview(event.payload)
+  })
+  scheduleDailyTaskReview()
 })
 
 onUnmounted(() => {
   window.removeEventListener('mouseup', clearResizeActive)
   clearDailyReminderTimer()
+  clearDailyTaskReviewTimer()
   unlistenFloatingDrop?.()
   unlistenFloatingDrop = null
   unlistenReminderOpenTask?.()
   unlistenReminderOpenTask = null
   unlistenReminderSnooze?.()
   unlistenReminderSnooze = null
+  unlistenReviewCompleteTask?.()
+  unlistenReviewCompleteTask = null
+  unlistenReviewDelayTask?.()
+  unlistenReviewDelayTask = null
+  unlistenReviewCopyReport?.()
+  unlistenReviewCopyReport = null
+  unlistenReviewDismiss?.()
+  unlistenReviewDismiss = null
+  activeDailyTaskReview = null
+  firedDailyTaskReviewDates.clear()
   workspaceRealtime?.unsubscribe()
   workspaceRealtime = null
   void presence.leave()

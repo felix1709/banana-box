@@ -10,6 +10,7 @@ import { useCloudSessionStore } from '@/stores/cloudSession'
 import { useAuthStore } from '@/stores/auth'
 import { useDailyTasksStore } from '@/stores/dailyTasks'
 import { useUiStore } from '@/stores/ui'
+import * as ipc from '@/lib/ipc'
 
 let eventHandlers: Record<string, (event: { payload: unknown }) => void> = {}
 const coreApi = vi.hoisted(() => ({
@@ -17,6 +18,13 @@ const coreApi = vi.hoisted(() => ({
 }))
 const eventApi = vi.hoisted(() => ({
   emitTo: vi.fn().mockResolvedValue(undefined),
+}))
+const productionIpc = vi.hoisted(() => ({
+  listProjects: vi.fn().mockResolvedValue([]),
+  loadDailyTaskDay: vi.fn(),
+  createDailyTask: vi.fn(),
+  updateDailyTask: vi.fn(),
+  getDailyReport: vi.fn(),
 }))
 const windowApi = vi.hoisted(() => ({
   startResizeDragging: vi.fn().mockResolvedValue(undefined),
@@ -64,8 +72,11 @@ vi.mock('@/lib/ipc', () => ({
     anonKey: '',
     cloudEnabled: false,
   }),
+  copyToClipboard: vi.fn().mockResolvedValue(undefined),
   readImageBytes: vi.fn(),
 }))
+
+vi.mock('@/lib/productionIpc', () => productionIpc)
 
 describe('App', () => {
   beforeEach(() => {
@@ -74,6 +85,11 @@ describe('App', () => {
     eventHandlers = {}
     vi.clearAllMocks()
     eventApi.emitTo.mockClear()
+    productionIpc.listProjects.mockResolvedValue([])
+    productionIpc.loadDailyTaskDay.mockReset()
+    productionIpc.createDailyTask.mockReset()
+    productionIpc.updateDailyTask.mockReset()
+    productionIpc.getDailyReport.mockReset()
     windowApi.isFullscreen.mockResolvedValue(false)
   })
 
@@ -384,6 +400,176 @@ describe('App', () => {
     })
   })
 
+  it('starts a workday daily task review at 18:25 while the app is running', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 20, 18, 24, 0))
+    productionIpc.loadDailyTaskDay.mockResolvedValue(reviewDay())
+
+    mount(App)
+    await vi.advanceTimersByTimeAsync(0)
+    eventApi.emitTo.mockClear()
+
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(productionIpc.loadDailyTaskDay).toHaveBeenCalledWith('2026-07-20')
+    expect(eventApi.emitTo).toHaveBeenCalledWith('floatbtn', 'daily-task-review-start', {
+      sessionId: expect.any(String),
+      localDate: '2026-07-20',
+      index: 0,
+      total: 2,
+      task: expect.objectContaining({
+        taskId: 'task-1',
+        title: 'Already done',
+        progress: 100,
+      }),
+    })
+  })
+
+  it('does not catch up when mounted after 18:25', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 20, 18, 26, 0))
+    productionIpc.loadDailyTaskDay.mockResolvedValue(reviewDay())
+
+    mount(App)
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(productionIpc.loadDailyTaskDay).not.toHaveBeenCalled()
+    expect(eventApi.emitTo).not.toHaveBeenCalledWith(
+      'floatbtn',
+      'daily-task-review-start',
+      expect.anything(),
+    )
+  })
+
+  it('does not start the workday review on weekends', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 25, 18, 24, 0))
+    productionIpc.loadDailyTaskDay.mockResolvedValue(reviewDay())
+
+    mount(App)
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(productionIpc.loadDailyTaskDay).not.toHaveBeenCalled()
+  })
+
+  it('marks the current review task complete and advances to the next task', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 20, 18, 24, 0))
+    productionIpc.loadDailyTaskDay.mockResolvedValue(reviewDay())
+    productionIpc.updateDailyTask.mockResolvedValue(reviewDay())
+
+    mount(App)
+    await vi.advanceTimersByTimeAsync(60_000)
+    const startPayload = eventApi.emitTo.mock.calls.find(
+      (call) => call[1] === 'daily-task-review-start',
+    )?.[2] as { sessionId: string }
+    eventApi.emitTo.mockClear()
+
+    eventHandlers['daily-task-review-complete-task']?.({
+      payload: { sessionId: startPayload.sessionId, taskId: 'task-1' },
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(productionIpc.updateDailyTask).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      title: 'Already done',
+      progress: 100,
+      note: 'Completed before review',
+      investedMinutes: 20,
+      reminderTime: '',
+      reminderContent: '',
+    })
+    expect(eventApi.emitTo).toHaveBeenCalledWith('floatbtn', 'daily-task-review-update', {
+      sessionId: startPayload.sessionId,
+      localDate: '2026-07-20',
+      index: 1,
+      total: 2,
+      task: expect.objectContaining({ taskId: 'task-2' }),
+    })
+  })
+
+  it('delays a review task to tomorrow with the same progress and metadata', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 20, 18, 24, 0))
+    productionIpc.loadDailyTaskDay
+      .mockResolvedValueOnce(reviewDay())
+      .mockResolvedValueOnce(emptyDay('2026-07-21'))
+    productionIpc.createDailyTask.mockResolvedValue(emptyDay('2026-07-21'))
+
+    mount(App)
+    await vi.advanceTimersByTimeAsync(60_000)
+    const startPayload = eventApi.emitTo.mock.calls.find(
+      (call) => call[1] === 'daily-task-review-start',
+    )?.[2] as { sessionId: string }
+
+    eventHandlers['daily-task-review-delay-task']?.({
+      payload: { sessionId: startPayload.sessionId, taskId: 'task-1' },
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(productionIpc.createDailyTask).toHaveBeenCalledWith({
+      localDate: '2026-07-21',
+      code: 'L36',
+      projectId: null,
+      title: 'Already done',
+      progress: 100,
+      note: 'Completed before review',
+      investedMinutes: 20,
+      reminderTime: '',
+      reminderContent: '',
+    })
+  })
+
+  it('does not duplicate a delayed task when tomorrow has the same title', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 20, 18, 24, 0))
+    productionIpc.loadDailyTaskDay
+      .mockResolvedValueOnce(reviewDay())
+      .mockResolvedValueOnce(reviewDay('2026-07-21'))
+
+    mount(App)
+    await vi.advanceTimersByTimeAsync(60_000)
+    const startPayload = eventApi.emitTo.mock.calls.find(
+      (call) => call[1] === 'daily-task-review-start',
+    )?.[2] as { sessionId: string }
+
+    eventHandlers['daily-task-review-delay-task']?.({
+      payload: { sessionId: startPayload.sessionId, taskId: 'task-1' },
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(productionIpc.createDailyTask).not.toHaveBeenCalled()
+  })
+
+  it('copies the daily report after every review task is processed', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 20, 18, 24, 0))
+    productionIpc.loadDailyTaskDay.mockResolvedValue(oneTaskReviewDay())
+    productionIpc.updateDailyTask.mockResolvedValue(oneTaskReviewDay())
+    productionIpc.getDailyReport.mockResolvedValue({ text: '@日报\n#L36', taskCount: 1 })
+
+    mount(App)
+    await vi.advanceTimersByTimeAsync(60_000)
+    const startPayload = eventApi.emitTo.mock.calls.find(
+      (call) => call[1] === 'daily-task-review-start',
+    )?.[2] as { sessionId: string }
+
+    eventHandlers['daily-task-review-complete-task']?.({
+      payload: { sessionId: startPayload.sessionId, taskId: 'task-1' },
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    eventHandlers['daily-task-review-copy-report']?.({
+      payload: { sessionId: startPayload.sessionId },
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(productionIpc.getDailyReport).toHaveBeenCalledWith('2026-07-20')
+    expect(ipc.copyToClipboard).toHaveBeenCalledWith('@日报\n#L36')
+    expect(eventApi.emitTo).toHaveBeenCalledWith('floatbtn', 'daily-task-review-close', {
+      sessionId: startPayload.sessionId,
+    })
+  })
+
   it('does not render the old separate category pane in the prompt library', async () => {
     const wrapper = mount(App)
     await new Promise((resolve) => window.setTimeout(resolve, 0))
@@ -477,3 +663,63 @@ describe('App', () => {
     expect(wrapper.find('.prompt-drop-placeholder').exists()).toBe(false)
   })
 })
+
+function reviewDay(localDate = '2026-07-20') {
+  return {
+    id: `day-${localDate}`,
+    localDate,
+    settledAt: null,
+    reportSnapshot: null,
+    groups: [{
+      id: 'group-1',
+      code: 'L36',
+      projectId: null,
+      position: 0,
+      tasks: [
+        reviewTask('task-1', 'Already done', 100, 'Completed before review', 0),
+        reviewTask('task-2', 'Continue edit', 45, 'Needs another pass', 1),
+      ],
+    }],
+  }
+}
+
+function oneTaskReviewDay(localDate = '2026-07-20') {
+  const currentDay = reviewDay(localDate)
+  currentDay.groups[0].tasks = [
+    reviewTask('task-1', 'Already done', 100, 'Completed before review', 0),
+  ]
+  return currentDay
+}
+
+function emptyDay(localDate: string) {
+  return {
+    id: `day-${localDate}`,
+    localDate,
+    settledAt: null,
+    reportSnapshot: null,
+    groups: [],
+  }
+}
+
+function reviewTask(
+  id: string,
+  title: string,
+  progress: number,
+  note: string,
+  position: number,
+) {
+  return {
+    id,
+    title,
+    progress,
+    note,
+    investedMinutes: 20,
+    reminderTime: '',
+    reminderContent: '',
+    position,
+    sourceTaskId: null,
+    sourceSnapshotHash: null,
+    createdAt: '2026-07-20T08:00:00Z',
+    updatedAt: '2026-07-20T08:00:00Z',
+  }
+}
