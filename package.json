@@ -1,11 +1,12 @@
 {
   "name": "banana-box",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1422",
     "build": "vue-tsc --noEmit && vite build",
+    "prepare:pi-web": "node scripts/prepare-pi-web-runtime.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "typecheck": "vue-tsc --noEmit",

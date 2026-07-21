@@ -73,6 +73,16 @@ describe('AppSidebar', () => {
     expect(ui.activeTool).toBe('storyboard')
   })
 
+  it('switches to the PI-Web tool', async () => {
+    const wrapper = mount(AppSidebar)
+    const ui = useUiStore()
+
+    await wrapper.get('[data-tool="pi-web"]').trigger('click')
+
+    expect(ui.activeTool).toBe('pi-web')
+    expect(wrapper.text()).toContain('PI-Web')
+  })
+
   it('puts a compact icon-only prompt action next to the prompt library tool', async () => {
     const wrapper = mount(AppSidebar)
     const ui = useUiStore()

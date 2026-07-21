@@ -13,6 +13,7 @@ const tools: { id: ActiveTool; label: string }[] = [
   { id: 'projects', label: '项目管理' },
   { id: 'daily-tasks', label: '当日任务' },
   { id: 'storyboard', label: '故事板' },
+  { id: 'pi-web', label: 'PI-Web' },
 ]
 </script>
 

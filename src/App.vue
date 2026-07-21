@@ -42,6 +42,7 @@ import ProjectBoardPage from '@/components/projects/ProjectBoardPage.vue'
 import ProjectEditor from '@/components/projects/ProjectEditor.vue'
 import DailyTasksPage from '@/components/daily/DailyTasksPage.vue'
 import StoryboardPage from '@/components/storyboard/StoryboardPage.vue'
+import PiWebPage from '@/components/piweb/PiWebPage.vue'
 import CloudMigrationDialog from '@/components/cloud/CloudMigrationDialog.vue'
 import UserCloudMenu from '@/components/cloud/UserCloudMenu.vue'
 import SharedLibraryPage from '@/components/shared/SharedLibraryPage.vue'
@@ -818,6 +819,7 @@ watchEffect(async () => {
         <ProjectBoardPage v-else-if="ui.activeTool === 'projects'" />
         <DailyTasksPage v-else-if="ui.activeTool === 'daily-tasks'" />
         <StoryboardPage v-else-if="ui.activeTool === 'storyboard'" />
+        <PiWebPage v-else-if="ui.activeTool === 'pi-web'" />
       </main>
     </div>
     <PromptEditor v-if="ui.editorOpen" />

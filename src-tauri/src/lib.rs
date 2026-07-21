@@ -1,6 +1,6 @@
 mod app_state;
-mod command_auth;
 mod cloud_config;
+mod command_auth;
 mod commands;
 mod daily_tasks;
 mod db;
@@ -9,6 +9,7 @@ mod fs_atomic;
 mod legacy_import;
 mod library;
 mod migration;
+mod pi_web;
 mod projects;
 mod provider_http;
 mod providers;
@@ -65,6 +66,7 @@ pub fn run() {
         .manage(MainWindowPinState {
             pinned: Mutex::new(false),
         })
+        .manage(pi_web::PiWebService::default())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -147,6 +149,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::startup_commands::get_startup_status,
             commands::startup_commands::acknowledge_migration_summary,
+            pi_web::get_pi_web_status,
+            pi_web::start_pi_web,
+            pi_web::open_pi_web,
+            pi_web::stop_pi_web,
+            pi_web::get_pi_web_chat_health,
+            pi_web::repair_pi_web_model_compatibility,
             commands::load_library,
             commands::save_library,
             commands::load_cloud_config,

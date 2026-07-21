@@ -14,6 +14,9 @@ dist-ssr
 .codex-run/
 .superpowers/
 .worktrees/
+src-tauri/resources/pi-web/*
+!src-tauri/resources/pi-web/.gitkeep
+src-tauri/resources/pi-web-runtime.zip
 
 # Editor directories and files
 .vscode/*
