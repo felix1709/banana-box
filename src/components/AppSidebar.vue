@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { Plus } from '@lucide/vue'
 import { useUiStore, type ActiveTool } from '@/stores/ui'
 import CategoryTree from '@/components/CategoryTree.vue'
 
 const ui = useUiStore()
+const promptCategoriesExpanded = ref(false)
 
 const tools: { id: ActiveTool; label: string }[] = [
   { id: 'shared-library', label: '共享库' },
@@ -12,9 +14,19 @@ const tools: { id: ActiveTool; label: string }[] = [
   { id: 'compression', label: '快速压缩' },
   { id: 'projects', label: '项目管理' },
   { id: 'daily-tasks', label: '当日任务' },
-  { id: 'storyboard', label: '故事板' },
   { id: 'pi-web', label: 'PI-Web' },
 ]
+
+function selectTool(toolId: ActiveTool) {
+  if (toolId === 'prompts') {
+    ui.setActiveTool('prompts')
+    promptCategoriesExpanded.value = !promptCategoriesExpanded.value
+    return
+  }
+
+  promptCategoriesExpanded.value = false
+  ui.setActiveTool(toolId)
+}
 </script>
 
 <template>
@@ -33,8 +45,8 @@ const tools: { id: ActiveTool; label: string }[] = [
           class="tool-button"
           :class="{ active: ui.activeTool === tool.id }"
           :data-tool="tool.id"
-          :aria-expanded="ui.activeTool === 'prompts'"
-          @click="ui.setActiveTool(tool.id)"
+          :aria-expanded="promptCategoriesExpanded"
+          @click="selectTool(tool.id)"
         >
           {{ tool.label }}
         </button>
@@ -59,12 +71,12 @@ const tools: { id: ActiveTool; label: string }[] = [
         :class="{ active: ui.activeTool === tool.id }"
         :data-tool="tool.id"
         :data-tool-row="tool.id"
-        @click="ui.setActiveTool(tool.id)"
+        @click="selectTool(tool.id)"
       >
         {{ tool.label }}
       </button>
       <div
-        v-if="tool.id === 'prompts' && ui.activeTool === 'prompts'"
+        v-if="tool.id === 'prompts' && ui.activeTool === 'prompts' && promptCategoriesExpanded"
         class="sidebar-category-list"
       >
         <CategoryTree compact />

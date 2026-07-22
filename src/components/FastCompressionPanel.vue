@@ -12,6 +12,8 @@ const loading = ref(false)
 const error = ref('')
 const progress = ref(0)
 const progressText = ref('')
+const ffmpegDownloadUrl = 'https://ffmpeg.org/download.html'
+const ffmpegMissing = computed(() => /ffmpeg|ffprobe/i.test(error.value))
 
 const fileName = computed(() => {
   if (!sourcePath.value) return ''
@@ -40,6 +42,13 @@ function compressionErrorMessage(reason: unknown) {
   if (typeof reason === 'string' && reason.trim()) return reason
   return '压缩失败，请确认文件可用后重试'
 }
+
+const ffmpegMissingTools = computed(() => {
+  const missing = new Set<string>()
+  if (/ffmpeg/i.test(error.value)) missing.add('ffmpeg')
+  if (/ffprobe/i.test(error.value)) missing.add('ffprobe')
+  return [...missing]
+})
 
 async function pickFile() {
   const picked = await open({
@@ -168,6 +177,28 @@ async function onCompress() {
     >
       {{ error }}
     </p>
+
+    <section
+      v-if="ffmpegMissing"
+      class="dependency-help"
+      aria-label="视频压缩组件安装说明"
+    >
+      <strong>缺少视频压缩组件</strong>
+      <p>
+        视频压缩需要完整 FFmpeg，其中包含 ffmpeg 和 ffprobe。安装后请重新打开 Banana Box，或确认 FFmpeg 的 bin 目录已经加入 PATH。
+      </p>
+      <p v-if="ffmpegMissingTools.length">
+        当前提示缺少：{{ ffmpegMissingTools.join('、') }}
+      </p>
+      <a
+        :href="ffmpegDownloadUrl"
+        data-install-link="ffmpeg"
+        target="_blank"
+        rel="noreferrer"
+      >
+        打开 FFmpeg 官方下载页
+      </a>
+    </section>
   </section>
 </template>
 
@@ -278,5 +309,40 @@ async function onCompress() {
   color: var(--bb-danger);
   font-size: 13px;
   overflow-wrap: anywhere;
+}
+
+.dependency-help {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  border: 1px solid rgba(255, 196, 87, 0.38);
+  border-radius: var(--bb-radius-md);
+  background: rgba(255, 196, 87, 0.08);
+  color: var(--bb-text);
+}
+
+.dependency-help strong,
+.dependency-help p {
+  margin: 0;
+}
+
+.dependency-help p {
+  color: var(--bb-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dependency-help a {
+  width: max-content;
+  max-width: 100%;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid rgba(102, 247, 211, 0.42);
+  border-radius: var(--bb-radius-sm);
+  color: var(--bb-primary-strong);
+  background: var(--bb-primary-soft);
+  text-decoration: none;
 }
 </style>

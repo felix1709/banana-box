@@ -575,6 +575,10 @@ describe('App', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
     expect(wrapper.find('.category-pane').exists()).toBe(false)
+    expect(wrapper.find('.sidebar-category-list').exists()).toBe(false)
+
+    await wrapper.find('[data-tool="prompts"]').trigger('click')
+
     expect(wrapper.find('.sidebar-category-list').exists()).toBe(true)
   })
 

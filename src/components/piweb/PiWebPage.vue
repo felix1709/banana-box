@@ -21,6 +21,24 @@ const healthBusy = ref(false)
 const repairBusy = ref(false)
 
 const stateLabel = computed(() => status.value?.state ?? 'checking')
+const stateText = computed(() => {
+  switch (stateLabel.value) {
+    case 'missingRuntime':
+      return '缺少运行环境'
+    case 'stopped':
+      return '未启动'
+    case 'checking':
+      return '检查中'
+    case 'starting':
+      return '启动中'
+    case 'running':
+      return '运行中'
+    case 'error':
+      return '异常'
+    default:
+      return '未知'
+  }
+})
 const canCheckChat = computed(() => Boolean(status.value?.canOpen))
 const canRepairDeveloperRole = computed(() => {
   const detail = chatHealth.value?.detail ?? ''
@@ -100,14 +118,14 @@ onMounted(refresh)
   <main class="pi-web-page">
     <header class="pi-web-header">
       <div>
-        <p>Local agent console</p>
+        <p>本地智能体控制台</p>
         <h2>PI-Web</h2>
       </div>
       <span
         class="pi-web-state"
         :data-state="stateLabel"
       >
-        {{ stateLabel }}
+        {{ stateText }}
       </span>
     </header>
 
@@ -237,8 +255,8 @@ onMounted(refresh)
   padding: 20px 22px;
   overflow-y: auto;
   background:
-    radial-gradient(circle at 100% 0%, rgba(102, 247, 211, 0.08), transparent 32%),
-    var(--bb-bg);
+    radial-gradient(circle at 100% 0%, rgba(102, 247, 211, 0.08), transparent 34%),
+    linear-gradient(180deg, rgba(9, 20, 30, 0.74), rgba(5, 13, 20, 0.9));
 }
 
 .pi-web-header {
@@ -284,7 +302,9 @@ onMounted(refresh)
 .pi-web-diagnostics {
   border: 1px solid var(--bb-border);
   border-radius: var(--bb-radius-md);
-  background: rgba(12, 23, 33, 0.72);
+  background:
+    linear-gradient(180deg, rgba(18, 33, 45, 0.9), rgba(8, 19, 29, 0.88)),
+    var(--bb-surface-soft);
   box-shadow: var(--bb-shadow-sm);
 }
 

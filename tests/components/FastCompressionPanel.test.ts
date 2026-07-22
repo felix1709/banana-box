@@ -114,4 +114,28 @@ describe('FastCompressionPanel', () => {
 
     expect(wrapper.text()).toContain('未找到 FFmpeg/ffprobe')
   })
+
+  it('shows FFmpeg download guidance when video compression tools are missing', async () => {
+    mocks.open.mockResolvedValue('C:\\Users\\admin\\Desktop\\movie.mp4')
+    vi.mocked(suggestCompressedOutputPath).mockResolvedValue(
+      'C:\\Users\\admin\\Desktop\\movie_07010930.mp4',
+    )
+    mocks.save.mockResolvedValue('C:\\Users\\admin\\Desktop\\movie_07010930.mp4')
+    vi.mocked(compressMedia).mockRejectedValue(
+      new Error('未找到 ffprobe，请安装完整 FFmpeg（需要 ffmpeg 和 ffprobe）并加入 PATH。'),
+    )
+    const wrapper = mount(FastCompressionPanel)
+
+    await wrapper.find('.pick-file-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.find('.compress-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(wrapper.text()).toContain('缺少视频压缩组件')
+    expect(wrapper.text()).toContain('ffmpeg')
+    expect(wrapper.text()).toContain('ffprobe')
+    expect(wrapper.get('[data-install-link="ffmpeg"]').attributes('href')).toBe(
+      'https://ffmpeg.org/download.html',
+    )
+  })
 })

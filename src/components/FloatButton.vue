@@ -21,6 +21,7 @@ const reviewError = ref('')
 const reminderExpanded = ref(false)
 let acknowledgedGeneration = -1
 let compactPosition: { x: number, y: number } | null = null
+let dailyReviewAnchorSessionId: string | null = null
 let startX = 0
 let startY = 0
 let dragging = false
@@ -159,16 +160,20 @@ function isFloatingDailyTaskReviewCompletePayload(
 async function expandForReminder() {
   const position = await win.outerPosition()
   compactPosition = { x: position.x, y: position.y }
+  dailyReviewAnchorSessionId = null
   await win.setSize(new LogicalSize(360, 180))
   await win.setPosition(new PhysicalPosition(position.x - 296, position.y))
   reminderExpanded.value = true
 }
 
-async function expandForDailyReview() {
-  const position = await win.outerPosition()
-  compactPosition = { x: position.x, y: position.y }
+async function expandForDailyReview(sessionId: string) {
+  if (!compactPosition || dailyReviewAnchorSessionId !== sessionId) {
+    const position = await win.outerPosition()
+    compactPosition = { x: position.x, y: position.y }
+    dailyReviewAnchorSessionId = sessionId
+  }
   await win.setSize(new LogicalSize(380, 220))
-  await win.setPosition(new PhysicalPosition(position.x - 316, position.y))
+  await win.setPosition(new PhysicalPosition(compactPosition.x - 316, compactPosition.y))
   reminderExpanded.value = true
 }
 
@@ -179,6 +184,7 @@ async function restoreReminderSize() {
   await win.setSize(new LogicalSize(64, 64))
   reminderExpanded.value = false
   compactPosition = null
+  dailyReviewAnchorSessionId = null
 }
 
 async function showReminder(payload: DailyTaskReminderPayload) {
@@ -199,7 +205,7 @@ async function showDailyReview(payload: FloatingDailyTaskReviewPayload) {
   reviewComplete.value = null
   reviewError.value = ''
   try {
-    await expandForDailyReview()
+    await expandForDailyReview(payload.sessionId)
   } catch {
     // The review content still renders in browser tests or if native resizing is unavailable.
   }
@@ -211,7 +217,7 @@ async function showDailyReviewComplete(payload: FloatingDailyTaskReviewCompleteP
   reviewComplete.value = payload
   reviewError.value = ''
   try {
-    await expandForDailyReview()
+    await expandForDailyReview(payload.sessionId)
   } catch {
     // The review content still renders in browser tests or if native resizing is unavailable.
   }

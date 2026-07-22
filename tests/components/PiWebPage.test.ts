@@ -67,6 +67,8 @@ describe('PiWebPage', () => {
 
     expect(wrapper.text()).toContain('PI-Web')
     expect(wrapper.text()).toContain('http://127.0.0.1:30141')
+    expect(wrapper.text()).toContain('未启动')
+    expect(wrapper.text()).not.toContain('Local agent console')
 
     await wrapper.get('[data-action="start-pi-web"]').trigger('click')
 

@@ -30,6 +30,7 @@ use url::Url;
 const MAX_DOWNLOADED_IMAGE_BYTES: usize = 15 * 1024 * 1024;
 const MAX_UPDATE_RESPONSE_BYTES: usize = 1024 * 1024;
 const APP_SERVICES_UNAVAILABLE: &str = "STARTUP_NOT_READY";
+const FFMPEG_DOWNLOAD_URL: &str = "https://ffmpeg.org/download.html";
 
 pub(crate) fn data_dir(app: &tauri::AppHandle) -> PathBuf {
     app.path().app_data_dir().expect("no app data dir")
@@ -447,6 +448,12 @@ fn ffmpeg_tool_path(tool_name: &str) -> PathBuf {
     resolve_ffmpeg_tool(tool_name, default_ffmpeg_bin_dir().as_deref())
 }
 
+fn ffmpeg_missing_message(tool_name: &str) -> String {
+    format!(
+        "未找到 {tool_name}，请安装完整 FFmpeg（需要 ffmpeg 和 ffprobe）并加入 PATH。下载地址：{FFMPEG_DOWNLOAD_URL}"
+    )
+}
+
 fn ffprobe_duration_secs(source: &Path) -> Result<f64, String> {
     let output = Command::new(ffmpeg_tool_path("ffprobe"))
         .args([
@@ -459,7 +466,7 @@ fn ffprobe_duration_secs(source: &Path) -> Result<f64, String> {
         ])
         .arg(source)
         .output()
-        .map_err(|_| "未找到 ffprobe，请安装完整 FFmpeg（需要 ffmpeg 和 ffprobe）并加入 PATH".to_string())?;
+        .map_err(|_| ffmpeg_missing_message("ffprobe"))?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
@@ -495,7 +502,7 @@ fn compress_video_with_ffmpeg(source: &Path, output: &Path, target_mb: f64) -> R
         ])
         .arg(output)
         .status()
-        .map_err(|_| "未找到 ffmpeg，请安装完整 FFmpeg（需要 ffmpeg 和 ffprobe）并加入 PATH".to_string())?;
+        .map_err(|_| ffmpeg_missing_message("ffmpeg"))?;
     if status.success() {
         Ok(())
     } else {
@@ -790,6 +797,15 @@ mod tests {
             resolve_ffmpeg_tool("ffprobe", Some(dir.path())),
             PathBuf::from("ffprobe")
         );
+    }
+
+    #[test]
+    fn ffmpeg_missing_message_names_tool_and_download_url() {
+        let message = ffmpeg_missing_message("ffprobe");
+
+        assert!(message.contains("ffprobe"));
+        assert!(message.contains("ffmpeg"));
+        assert!(message.contains(FFMPEG_DOWNLOAD_URL));
     }
 
     #[test]

@@ -241,6 +241,28 @@ describe('FloatButton', () => {
     expect(mocks.setPosition).toHaveBeenCalled()
   })
 
+  it('keeps consecutive daily task review cards anchored to the original floating icon position', async () => {
+    mocks.outerPosition
+      .mockResolvedValueOnce({ x: 1200, y: 320 })
+      .mockResolvedValueOnce({ x: 884, y: 320 })
+    const wrapper = mount(FloatButton)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    eventHandlers['daily-task-review-start']?.({
+      payload: reviewPayload({ index: 0, taskId: 'task-1', title: 'First task' }),
+    })
+    await wrapper.vm.$nextTick()
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    eventHandlers['daily-task-review-update']?.({
+      payload: reviewPayload({ index: 1, taskId: 'task-2', title: 'Second task' }),
+    })
+    await wrapper.vm.$nextTick()
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(mocks.setPosition).toHaveBeenNthCalledWith(1, expect.objectContaining({ x: 884, y: 320 }))
+    expect(mocks.setPosition).toHaveBeenNthCalledWith(2, expect.objectContaining({ x: 884, y: 320 }))
+  })
+
   it('emits complete and delay actions from the daily task review card', async () => {
     const wrapper = mount(FloatButton)
     await new Promise((resolve) => window.setTimeout(resolve, 0))
@@ -300,17 +322,17 @@ describe('FloatButton', () => {
   })
 })
 
-function reviewPayload() {
+function reviewPayload(overrides: Partial<{ index: number; taskId: string; title: string }> = {}) {
   return {
     sessionId: 'session-1',
     localDate: '2026-07-20',
-    index: 0,
+    index: overrides.index ?? 0,
     total: 2,
     task: {
-      taskId: 'task-1',
+      taskId: overrides.taskId ?? 'task-1',
       code: 'L36',
       projectId: null,
-      title: 'Shot refinement',
+      title: overrides.title ?? 'Shot refinement',
       progress: 45,
       note: 'Check final color',
       investedMinutes: 20,

@@ -33,7 +33,7 @@ describe('AppSidebar', () => {
     expect(ui.activeTool).toBe('projects')
   })
 
-  it('shows prompt categories under the prompt library tool only when prompts are active', async () => {
+  it('toggles all prompt categories from the prompt library button', async () => {
     const lib = useLibraryStore()
     lib.hydrate({
       version: 1,
@@ -47,10 +47,38 @@ describe('AppSidebar', () => {
     const wrapper = mount(AppSidebar)
     const ui = useUiStore()
 
+    expect(wrapper.find('.sidebar-category-list').exists()).toBe(false)
+
+    await wrapper.find('[data-tool="prompts"]').trigger('click')
+    expect(ui.activeTool).toBe('prompts')
     expect(wrapper.find('.sidebar-category-list').exists()).toBe(true)
     expect(wrapper.text()).toContain('Style')
+    expect(wrapper.find('[data-tool="prompts"]').attributes('aria-expanded')).toBe('true')
 
+    await wrapper.find('[data-tool="prompts"]').trigger('click')
+    expect(ui.activeTool).toBe('prompts')
+    expect(wrapper.find('.sidebar-category-list').exists()).toBe(false)
+    expect(wrapper.find('[data-tool="prompts"]').attributes('aria-expanded')).toBe('false')
+  })
+
+  it('collapses prompt categories when switching to another tool', async () => {
+    const lib = useLibraryStore()
+    lib.hydrate({
+      version: 1,
+      categories: [{ id: 'style', name: 'Style', color: '#22c55e', order: 0 }],
+      prompts: [],
+      settings: {
+        hotkey: 'Ctrl+Shift+B',
+        theme: 'auto',
+      },
+    })
+    const wrapper = mount(AppSidebar)
+    const ui = useUiStore()
+
+    await wrapper.find('[data-tool="prompts"]').trigger('click')
+    expect(wrapper.find('.sidebar-category-list').exists()).toBe(true)
     await wrapper.find('[data-tool="compression"]').trigger('click')
+
     expect(ui.activeTool).toBe('compression')
     expect(wrapper.find('.sidebar-category-list').exists()).toBe(false)
   })
@@ -64,13 +92,11 @@ describe('AppSidebar', () => {
     expect(ui.activeTool).toBe('daily-tasks')
   })
 
-  it('switches to the storyboard tool', async () => {
+  it('hides the unfinished storyboard tool from the sidebar', () => {
     const wrapper = mount(AppSidebar)
-    const ui = useUiStore()
 
-    await wrapper.get('[data-tool="storyboard"]').trigger('click')
-
-    expect(ui.activeTool).toBe('storyboard')
+    expect(wrapper.find('[data-tool="storyboard"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('故事板')
   })
 
   it('switches to the PI-Web tool', async () => {
@@ -114,7 +140,7 @@ describe('AppSidebar', () => {
     )
   })
 
-  it('renders prompt categories in compact sidebar styling', () => {
+  it('renders prompt categories in compact sidebar styling', async () => {
     const lib = useLibraryStore()
     lib.hydrate({
       version: 1,
@@ -127,6 +153,7 @@ describe('AppSidebar', () => {
     })
 
     const wrapper = mount(AppSidebar)
+    await wrapper.find('[data-tool="prompts"]').trigger('click')
 
     expect(wrapper.find('.sidebar-category-list .tree.compact').exists()).toBe(true)
   })
@@ -135,6 +162,7 @@ describe('AppSidebar', () => {
     const wrapper = mount(AppSidebar)
     const lib = useLibraryStore()
 
+    await wrapper.find('[data-tool="prompts"]').trigger('click')
     const favorite = wrapper.find('.favorite-category')
     expect(favorite.exists()).toBe(true)
     expect(favorite.find('.del').exists()).toBe(false)
