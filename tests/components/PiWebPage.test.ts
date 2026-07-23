@@ -200,4 +200,32 @@ describe('PiWebPage', () => {
     expect(wrapper.text()).toContain('PI-Web 配置已修复')
     expect(wrapper.text()).not.toContain('sk-user-secret')
   })
+
+  it('allows replacing the API key even when config status says ready', async () => {
+    api.getPiWebConfigStatus.mockResolvedValueOnce({
+      agentDir: 'C:\\Users\\tester\\.pi\\agent',
+      settingsExists: true,
+      modelsExists: true,
+      authExists: true,
+      defaultProvider: 'ready-provider',
+      defaultModel: 'ready-model',
+      providerConfigured: true,
+      authConfigured: true,
+      needsRepair: false,
+      message: 'PI-Web config ready',
+      detail: 'Current config is ready.',
+    })
+    const wrapper = mount(PiWebPage)
+    await vi.dynamicImportSettled()
+
+    const input = wrapper.get('[data-field="pi-web-api-key"]')
+    expect(input.attributes('disabled')).toBeUndefined()
+
+    await input.setValue('sk-user-secret')
+    const button = wrapper.get('[data-action="repair-pi-web-config"]')
+    expect(button.attributes('disabled')).toBeUndefined()
+    await button.trigger('click')
+
+    expect(api.repairPiWebConfig).toHaveBeenCalledWith('sk-user-secret')
+  })
 })

@@ -72,7 +72,7 @@ const configModelLabel = computed(() => {
   return `${provider} / ${model}`
 })
 const canRepairConfig = computed(() => {
-  return Boolean(configStatus.value?.needsRepair && configApiKey.value.trim() && !configRepairBusy.value)
+  return Boolean(configApiKey.value.trim() && !configRepairBusy.value)
 })
 
 async function refresh() {
@@ -270,7 +270,7 @@ onMounted(() => {
           autocomplete="off"
           spellcheck="false"
           placeholder="请输入当前用户自己的 API Key"
-          :disabled="configRepairBusy || configStatus?.needsRepair === false"
+          :disabled="configRepairBusy"
         >
       </label>
 
