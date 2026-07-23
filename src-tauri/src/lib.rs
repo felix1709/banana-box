@@ -155,6 +155,8 @@ pub fn run() {
             pi_web::stop_pi_web,
             pi_web::get_pi_web_chat_health,
             pi_web::repair_pi_web_model_compatibility,
+            pi_web::get_pi_web_config_status,
+            pi_web::repair_pi_web_config,
             commands::load_library,
             commands::save_library,
             commands::load_cloud_config,

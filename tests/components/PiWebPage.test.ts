@@ -22,6 +22,8 @@ const api = vi.hoisted(() => ({
   openPiWeb: vi.fn(),
   getPiWebChatHealth: vi.fn(),
   repairPiWebModelCompatibility: vi.fn(),
+  getPiWebConfigStatus: vi.fn(),
+  repairPiWebConfig: vi.fn(),
 }))
 
 vi.mock('@/lib/piWebIpc', () => api)
@@ -30,6 +32,37 @@ describe('PiWebPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.getPiWebStatus.mockResolvedValue({ ...status })
+    api.getPiWebConfigStatus.mockResolvedValue({
+      agentDir: 'C:\\Users\\tester\\.pi\\agent',
+      settingsExists: false,
+      modelsExists: false,
+      authExists: false,
+      defaultProvider: '雷火',
+      defaultModel: 'glm-5.2',
+      providerConfigured: false,
+      authConfigured: false,
+      needsRepair: true,
+      message: 'PI-Web 配置需要修复',
+      detail: '请填写自己的 API Key 后点击一键修复。',
+    })
+    api.repairPiWebConfig.mockResolvedValue({
+      changed: true,
+      message: 'PI-Web 配置已修复',
+      detail: '请重新启动 PI-Web 后检测对话。',
+      status: {
+        agentDir: 'C:\\Users\\tester\\.pi\\agent',
+        settingsExists: true,
+        modelsExists: true,
+        authExists: true,
+        defaultProvider: '雷火',
+        defaultModel: 'glm-5.2',
+        providerConfigured: true,
+        authConfigured: true,
+        needsRepair: false,
+        message: 'PI-Web 配置已就绪',
+        detail: '当前用户已配置雷火 / glm-5.2。',
+      },
+    })
     api.startPiWeb.mockResolvedValue({
       ...status,
       state: 'running',
@@ -144,5 +177,27 @@ describe('PiWebPage', () => {
 
     expect(api.repairPiWebModelCompatibility).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('已写入兼容配置')
+  })
+  it('shows the PI-Web config repair card with missing API key guidance', async () => {
+    const wrapper = mount(PiWebPage)
+    await vi.dynamicImportSettled()
+
+    expect(api.getPiWebConfigStatus).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('配置修复')
+    expect(wrapper.text()).toContain('PI-Web 配置需要修复')
+    expect(wrapper.text()).toContain('雷火 / glm-5.2')
+    expect(wrapper.get('[data-field="pi-web-api-key"]').attributes('type')).toBe('password')
+  })
+
+  it('submits the user API key to repair PI-Web config without echoing it', async () => {
+    const wrapper = mount(PiWebPage)
+    await vi.dynamicImportSettled()
+
+    await wrapper.get('[data-field="pi-web-api-key"]').setValue('sk-user-secret')
+    await wrapper.get('[data-action="repair-pi-web-config"]').trigger('click')
+
+    expect(api.repairPiWebConfig).toHaveBeenCalledWith('sk-user-secret')
+    expect(wrapper.text()).toContain('PI-Web 配置已修复')
+    expect(wrapper.text()).not.toContain('sk-user-secret')
   })
 })

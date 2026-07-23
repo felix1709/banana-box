@@ -42,6 +42,27 @@ export interface PiWebRepairResult {
   detail: string
 }
 
+export interface PiWebConfigStatus {
+  agentDir: string
+  settingsExists: boolean
+  modelsExists: boolean
+  authExists: boolean
+  defaultProvider: string
+  defaultModel: string
+  providerConfigured: boolean
+  authConfigured: boolean
+  needsRepair: boolean
+  message: string
+  detail: string
+}
+
+export interface PiWebConfigRepairResult {
+  changed: boolean
+  message: string
+  detail: string
+  status: PiWebConfigStatus
+}
+
 export async function getPiWebStatus(): Promise<PiWebStatus> {
   return await invoke<PiWebStatus>('get_pi_web_status', {})
 }
@@ -64,4 +85,12 @@ export async function getPiWebChatHealth(): Promise<PiWebChatHealth> {
 
 export async function repairPiWebModelCompatibility(): Promise<PiWebRepairResult> {
   return await invoke<PiWebRepairResult>('repair_pi_web_model_compatibility', {})
+}
+
+export async function getPiWebConfigStatus(): Promise<PiWebConfigStatus> {
+  return await invoke<PiWebConfigStatus>('get_pi_web_config_status', {})
+}
+
+export async function repairPiWebConfig(apiKey: string): Promise<PiWebConfigRepairResult> {
+  return await invoke<PiWebConfigRepairResult>('repair_pi_web_config', { apiKey })
 }

@@ -18,6 +18,10 @@ const PI_WEB_HOST: &str = "127.0.0.1";
 const PI_WEB_VERSION: &str = "0.7.16";
 const PI_WEB_ARCHIVE: &str = "pi-web-runtime.zip";
 const NODE_INSTALL_URL: &str = "https://nodejs.org/";
+const DEFAULT_PI_PROVIDER_ID: &str = "雷火";
+const DEFAULT_PI_MODEL_ID: &str = "glm-5.2";
+const DEFAULT_PI_BASE_URL: &str = "https://ai.leihuo.netease.com/v1";
+const DEFAULT_PI_API: &str = "openai-completions";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,6 +82,31 @@ pub struct PiWebRepairResult {
     detail: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PiWebConfigStatus {
+    agent_dir: String,
+    settings_exists: bool,
+    models_exists: bool,
+    auth_exists: bool,
+    default_provider: String,
+    default_model: String,
+    provider_configured: bool,
+    auth_configured: bool,
+    needs_repair: bool,
+    message: String,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PiWebConfigRepairResult {
+    changed: bool,
+    message: String,
+    detail: String,
+    status: PiWebConfigStatus,
+}
+
 pub struct PiWebService {
     child: Mutex<Option<Child>>,
 }
@@ -85,6 +114,12 @@ pub struct PiWebService {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PiWebEmptyCommandArgs {}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PiWebConfigRepairArgs {
+    api_key: String,
+}
 
 impl Default for PiWebService {
     fn default() -> Self {
@@ -428,7 +463,8 @@ pub fn repair_pi_web_model_compatibility(
         });
     }
 
-    let content = serde_json::to_string_pretty(&models_config).map_err(|error| error.to_string())?;
+    let content =
+        serde_json::to_string_pretty(&models_config).map_err(|error| error.to_string())?;
     fs::write(&models_path, format!("{content}\n"))
         .map_err(|error| format!("无法写入 PI-Web 模型配置：{error}"))?;
     let _ = service.stop();
@@ -438,6 +474,24 @@ pub fn repair_pi_web_model_compatibility(
         message: "已写入兼容配置".into(),
         detail: "已关闭 developer 角色和 reasoning_effort 兼容项，并停止 PI-Web。请重新启动后再检测对话。".into(),
     })
+}
+
+#[tauri::command]
+pub fn get_pi_web_config_status(
+    _args: MainArgs<PiWebEmptyCommandArgs>,
+) -> Result<PiWebConfigStatus, String> {
+    diagnose_pi_agent_config_at(&pi_agent_config_dir()?)
+}
+
+#[tauri::command]
+pub fn repair_pi_web_config(
+    service: tauri::State<PiWebService>,
+    args: MainArgs<PiWebConfigRepairArgs>,
+) -> Result<PiWebConfigRepairResult, String> {
+    let agent_dir = pi_agent_config_dir()?;
+    let result = repair_pi_agent_config_at(&agent_dir, &args.0.api_key)?;
+    let _ = service.stop();
+    Ok(result)
 }
 
 fn build_launch_command(app: &tauri::AppHandle) -> Result<Command, String> {
@@ -593,6 +647,255 @@ fn pi_agent_config_dir() -> Result<PathBuf, String> {
     Ok(home.join(".pi").join("agent"))
 }
 
+fn diagnose_pi_agent_config_at(agent_dir: &Path) -> Result<PiWebConfigStatus, String> {
+    let settings_path = agent_dir.join("settings.json");
+    let models_path = agent_dir.join("models.json");
+    let auth_path = agent_dir.join("auth.json");
+    let settings_exists = settings_path.is_file();
+    let models_exists = models_path.is_file();
+    let auth_exists = auth_path.is_file();
+    let settings = read_json_file(&settings_path)?;
+    let models = read_json_file(&models_path)?;
+    let auth = read_json_file(&auth_path)?;
+    let default_provider = settings
+        .get("defaultProvider")
+        .and_then(Value::as_str)
+        .filter(|provider| !provider.trim().is_empty())
+        .unwrap_or(DEFAULT_PI_PROVIDER_ID)
+        .to_string();
+    let default_model = settings
+        .get("defaultModel")
+        .and_then(Value::as_str)
+        .filter(|model| !model.trim().is_empty())
+        .unwrap_or(DEFAULT_PI_MODEL_ID)
+        .to_string();
+    let provider_configured = models
+        .get("providers")
+        .and_then(Value::as_object)
+        .is_some_and(|providers| providers.contains_key(&default_provider));
+    let auth_configured = auth_has_api_key(&auth, &default_provider)
+        || model_provider_has_resolved_api_key(&models, &default_provider);
+    let needs_repair = !settings_exists
+        || !models_exists
+        || !auth_exists
+        || !provider_configured
+        || !auth_configured;
+    let message = if needs_repair {
+        "PI-Web 配置需要修复".to_string()
+    } else {
+        "PI-Web 配置已就绪".to_string()
+    };
+    let detail = if needs_repair {
+        format!(
+            "当前用户的 PI-Web 配置目录为 {}。默认模型为 {} / {}，请填写自己的 API Key 后点击一键修复。",
+            agent_dir.display(),
+            default_provider,
+            default_model
+        )
+    } else {
+        format!(
+            "当前用户已配置 {} / {}，可以启动 PI-Web 后检测对话。",
+            default_provider, default_model
+        )
+    };
+
+    Ok(PiWebConfigStatus {
+        agent_dir: agent_dir.display().to_string(),
+        settings_exists,
+        models_exists,
+        auth_exists,
+        default_provider,
+        default_model,
+        provider_configured,
+        auth_configured,
+        needs_repair,
+        message,
+        detail,
+    })
+}
+
+fn repair_pi_agent_config_at(
+    agent_dir: &Path,
+    api_key: &str,
+) -> Result<PiWebConfigRepairResult, String> {
+    let trimmed_key = api_key.trim();
+    if trimmed_key.is_empty() {
+        return Err("PI_WEB_API_KEY_REQUIRED".into());
+    }
+
+    fs::create_dir_all(agent_dir).map_err(|error| format!("无法创建 PI-Web 配置目录：{error}"))?;
+    let settings_path = agent_dir.join("settings.json");
+    let models_path = agent_dir.join("models.json");
+    let auth_path = agent_dir.join("auth.json");
+    let mut changed = false;
+
+    let mut settings = ensure_json_object(read_json_file(&settings_path)?);
+    if settings
+        .get("defaultProvider")
+        .and_then(Value::as_str)
+        .is_none_or(|provider| provider.trim().is_empty())
+    {
+        settings["defaultProvider"] = Value::String(DEFAULT_PI_PROVIDER_ID.into());
+        changed = true;
+    }
+    if settings
+        .get("defaultModel")
+        .and_then(Value::as_str)
+        .is_none_or(|model| model.trim().is_empty())
+    {
+        settings["defaultModel"] = Value::String(DEFAULT_PI_MODEL_ID.into());
+        changed = true;
+    }
+    write_json_file(&settings_path, &settings)?;
+
+    let mut models = ensure_json_object(read_json_file(&models_path)?);
+    if !models.get("providers").is_some_and(Value::is_object) {
+        models["providers"] = json!({});
+        changed = true;
+    }
+    let providers = models
+        .get_mut("providers")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "PI_WEB_MODELS_PROVIDERS_INVALID".to_string())?;
+    if !providers.contains_key(DEFAULT_PI_PROVIDER_ID) {
+        providers.insert(DEFAULT_PI_PROVIDER_ID.into(), default_pi_provider_config());
+        changed = true;
+    } else if let Some(provider_config) = providers.get_mut(DEFAULT_PI_PROVIDER_ID) {
+        changed |= ensure_default_provider_compat(provider_config);
+    }
+    write_json_file(&models_path, &models)?;
+
+    let target_provider = settings
+        .get("defaultProvider")
+        .and_then(Value::as_str)
+        .filter(|provider| !provider.trim().is_empty())
+        .unwrap_or(DEFAULT_PI_PROVIDER_ID)
+        .to_string();
+    let mut auth = ensure_json_object(read_json_file(&auth_path)?);
+    let next_auth = json!({
+        "type": "api_key",
+        "key": trimmed_key,
+    });
+    if auth.get(&target_provider) != Some(&next_auth) {
+        auth[&target_provider] = next_auth;
+        changed = true;
+    }
+    write_json_file(&auth_path, &auth)?;
+
+    let status = diagnose_pi_agent_config_at(agent_dir)?;
+    Ok(PiWebConfigRepairResult {
+        changed,
+        message: "PI-Web 配置已修复".into(),
+        detail: "API Key 已写入当前 Windows 用户的 PI-Web 凭据文件。请重新启动 PI-Web 后检测对话。"
+            .into(),
+        status,
+    })
+}
+
+fn read_json_file(path: &Path) -> Result<Value, String> {
+    if !path.is_file() {
+        return Ok(json!({}));
+    }
+    let content = fs::read_to_string(path)
+        .map_err(|error| format!("无法读取 PI-Web 配置文件 {}：{error}", path.display()))?;
+    serde_json::from_str(&content)
+        .map_err(|error| format!("PI-Web 配置文件不是有效 JSON {}：{error}", path.display()))
+}
+
+fn write_json_file(path: &Path, value: &Value) -> Result<(), String> {
+    let content = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
+    fs::write(path, format!("{content}\n"))
+        .map_err(|error| format!("无法写入 PI-Web 配置文件 {}：{error}", path.display()))
+}
+
+fn ensure_json_object(value: Value) -> Value {
+    if value.is_object() {
+        value
+    } else {
+        json!({})
+    }
+}
+
+fn auth_has_api_key(auth: &Value, provider: &str) -> bool {
+    auth.get(provider)
+        .and_then(|credential| credential.get("key"))
+        .and_then(Value::as_str)
+        .is_some_and(|key| !key.trim().is_empty())
+}
+
+fn model_provider_has_resolved_api_key(models: &Value, provider: &str) -> bool {
+    models
+        .get("providers")
+        .and_then(|providers| providers.get(provider))
+        .and_then(|provider_config| provider_config.get("apiKey"))
+        .and_then(Value::as_str)
+        .is_some_and(api_key_value_is_resolved)
+}
+
+fn api_key_value_is_resolved(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if let Some(variable) = trimmed
+        .strip_prefix("${")
+        .and_then(|value| value.strip_suffix('}'))
+        .or_else(|| trimmed.strip_prefix('$'))
+    {
+        return std::env::var(variable).is_ok_and(|env_value| !env_value.trim().is_empty());
+    }
+    true
+}
+
+fn default_pi_provider_config() -> Value {
+    json!({
+        "api": DEFAULT_PI_API,
+        "baseUrl": DEFAULT_PI_BASE_URL,
+        "models": [
+            {
+                "id": DEFAULT_PI_MODEL_ID,
+                "name": DEFAULT_PI_MODEL_ID,
+                "reasoning": true,
+                "thinkingLevelMap": {
+                    "max": "max",
+                    "low": "low",
+                    "medium": "medium",
+                    "high": "high",
+                    "xhigh": "xhigh"
+                },
+                "api": DEFAULT_PI_API
+            },
+            {
+                "id": "gpt-image-2",
+                "name": "gpt-image-2",
+                "input": ["text", "image"],
+                "api": DEFAULT_PI_API
+            }
+        ],
+        "compat": {
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": false
+        }
+    })
+}
+
+fn ensure_default_provider_compat(provider_config: &mut Value) -> bool {
+    let mut changed = false;
+    if !provider_config.get("compat").is_some_and(Value::is_object) {
+        provider_config["compat"] = json!({});
+        changed = true;
+    }
+    if provider_config["compat"]["supportsDeveloperRole"] != Value::Bool(false) {
+        provider_config["compat"]["supportsDeveloperRole"] = Value::Bool(false);
+        changed = true;
+    }
+    if provider_config["compat"]["supportsReasoningEffort"] != Value::Bool(false) {
+        provider_config["compat"]["supportsReasoningEffort"] = Value::Bool(false);
+        changed = true;
+    }
+    changed
+}
+
 fn apply_developer_role_compat(config: &mut Value, provider: &str, model_id: &str) -> bool {
     let Some(providers) = config.get_mut("providers").and_then(Value::as_object_mut) else {
         return false;
@@ -604,7 +907,10 @@ fn apply_developer_role_compat(config: &mut Value, provider: &str, model_id: &st
     }
 
     for provider_config in providers.values_mut() {
-        let Some(models) = provider_config.get_mut("models").and_then(Value::as_array_mut) else {
+        let Some(models) = provider_config
+            .get_mut("models")
+            .and_then(Value::as_array_mut)
+        else {
             continue;
         };
         if let Some(model) = models
@@ -795,12 +1101,7 @@ async fn read_health_events(
                     } else {
                         "模型调用失败"
                     };
-                    return Ok(PiWebChatHealth::error(
-                        message,
-                        error,
-                        provider,
-                        model_id,
-                    ));
+                    return Ok(PiWebChatHealth::error(message, error, provider, model_id));
                 }
                 if assistant_text_present(&event) {
                     saw_assistant_text = true;
@@ -1098,6 +1399,90 @@ mod tests {
             config["providers"]["雷火"]["compat"]["supportsReasoningEffort"],
             Value::Bool(false)
         );
+    }
+
+    #[test]
+    fn pi_web_config_diagnosis_reports_missing_api_key_without_leaking_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = diagnose_pi_agent_config_at(dir.path()).unwrap();
+
+        assert!(status.needs_repair);
+        assert!(!status.settings_exists);
+        assert!(!status.models_exists);
+        assert!(!status.auth_exists);
+        assert!(!status.auth_configured);
+        assert_eq!(status.default_provider, "雷火");
+        assert_eq!(status.default_model, "glm-5.2");
+        assert!(!status.message.contains("sk-"));
+        assert!(!status.detail.contains("sk-"));
+    }
+
+    #[test]
+    fn pi_web_config_repair_writes_default_model_and_auth_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = repair_pi_agent_config_at(dir.path(), "sk-test-secret").unwrap();
+
+        assert!(result.changed);
+        assert!(!result.status.needs_repair);
+        assert!(result.status.settings_exists);
+        assert!(result.status.models_exists);
+        assert!(result.status.auth_exists);
+        assert!(result.status.provider_configured);
+        assert!(result.status.auth_configured);
+
+        let settings: Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(settings["defaultProvider"], "雷火");
+        assert_eq!(settings["defaultModel"], "glm-5.2");
+
+        let models: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("models.json")).unwrap())
+                .unwrap();
+        assert_eq!(models["providers"]["雷火"]["models"][0]["id"], "glm-5.2");
+        assert_eq!(
+            models["providers"]["雷火"]["compat"]["supportsDeveloperRole"],
+            Value::Bool(false)
+        );
+
+        let auth: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("auth.json")).unwrap())
+                .unwrap();
+        assert_eq!(auth["雷火"]["type"], "api_key");
+        assert_eq!(auth["雷火"]["key"], "sk-test-secret");
+        assert!(!result.message.contains("sk-test-secret"));
+        assert!(!result.detail.contains("sk-test-secret"));
+    }
+
+    #[test]
+    fn pi_web_config_repair_preserves_existing_provider_models() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("models.json"),
+            serde_json::to_string_pretty(&json!({
+                "providers": {
+                    "custom": {
+                        "baseUrl": "https://custom.example/v1",
+                        "api": "openai-completions",
+                        "models": [{ "id": "custom-model" }]
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        repair_pi_agent_config_at(dir.path(), "sk-test-secret").unwrap();
+
+        let models: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("models.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            models["providers"]["custom"]["models"][0]["id"],
+            "custom-model"
+        );
+        assert_eq!(models["providers"]["雷火"]["models"][0]["id"], "glm-5.2");
     }
 
     #[test]
