@@ -155,4 +155,22 @@ describe('ReverseImagePanel', () => {
     expect(wrapper.text()).not.toContain('clear.png')
     expect((wrapper.find('.reverse-result').element as HTMLTextAreaElement).value).toBe('')
   })
+
+  it('explains when the configured service rejects a reverse-image request', async () => {
+    vi.mocked(saveImage).mockResolvedValue('images/rejected.png')
+    vi.mocked(reverseImagePrompt).mockRejectedValue(new Error('PROVIDER_HTTP_ERROR'))
+    const wrapper = mount(ReverseImagePanel)
+    const file = new File(['fake'], 'rejected.png', { type: 'image/png' })
+
+    Object.defineProperty(wrapper.find('input[type="file"]').element, 'files', {
+      value: [file],
+      configurable: true,
+    })
+    await wrapper.find('input[type="file"]').trigger('change')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.find('.reverse-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(wrapper.text()).toContain('服务拒绝了图片请求，请检查模型、图片格式和尺寸')
+  })
 })

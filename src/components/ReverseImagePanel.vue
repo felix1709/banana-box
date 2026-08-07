@@ -16,6 +16,20 @@ const loading = ref(false)
 const error = ref('')
 const reverseImageProviderId = 'reverse-image'
 
+function reverseImageErrorMessage(reason: unknown) {
+  const code = reason instanceof Error ? reason.message : ''
+  return (
+    {
+      PROVIDER_HTTP_ERROR: '服务拒绝了图片请求，请检查模型、图片格式和尺寸',
+      PROVIDER_TIMEOUT: '图片反推请求超时，请稍后重试',
+      PROVIDER_CREDENTIALS_REQUIRED: '未找到 API Key，请在设置中重新保存',
+      IMAGE_TOO_LARGE: '图片超过 10MB，请压缩后再试',
+      IMAGE_NOT_FOUND: '找不到已导入的图片，请重新选择图片',
+      INVALID_PROVIDER_RESPONSE: '服务返回的内容无法识别，请更换支持视觉的模型后重试',
+    }[code] ?? '反推失败，请检查 API 设置后重试'
+  )
+}
+
 onMounted(async () => {
   try {
     await providers.load('reverse-image')
@@ -120,8 +134,8 @@ async function onReverse() {
       imagePath: imagePath.value,
     })
     result.value = response.prompt
-  } catch {
-    error.value = '反推失败，请检查 API 设置后重试'
+  } catch (reason) {
+    error.value = reverseImageErrorMessage(reason)
   } finally {
     loading.value = false
   }
