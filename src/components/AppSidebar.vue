@@ -12,6 +12,7 @@ const tools: { id: ActiveTool; label: string }[] = [
   { id: 'prompts', label: '提示词库' },
   { id: 'reverse-image', label: '反推图片' },
   { id: 'compression', label: '快速压缩' },
+  { id: 'depth-video', label: '深度视频' },
   { id: 'projects', label: '项目管理' },
   { id: 'daily-tasks', label: '当日任务' },
   { id: 'pi-web', label: 'PI-Web' },

@@ -17,6 +17,7 @@ describe('AppSidebar', () => {
     expect(wrapper.text()).toContain('提示词库')
     expect(wrapper.text()).toContain('反推图片')
     expect(wrapper.text()).toContain('快速压缩')
+    expect(wrapper.text()).toContain('深度视频')
 
     expect(wrapper.findAll('.tool-button')[0].attributes('data-tool')).toBe('shared-library')
 
@@ -28,6 +29,9 @@ describe('AppSidebar', () => {
 
     await wrapper.find('[data-tool="compression"]').trigger('click')
     expect(ui.activeTool).toBe('compression')
+
+    await wrapper.find('[data-tool="depth-video"]').trigger('click')
+    expect(ui.activeTool).toBe('depth-video')
 
     await wrapper.find('[data-tool="projects"]').trigger('click')
     expect(ui.activeTool).toBe('projects')
