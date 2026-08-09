@@ -216,6 +216,7 @@ pub struct CompressMediaInput {
 pub struct DepthVideoInput {
     pub source_path: String,
     pub output_path: String,
+    pub engine_path: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -240,6 +241,14 @@ pub struct SuggestDepthVideoOutputPathInput {
 #[serde(rename_all = "camelCase")]
 pub struct DepthVideoResult {
     pub output_path: String,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DepthVideoEngineSetupResult {
+    pub engine_path: String,
+    pub engine_dir: String,
+    pub message: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -553,15 +562,44 @@ fn depth_video_output_path(source: &Path, suffix: &str) -> Result<PathBuf, Strin
     Ok(dir.join(format!("{}_depth_{}.mp4", stem, suffix)))
 }
 
-fn depth_video_engine_command() -> Command {
-    let configured = std::env::var_os(DEPTH_VIDEO_ENGINE_ENV)
+fn resolve_depth_video_engine(configured_path: Option<&str>, env_path: Option<PathBuf>) -> PathBuf {
+    configured_path
+        .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-    Command::new(configured.unwrap_or_else(|| PathBuf::from(DEPTH_VIDEO_ENGINE_COMMAND)))
+        .map(PathBuf::from)
+        .or_else(|| env_path.filter(|value| !value.as_os_str().is_empty()))
+        .unwrap_or_else(|| PathBuf::from(DEPTH_VIDEO_ENGINE_COMMAND))
 }
 
-fn convert_video_with_depth_engine(source: &Path, output: &Path) -> Result<(), String> {
-    let status = depth_video_engine_command()
+fn depth_video_engine_command(configured_path: Option<&str>) -> Command {
+    let env_path = std::env::var_os(DEPTH_VIDEO_ENGINE_ENV).map(PathBuf::from);
+    let engine = resolve_depth_video_engine(configured_path, env_path);
+    let extension = engine
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if extension == "ps1" {
+        let mut command = Command::new("powershell.exe");
+        command
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(engine);
+        return command;
+    }
+    if extension == "bat" || extension == "cmd" {
+        let mut command = Command::new("cmd.exe");
+        command.arg("/C").arg(engine);
+        return command;
+    }
+    Command::new(engine)
+}
+
+fn convert_video_with_depth_engine(
+    source: &Path,
+    output: &Path,
+    configured_path: Option<&str>,
+) -> Result<(), String> {
+    let status = depth_video_engine_command(configured_path)
         .arg("--input")
         .arg(source)
         .arg("--output")
@@ -574,6 +612,145 @@ fn convert_video_with_depth_engine(source: &Path, output: &Path) -> Result<(), S
     } else {
         Err("DEPTH_VIDEO_CONVERSION_FAILED".to_string())
     }
+}
+
+fn depth_video_setup_script() -> &'static str {
+    r#"$ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoUrl = 'https://github.com/DepthAnything/Video-Depth-Anything/archive/refs/heads/main.zip'
+$WeightUrl = 'https://huggingface.co/depth-anything/Video-Depth-Anything-Small/resolve/main/video_depth_anything_vits.pth'
+$RepoDir = Join-Path $Root 'Video-Depth-Anything-main'
+$ArchivePath = Join-Path $Root 'Video-Depth-Anything-main.zip'
+$VenvDir = Join-Path $Root '.venv'
+$CheckpointDir = Join-Path $RepoDir 'checkpoints'
+$SmallCheckpoint = Join-Path $CheckpointDir 'video_depth_anything_vits.pth'
+
+function Invoke-HostPython {
+  param([string[]]$Arguments)
+  if (Get-Command py -ErrorAction SilentlyContinue) {
+    & py -3 @Arguments
+  } elseif (Get-Command python -ErrorAction SilentlyContinue) {
+    & python @Arguments
+  } else {
+    throw 'PYTHON_NOT_FOUND: 请先安装 Python 3.10+，并在安装时勾选 Add python.exe to PATH。'
+  }
+  if ($LASTEXITCODE -ne 0) {
+    throw "PYTHON_COMMAND_FAILED: $($Arguments -join ' ')"
+  }
+}
+
+if (!(Test-Path (Join-Path $RepoDir 'run.py'))) {
+  if (!(Test-Path $ArchivePath)) {
+    Invoke-WebRequest -Uri $RepoUrl -OutFile $ArchivePath -UseBasicParsing
+  }
+  $ExtractDir = Join-Path $Root 'repo-extract'
+  if (Test-Path $ExtractDir) { Remove-Item -LiteralPath $ExtractDir -Recurse -Force }
+  Expand-Archive -LiteralPath $ArchivePath -DestinationPath $ExtractDir -Force
+  $ExtractedRepo = Join-Path $ExtractDir 'Video-Depth-Anything-main'
+  if (Test-Path $RepoDir) { Remove-Item -LiteralPath $RepoDir -Recurse -Force }
+  Move-Item -LiteralPath $ExtractedRepo -Destination $RepoDir
+  Remove-Item -LiteralPath $ExtractDir -Recurse -Force
+}
+
+if (!(Test-Path (Join-Path $VenvDir 'Scripts\python.exe'))) {
+  Invoke-HostPython @('-m', 'venv', $VenvDir)
+}
+
+$VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+& $VenvPython -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) { throw 'PIP_UPGRADE_FAILED' }
+& $VenvPython -m pip install -r (Join-Path $RepoDir 'requirements.txt')
+if ($LASTEXITCODE -ne 0) { throw 'PYTHON_REQUIREMENTS_INSTALL_FAILED' }
+
+New-Item -ItemType Directory -Path $CheckpointDir -Force | Out-Null
+if (!(Test-Path $SmallCheckpoint)) {
+  Invoke-WebRequest -Uri $WeightUrl -OutFile $SmallCheckpoint -UseBasicParsing
+}
+
+Write-Output 'DEPTH_VIDEO_ENGINE_READY'
+"#
+}
+
+fn depth_video_launcher_script() -> &'static str {
+    r#"$ErrorActionPreference = 'Stop'
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoDir = Join-Path $Root 'Video-Depth-Anything-main'
+$VenvPython = Join-Path $Root '.venv\Scripts\python.exe'
+$InputPath = $null
+$OutputPath = $null
+
+for ($Index = 0; $Index -lt $args.Count; $Index++) {
+  if ($args[$Index] -eq '--input') {
+    $Index += 1
+    $InputPath = $args[$Index]
+  } elseif ($args[$Index] -eq '--output') {
+    $Index += 1
+    $OutputPath = $args[$Index]
+  }
+}
+
+if (!$InputPath -or !$OutputPath) {
+  throw 'DEPTH_VIDEO_ARGUMENTS_REQUIRED: expected --input <video> --output <mp4>'
+}
+if (!(Test-Path $InputPath)) {
+  throw "DEPTH_VIDEO_INPUT_NOT_FOUND: $InputPath"
+}
+if (!(Test-Path $VenvPython) -or !(Test-Path (Join-Path $RepoDir 'run.py'))) {
+  throw 'DEPTH_VIDEO_ENGINE_NOT_CONFIGURED: 请先在 Banana Box 中点击“下载并配置”。'
+}
+
+$RunDir = Join-Path (Join-Path $Root 'outputs') ([guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $RunDir -Force | Out-Null
+$Stem = [IO.Path]::GetFileNameWithoutExtension($InputPath)
+$Generated = Join-Path $RunDir "$($Stem)_vis.mp4"
+
+Push-Location $RepoDir
+try {
+  & $VenvPython (Join-Path $RepoDir 'run.py') --input_video $InputPath --output_dir $RunDir --encoder vits --grayscale
+  if ($LASTEXITCODE -ne 0) { throw "DEPTH_VIDEO_RUN_FAILED: exit $LASTEXITCODE" }
+} finally {
+  Pop-Location
+}
+
+if (!(Test-Path $Generated)) {
+  throw "DEPTH_VIDEO_OUTPUT_NOT_FOUND: $Generated"
+}
+
+New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($OutputPath)) -Force | Out-Null
+Copy-Item -LiteralPath $Generated -Destination $OutputPath -Force
+"#
+}
+
+fn depth_video_cmd_launcher() -> &'static str {
+    "@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%~dp0banana-depth-video.ps1\" %*\r\n"
+}
+
+fn write_depth_video_engine_scripts(data_dir: &Path) -> Result<DepthVideoEngineSetupResult, String> {
+    let engine_dir = data_dir.join("depth-video-engine");
+    std::fs::create_dir_all(&engine_dir).map_err(|error| error.to_string())?;
+    std::fs::write(
+        engine_dir.join("setup-depth-video-engine.ps1"),
+        depth_video_setup_script(),
+    )
+    .map_err(|error| error.to_string())?;
+    std::fs::write(
+        engine_dir.join("banana-depth-video.ps1"),
+        depth_video_launcher_script(),
+    )
+    .map_err(|error| error.to_string())?;
+    std::fs::write(
+        engine_dir.join("banana-depth-video.cmd"),
+        depth_video_cmd_launcher(),
+    )
+    .map_err(|error| error.to_string())?;
+    let engine_path = engine_dir.join("banana-depth-video.cmd");
+    Ok(DepthVideoEngineSetupResult {
+        engine_path: engine_path.to_string_lossy().to_string(),
+        engine_dir: engine_dir.to_string_lossy().to_string(),
+        message: "本地深度视频引擎已配置".to_string(),
+    })
 }
 
 // 读取目录下所有 .md/.txt 文件内容，供前端解析
@@ -749,10 +926,46 @@ pub fn convert_video_to_depth_video(
         return Err("请选择视频文件".to_string());
     }
     let output = PathBuf::from(&input.output_path);
-    convert_video_with_depth_engine(&source, &output)?;
+    convert_video_with_depth_engine(&source, &output, input.engine_path.as_deref())?;
     Ok(DepthVideoResult {
         output_path: output.to_string_lossy().to_string(),
     })
+}
+
+#[tauri::command]
+pub async fn prepare_depth_video_engine(
+    app: tauri::AppHandle,
+    gate: tauri::State<'_, StartupGate>,
+) -> Result<DepthVideoEngineSetupResult, String> {
+    require_startup_ready(&gate)?;
+    let data_dir = data_dir(&app);
+    let script_result = write_depth_video_engine_scripts(&data_dir)?;
+    let setup_script = PathBuf::from(&script_result.engine_dir).join("setup-depth-video-engine.ps1");
+    let setup_output = tauri::async_runtime::spawn_blocking(move || {
+        Command::new("powershell.exe")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(setup_script)
+            .output()
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|_| "DEPTH_VIDEO_SETUP_POWERSHELL_MISSING".to_string())?;
+
+    if setup_output.status.success() {
+        Ok(script_result)
+    } else {
+        let stderr = String::from_utf8_lossy(&setup_output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&setup_output.stdout).trim().to_string();
+        Err(format!(
+            "DEPTH_VIDEO_ENGINE_SETUP_FAILED\n{}{}",
+            stdout,
+            if stderr.is_empty() {
+                String::new()
+            } else {
+                format!("\n{stderr}")
+            }
+        ))
+    }
 }
 
 #[tauri::command]
@@ -892,6 +1105,33 @@ mod tests {
         assert!(message.contains("ffprobe"));
         assert!(message.contains("ffmpeg"));
         assert!(message.contains(FFMPEG_DOWNLOAD_URL));
+    }
+
+    #[test]
+    fn depth_video_engine_resolution_prefers_user_configured_path() {
+        assert_eq!(
+            resolve_depth_video_engine(Some("C:/tools/banana-depth-video.exe"), None),
+            PathBuf::from("C:/tools/banana-depth-video.exe")
+        );
+    }
+
+    #[test]
+    fn depth_video_engine_scripts_prepare_a_windows_launcher() {
+        let directory = tempfile::tempdir().unwrap();
+        let result = write_depth_video_engine_scripts(directory.path()).unwrap();
+
+        assert!(result.engine_path.ends_with("banana-depth-video.cmd"));
+        assert!(result.engine_dir.ends_with("depth-video-engine"));
+
+        let engine_dir = directory.path().join("depth-video-engine");
+        let setup_script = std::fs::read_to_string(engine_dir.join("setup-depth-video-engine.ps1")).unwrap();
+        assert!(setup_script.contains("Video-Depth-Anything"));
+        assert!(setup_script.contains("video_depth_anything_vits.pth"));
+
+        let launcher = std::fs::read_to_string(engine_dir.join("banana-depth-video.ps1")).unwrap();
+        assert!(launcher.contains("--input_video"));
+        assert!(launcher.contains("--encoder"));
+        assert!(launcher.contains("_vis.mp4"));
     }
 
     #[test]

@@ -36,10 +36,17 @@ export interface CompressMediaResult {
 export interface DepthVideoInput {
   sourcePath: string
   outputPath: string
+  enginePath?: string
 }
 
 export interface DepthVideoResult {
   outputPath: string
+}
+
+export interface DepthVideoEngineSetupResult {
+  enginePath: string
+  engineDir: string
+  message: string
 }
 
 export interface SuggestCompressedOutputPathInput {
@@ -132,6 +139,10 @@ export async function suggestCompressedOutputPath(
 
 export async function convertVideoToDepthVideo(input: DepthVideoInput): Promise<DepthVideoResult> {
   return await invoke<DepthVideoResult>('convert_video_to_depth_video', { input })
+}
+
+export async function prepareDepthVideoEngine(): Promise<DepthVideoEngineSetupResult> {
+  return await invoke<DepthVideoEngineSetupResult>('prepare_depth_video_engine')
 }
 
 export async function suggestDepthVideoOutputPath(

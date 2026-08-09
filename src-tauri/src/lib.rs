@@ -183,6 +183,7 @@ pub fn run() {
             commands::compress_media,
             commands::suggest_compressed_output_path,
             commands::convert_video_to_depth_video,
+            commands::prepare_depth_video_engine,
             commands::suggest_depth_video_output_path,
             projects::list_projects,
             projects::create_project,
