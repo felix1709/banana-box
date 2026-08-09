@@ -1,4 +1,4 @@
-use crate::command_auth::MainArgs;
+use crate::command_auth::{MainArgs, MainOrPiWebRepairArgs};
 use futures_util::StreamExt;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -11,7 +11,7 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 const PI_WEB_PORT: u16 = 30141;
 const PI_WEB_HOST: &str = "127.0.0.1";
@@ -22,6 +22,7 @@ const DEFAULT_PI_PROVIDER_ID: &str = "雷火";
 const DEFAULT_PI_MODEL_ID: &str = "glm-5.2";
 const DEFAULT_PI_BASE_URL: &str = "https://ai.leihuo.netease.com/v1";
 const DEFAULT_PI_API: &str = "openai-completions";
+pub(crate) const PI_WEB_REPAIR_WINDOW_LABEL: &str = "pi-web-repair";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -405,6 +406,31 @@ pub fn open_pi_web(
 }
 
 #[tauri::command]
+pub fn open_pi_web_repair_window(
+    app: tauri::AppHandle,
+    _args: MainArgs<PiWebEmptyCommandArgs>,
+) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(PI_WEB_REPAIR_WINDOW_LABEL) {
+        window.show().map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(
+        &app,
+        PI_WEB_REPAIR_WINDOW_LABEL,
+        WebviewUrl::App("index.html".into()),
+    )
+    .title("PI-Web 配置修复")
+    .inner_size(640.0, 620.0)
+    .min_inner_size(520.0, 440.0)
+    .resizable(true)
+    .build()
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn stop_pi_web(
     service: tauri::State<PiWebService>,
     _args: MainArgs<PiWebEmptyCommandArgs>,
@@ -478,7 +504,7 @@ pub fn repair_pi_web_model_compatibility(
 
 #[tauri::command]
 pub fn get_pi_web_config_status(
-    _args: MainArgs<PiWebEmptyCommandArgs>,
+    _args: MainOrPiWebRepairArgs<PiWebEmptyCommandArgs>,
 ) -> Result<PiWebConfigStatus, String> {
     diagnose_pi_agent_config_at(&pi_agent_config_dir()?)
 }
@@ -486,7 +512,7 @@ pub fn get_pi_web_config_status(
 #[tauri::command]
 pub fn repair_pi_web_config(
     service: tauri::State<PiWebService>,
-    args: MainArgs<PiWebConfigRepairArgs>,
+    args: MainOrPiWebRepairArgs<PiWebConfigRepairArgs>,
 ) -> Result<PiWebConfigRepairResult, String> {
     let agent_dir = pi_agent_config_dir()?;
     let result = repair_pi_agent_config_at(&agent_dir, &args.0.api_key)?;

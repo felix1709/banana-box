@@ -88,7 +88,9 @@ const autostartError = ref('')
 const cloudSetupSql = `${authWorkspaceSql.trim()}\n\n${contentCollaborationSql.trim()}\n\n${inviteAcceptanceRealtimeSql.trim()}\n\n${workspaceBootstrapFixSql.trim()}\n\n${profileBootstrapFixSql.trim()}\n\n${dailyTaskRemindersSql.trim()}\n\n${projectLevelCollaborationSql.trim()}\n\n${projectInviteNotificationsSql.trim()}\n\n${profileDisplayNameRpcSql.trim()}\n\n${notificationsInsertPolicySql.trim()}\n\n${inviteDigestExtensionPathSql.trim()}\n\n${inviteAcceptanceConflictTargetsSql.trim()}\n\n${projectScheduleChangeRequestsSql.trim()}\n\n${projectCollaborationRlsFixesSql.trim()}\n\n${sharedPromptLibrarySql.trim()}\n\n${sharedPromptAdminDeleteSql.trim()}\n`
 
 onMounted(async () => {
-  await Promise.all([refreshAutostart(), loadApiProviders(), loadCloudSettings()])
+  const tasks: Promise<unknown>[] = [refreshAutostart(), loadApiProviders()]
+  if (canManageCloudSettings()) tasks.push(loadCloudSettings())
+  await Promise.all(tasks)
 })
 
 function saveHotkey() {
@@ -111,7 +113,7 @@ function cloudStatusText() {
 }
 
 function canManageCloudSettings() {
-  return !auth.user || auth.isCloudAdmin
+  return auth.user !== null && auth.isCloudAdmin === true
 }
 
 async function loadCloudSettings() {

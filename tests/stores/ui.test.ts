@@ -20,6 +20,9 @@ describe('ui store', () => {
 
     ui.setActiveTool('daily-tasks')
     expect(ui.activeTool).toBe('daily-tasks')
+
+    ui.setActiveTool('depth-video')
+    expect(ui.activeTool).toBe('depth-video')
   })
 
   it('opens the prompt editor with optional prefilled content', () => {
@@ -78,5 +81,14 @@ describe('ui store', () => {
 
     expect(ui.activeTool).toBe('reverse-image')
     expect(ui.reverseImageSourcePath).toBe('C:/tmp/photo.png')
+  })
+
+  it('stores a prefilled depth-video source path', () => {
+    const ui = useUiStore()
+
+    ui.openDepthVideoWithSource('C:/tmp/movie.mp4')
+
+    expect(ui.activeTool).toBe('depth-video')
+    expect(ui.depthVideoSourcePath).toBe('C:/tmp/movie.mp4')
   })
 })

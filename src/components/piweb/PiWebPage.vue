@@ -2,16 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { Activity, ExternalLink, Play, RefreshCw, Square } from '@lucide/vue'
 import {
-  getPiWebConfigStatus,
   getPiWebChatHealth,
   getPiWebStatus,
   openPiWeb,
-  repairPiWebConfig,
+  openPiWebRepairWindow,
   repairPiWebModelCompatibility,
   startPiWeb,
   stopPiWeb,
-  type PiWebConfigRepairResult,
-  type PiWebConfigStatus,
   type PiWebChatHealth,
   type PiWebRepairResult,
   type PiWebStatus,
@@ -20,14 +17,9 @@ import {
 const status = ref<PiWebStatus | null>(null)
 const chatHealth = ref<PiWebChatHealth | null>(null)
 const repairResult = ref<PiWebRepairResult | null>(null)
-const configStatus = ref<PiWebConfigStatus | null>(null)
-const configRepairResult = ref<PiWebConfigRepairResult | null>(null)
-const configApiKey = ref('')
 const busy = ref(false)
 const healthBusy = ref(false)
 const repairBusy = ref(false)
-const configBusy = ref(false)
-const configRepairBusy = ref(false)
 
 const stateLabel = computed(() => status.value?.state ?? 'checking')
 const stateText = computed(() => {
@@ -66,44 +58,12 @@ const primaryLabel = computed(() => {
   return '重新检查'
 })
 
-const configModelLabel = computed(() => {
-  const provider = configStatus.value?.defaultProvider || '雷火'
-  const model = configStatus.value?.defaultModel || 'glm-5.2'
-  return `${provider} / ${model}`
-})
-const canRepairConfig = computed(() => {
-  return Boolean(configApiKey.value.trim() && !configRepairBusy.value)
-})
-
 async function refresh() {
   busy.value = true
   try {
     status.value = await getPiWebStatus()
   } finally {
     busy.value = false
-  }
-}
-
-async function refreshConfigStatus() {
-  configBusy.value = true
-  try {
-    configStatus.value = await getPiWebConfigStatus()
-  } finally {
-    configBusy.value = false
-  }
-}
-
-async function repairConfig() {
-  if (!canRepairConfig.value) return
-  configRepairBusy.value = true
-  try {
-    configRepairResult.value = await repairPiWebConfig(configApiKey.value)
-    configStatus.value = configRepairResult.value.status
-    configApiKey.value = ''
-    status.value = await getPiWebStatus()
-    chatHealth.value = null
-  } finally {
-    configRepairBusy.value = false
   }
 }
 
@@ -117,6 +77,10 @@ async function runPrimaryAction() {
   } finally {
     busy.value = false
   }
+}
+
+async function openRepairWindow() {
+  await openPiWebRepairWindow()
 }
 
 async function checkChatHealth() {
@@ -154,7 +118,6 @@ async function stop() {
 
 onMounted(() => {
   refresh()
-  refreshConfigStatus()
 })
 </script>
 
@@ -221,75 +184,25 @@ onMounted(() => {
       </div>
     </section>
 
-    <section
-      class="pi-web-diagnostics pi-web-config-card"
-      :data-repair-needed="configStatus?.needsRepair ? 'true' : 'false'"
-      aria-live="polite"
-    >
+    <section class="pi-web-diagnostics pi-web-config-entry">
       <div class="pi-web-card-heading">
         <div>
           <h3>配置修复</h3>
           <p class="pi-web-health-title">
-            {{ configStatus?.message || '正在检测 PI-Web 配置' }}
+            配置检测和 API Key 修复已移到独立窗口。
           </p>
         </div>
         <button
-          data-action="check-pi-web-config"
+          data-action="open-pi-web-repair"
           type="button"
-          :disabled="configBusy"
-          @click="refreshConfigStatus"
+          @click="openRepairWindow"
         >
           <RefreshCw :size="14" />
-          {{ configBusy ? '检测中' : '检测配置' }}
+          打开配置修复
         </button>
       </div>
-
-      <p>当前模型：{{ configModelLabel }}</p>
-      <p v-if="configStatus?.agentDir">
-        配置目录：{{ configStatus.agentDir }}
-      </p>
-      <div
-        v-if="configStatus"
-        class="pi-web-config-grid"
-      >
-        <span :data-ready="configStatus.settingsExists">settings.json</span>
-        <span :data-ready="configStatus.modelsExists">models.json</span>
-        <span :data-ready="configStatus.authExists">auth.json</span>
-        <span :data-ready="configStatus.authConfigured">API Key</span>
-      </div>
-      <p v-if="configStatus?.detail">
-        {{ configStatus.detail }}
-      </p>
-
-      <label class="pi-web-key-field">
-        <span>PI-Web API Key</span>
-        <input
-          v-model="configApiKey"
-          data-field="pi-web-api-key"
-          type="password"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="请输入当前用户自己的 API Key"
-          :disabled="configRepairBusy"
-        >
-      </label>
-
-      <div class="pi-web-card-actions">
-        <button
-          data-action="repair-pi-web-config"
-          type="button"
-          :disabled="!canRepairConfig"
-          @click="repairConfig"
-        >
-          <RefreshCw :size="14" />
-          {{ configRepairBusy ? '修复中' : '一键修复' }}
-        </button>
-      </div>
-      <p
-        v-if="configRepairResult"
-        class="pi-web-repair-result"
-      >
-        {{ configRepairResult.message }}。{{ configRepairResult.detail }}
+      <p>
+        主页面只保留启动和检测操作，复杂配置在二级窗口里处理。
       </p>
     </section>
 

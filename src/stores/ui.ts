@@ -8,6 +8,7 @@ export type ActiveTool =
   | 'prompts'
   | 'reverse-image'
   | 'compression'
+  | 'depth-video'
   | 'projects'
   | 'daily-tasks'
   | 'storyboard'
@@ -35,6 +36,7 @@ export const useUiStore = defineStore('ui', {
     floatingActionDialogOpen: false as boolean,
     floatingActionFile: null as FloatingActionFile | null,
     compressionSourcePath: '' as string,
+    depthVideoSourcePath: '' as string,
     reverseImageSourcePath: '' as string,
     settingsOpen: false as boolean,
     previewImage: null as string | null,
@@ -74,6 +76,11 @@ export const useUiStore = defineStore('ui', {
     openCompressionWithSource(sourcePath: string) {
       this.compressionSourcePath = sourcePath
       this.activeTool = 'compression'
+      this.showPanel()
+    },
+    openDepthVideoWithSource(sourcePath: string) {
+      this.depthVideoSourcePath = sourcePath
+      this.activeTool = 'depth-video'
       this.showPanel()
     },
     openReverseImageWithSource(sourcePath: string) {

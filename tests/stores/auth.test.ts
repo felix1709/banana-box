@@ -107,6 +107,20 @@ describe('auth store', () => {
     })
   })
 
+  it('derives cloud administrator access only from the cloud_admin app metadata claim', () => {
+    const store = useAuthStore()
+
+    store.user = { id: 'legacy', email: '000001@banana-box.local' } as never
+    expect(store.isCloudAdmin).toBe(false)
+
+    store.user = {
+      id: 'admin',
+      email: 'admin@example.com',
+      app_metadata: { cloud_admin: true },
+    } as never
+    expect(store.isCloudAdmin).toBe(true)
+  })
+
   it('records sign-in errors without throwing', async () => {
     vi.mocked(getSupabaseClient).mockResolvedValue({ auth: authApi } as never)
     authApi.getSession.mockResolvedValue({ data: { session: null }, error: null })

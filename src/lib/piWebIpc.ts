@@ -79,6 +79,10 @@ export async function openPiWeb(): Promise<PiWebStatus> {
   return await invoke<PiWebStatus>('open_pi_web', {})
 }
 
+export async function openPiWebRepairWindow(): Promise<void> {
+  await invoke('open_pi_web_repair_window', {})
+}
+
 export async function getPiWebChatHealth(): Promise<PiWebChatHealth> {
   return await invoke<PiWebChatHealth>('get_pi_web_chat_health', {})
 }

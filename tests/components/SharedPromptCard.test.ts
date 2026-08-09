@@ -73,8 +73,12 @@ describe('SharedPromptCard', () => {
     expect(wrapper.find('[data-action="delete-shared-prompt"]').exists()).toBe(false)
   })
 
-  it('lets account 000001 delete shared prompts', async () => {
-    useAuthStore().user = { id: 'admin', email: '000001@banana-box.local' } as never
+  it('lets cloud_admin users delete shared prompts', async () => {
+    useAuthStore().user = {
+      id: 'admin',
+      email: 'admin@example.com',
+      app_metadata: { cloud_admin: true },
+    } as never
     const shared = useSharedLibraryStore()
     const remove = vi.spyOn(shared, 'deleteSharedPrompt').mockResolvedValue(undefined)
     const wrapper = mount(SharedPromptCard, { props: { prompt: sharedPrompt() } })

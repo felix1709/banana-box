@@ -24,6 +24,7 @@ const api = vi.hoisted(() => ({
   repairPiWebModelCompatibility: vi.fn(),
   getPiWebConfigStatus: vi.fn(),
   repairPiWebConfig: vi.fn(),
+  openPiWebRepairWindow: vi.fn(),
 }))
 
 vi.mock('@/lib/piWebIpc', () => api)
@@ -92,6 +93,7 @@ describe('PiWebPage', () => {
       message: '已写入兼容配置',
       detail: '请停止并重新启动 PI-Web。',
     })
+    api.openPiWebRepairWindow.mockResolvedValue(undefined)
   })
 
   it('shows status and starts PI-Web from the main action', async () => {
@@ -178,54 +180,22 @@ describe('PiWebPage', () => {
     expect(api.repairPiWebModelCompatibility).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('已写入兼容配置')
   })
-  it('shows the PI-Web config repair card with missing API key guidance', async () => {
+  it('opens PI-Web configuration repair in a secondary window', async () => {
     const wrapper = mount(PiWebPage)
     await vi.dynamicImportSettled()
 
-    expect(api.getPiWebConfigStatus).toHaveBeenCalledOnce()
-    expect(wrapper.text()).toContain('配置修复')
-    expect(wrapper.text()).toContain('PI-Web 配置需要修复')
-    expect(wrapper.text()).toContain('雷火 / glm-5.2')
-    expect(wrapper.get('[data-field="pi-web-api-key"]').attributes('type')).toBe('password')
+    await wrapper.get('[data-action="open-pi-web-repair"]').trigger('click')
+
+    expect(api.openPiWebRepairWindow).toHaveBeenCalledOnce()
   })
 
-  it('submits the user API key to repair PI-Web config without echoing it', async () => {
+  it('does not render embedded PI-Web config repair controls on the main page', async () => {
     const wrapper = mount(PiWebPage)
     await vi.dynamicImportSettled()
 
-    await wrapper.get('[data-field="pi-web-api-key"]').setValue('sk-user-secret')
-    await wrapper.get('[data-action="repair-pi-web-config"]').trigger('click')
-
-    expect(api.repairPiWebConfig).toHaveBeenCalledWith('sk-user-secret')
-    expect(wrapper.text()).toContain('PI-Web 配置已修复')
-    expect(wrapper.text()).not.toContain('sk-user-secret')
-  })
-
-  it('allows replacing the API key even when config status says ready', async () => {
-    api.getPiWebConfigStatus.mockResolvedValueOnce({
-      agentDir: 'C:\\Users\\tester\\.pi\\agent',
-      settingsExists: true,
-      modelsExists: true,
-      authExists: true,
-      defaultProvider: 'ready-provider',
-      defaultModel: 'ready-model',
-      providerConfigured: true,
-      authConfigured: true,
-      needsRepair: false,
-      message: 'PI-Web config ready',
-      detail: 'Current config is ready.',
-    })
-    const wrapper = mount(PiWebPage)
-    await vi.dynamicImportSettled()
-
-    const input = wrapper.get('[data-field="pi-web-api-key"]')
-    expect(input.attributes('disabled')).toBeUndefined()
-
-    await input.setValue('sk-user-secret')
-    const button = wrapper.get('[data-action="repair-pi-web-config"]')
-    expect(button.attributes('disabled')).toBeUndefined()
-    await button.trigger('click')
-
-    expect(api.repairPiWebConfig).toHaveBeenCalledWith('sk-user-secret')
+    expect(api.getPiWebConfigStatus).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-field="pi-web-api-key"]').exists()).toBe(false)
+    expect(wrapper.find('[data-action="repair-pi-web-config"]').exists()).toBe(false)
+    expect(wrapper.find('[data-action="open-pi-web-repair"]').exists()).toBe(true)
   })
 })

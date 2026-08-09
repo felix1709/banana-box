@@ -41,7 +41,7 @@ describe('FloatingActionDialog', () => {
     expect(ui.floatingActionDialogOpen).toBe(false)
   })
 
-  it('shows compression and a reserved reverse action for videos', async () => {
+  it('shows compression and depth-video actions for videos', async () => {
     const ui = useUiStore()
     ui.openFloatingActionDialog({
       filePath: 'C:/tmp/movie.mp4',
@@ -51,7 +51,12 @@ describe('FloatingActionDialog', () => {
     const wrapper = mount(FloatingActionDialog)
 
     expect(wrapper.find('[data-action="compress-video"]').text()).toContain('压缩视频')
-    expect(wrapper.find('[data-action="reverse-video"]').text()).toContain('视频反推')
-    expect(wrapper.find('[data-action="reverse-video"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-action="convert-depth-video"]').exists()).toBe(true)
+
+    await wrapper.find('[data-action="convert-depth-video"]').trigger('click')
+
+    expect(ui.activeTool).toBe('depth-video')
+    expect(ui.depthVideoSourcePath).toBe('C:/tmp/movie.mp4')
+    expect(ui.floatingActionDialogOpen).toBe(false)
   })
 })

@@ -14,6 +14,12 @@ function openReverseImage() {
   ui.openReverseImageWithSource(ui.floatingActionFile.filePath)
   ui.closeFloatingActionDialog()
 }
+
+function openDepthVideo() {
+  if (!ui.floatingActionFile) return
+  ui.openDepthVideoWithSource(ui.floatingActionFile.filePath)
+  ui.closeFloatingActionDialog()
+}
 </script>
 
 <template>
@@ -72,11 +78,11 @@ function openReverseImage() {
           <button
             type="button"
             class="action-button"
-            data-action="reverse-video"
-            disabled
+            data-action="convert-depth-video"
+            @click="openDepthVideo"
           >
-            <strong>视频反推</strong>
-            <span>后续开发，当前先保留入口</span>
+            <strong>转换深度视频</strong>
+            <span>使用本地引擎生成深度图视频并另存为</span>
           </button>
         </template>
       </div>

@@ -4,7 +4,8 @@
   "description": "Capability for the main window",
   "windows": [
     "main",
-    "floatbtn"
+    "floatbtn",
+    "pi-web-repair"
   ],
   "permissions": [
     "core:default",

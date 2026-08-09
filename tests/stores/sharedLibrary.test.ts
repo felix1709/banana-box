@@ -123,7 +123,11 @@ describe('shared library store', () => {
   it('soft deletes shared prompts from the cloud and local list', async () => {
     const auth = useAuthStore()
     const client = sharedClientMock({ duplicate: false })
-    auth.user = { id: 'admin', email: '000001@banana-box.local' } as never
+    auth.user = {
+      id: 'admin',
+      email: 'admin@example.com',
+      app_metadata: { cloud_admin: true },
+    } as never
     auth.client = client as never
     const shared = useSharedLibraryStore()
     shared.hydrate([sharedPrompt()])

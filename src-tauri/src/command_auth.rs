@@ -6,6 +6,7 @@ pub(crate) enum IpcCaller {
     Main,
     FloatButton,
     Reminder,
+    PiWebRepair,
 }
 
 pub(crate) fn require_caller_label(label: &str, allowed: &[IpcCaller]) -> Result<(), String> {
@@ -13,6 +14,7 @@ pub(crate) fn require_caller_label(label: &str, allowed: &[IpcCaller]) -> Result
         "main" => IpcCaller::Main,
         "floatbtn" => IpcCaller::FloatButton,
         "reminder" => IpcCaller::Reminder,
+        "pi-web-repair" => IpcCaller::PiWebRepair,
         _ => return Err("FORBIDDEN_WINDOW".into()),
     };
 
@@ -28,6 +30,7 @@ pub(crate) type MainArgs<T> = AuthorizedArgs<T, 0b001>;
 pub(crate) type FloatArgs<T> = AuthorizedArgs<T, 0b010>;
 pub(crate) type ReminderArgs<T> = AuthorizedArgs<T, 0b100>;
 pub(crate) type MainOrFloatArgs<T> = AuthorizedArgs<T, 0b011>;
+pub(crate) type MainOrPiWebRepairArgs<T> = AuthorizedArgs<T, 0b1001>;
 
 fn allowed_callers<const MASK: u8>() -> Vec<IpcCaller> {
     let mut allowed = Vec::with_capacity(3);
@@ -39,6 +42,9 @@ fn allowed_callers<const MASK: u8>() -> Vec<IpcCaller> {
     }
     if MASK & 0b100 != 0 {
         allowed.push(IpcCaller::Reminder);
+    }
+    if MASK & 0b1000 != 0 {
+        allowed.push(IpcCaller::PiWebRepair);
     }
     allowed
 }
@@ -123,5 +129,16 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error, "INVALID_INPUT");
+    }
+
+    #[test]
+    fn main_or_pi_web_repair_args_allow_the_repair_window_label() {
+        let parsed = deserialize_authorized_payload::<ExampleCommandArgs, 0b1001>(
+            "pi-web-repair",
+            &tauri::ipc::InvokeBody::Json(serde_json::json!({ "projectName": "PI-Web" })),
+        )
+        .unwrap();
+
+        assert_eq!(parsed.project_name, "PI-Web");
     }
 }

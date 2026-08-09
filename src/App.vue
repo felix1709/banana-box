@@ -37,12 +37,14 @@ import PromptEditor from '@/components/PromptEditor.vue'
 import SettingsModal from '@/components/SettingsModal.vue'
 import ReverseImagePanel from '@/components/ReverseImagePanel.vue'
 import FastCompressionPanel from '@/components/FastCompressionPanel.vue'
+import DepthVideoPanel from '@/components/DepthVideoPanel.vue'
 import FloatingActionDialog from '@/components/FloatingActionDialog.vue'
 import ProjectBoardPage from '@/components/projects/ProjectBoardPage.vue'
 import ProjectEditor from '@/components/projects/ProjectEditor.vue'
 import DailyTasksPage from '@/components/daily/DailyTasksPage.vue'
 import StoryboardPage from '@/components/storyboard/StoryboardPage.vue'
 import PiWebPage from '@/components/piweb/PiWebPage.vue'
+import PiWebRepairWindow from '@/components/piweb/PiWebRepairWindow.vue'
 import CloudMigrationDialog from '@/components/cloud/CloudMigrationDialog.vue'
 import UserCloudMenu from '@/components/cloud/UserCloudMenu.vue'
 import SharedLibraryPage from '@/components/shared/SharedLibraryPage.vue'
@@ -57,6 +59,8 @@ const workspaces = useWorkspacesStore()
 const sync = useSyncStatusStore()
 const notifications = useNotificationsStore()
 const presence = usePresenceStore()
+const currentWindow = getCurrentWindow()
+const isPiWebRepairWindow = currentWindow.label === 'pi-web-repair'
 const previewUrl = ref('')
 const expandedPromptId = ref<string | null>(null)
 const sortingPromptId = ref<string | null>(null)
@@ -522,6 +526,7 @@ function dismissDailyTaskReview(payload: DailyTaskReviewActionPayload) {
 }
 
 onMounted(async () => {
+  if (isPiWebRepairWindow) return
   await Promise.all([lib.load(), projects.load(), cloud.load()])
   await auth.initialize()
   if (auth.client && auth.user) {
@@ -562,6 +567,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (isPiWebRepairWindow) return
   window.removeEventListener('mouseup', clearResizeActive)
   clearDailyReminderTimer()
   clearDailyTaskReviewTimer()
@@ -657,7 +663,9 @@ watchEffect(async () => {
 </script>
 
 <template>
+  <PiWebRepairWindow v-if="isPiWebRepairWindow" />
   <div
+    v-else
     v-show="ui.panelVisible"
     class="app"
     @pointerup="onSortEnd"
@@ -816,6 +824,7 @@ watchEffect(async () => {
         </section>
         <ReverseImagePanel v-else-if="ui.activeTool === 'reverse-image'" />
         <FastCompressionPanel v-else-if="ui.activeTool === 'compression'" />
+        <DepthVideoPanel v-else-if="ui.activeTool === 'depth-video'" />
         <ProjectBoardPage v-else-if="ui.activeTool === 'projects'" />
         <DailyTasksPage v-else-if="ui.activeTool === 'daily-tasks'" />
         <StoryboardPage v-else-if="ui.activeTool === 'storyboard'" />

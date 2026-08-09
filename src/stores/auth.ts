@@ -32,7 +32,7 @@ export const useAuthStore = defineStore('auth', {
   }),
   getters: {
     isCloudAdmin(state) {
-      return state.user?.email?.toLowerCase() === `000001@${TEST_ACCOUNT_DOMAIN}`
+      return state.user?.app_metadata?.cloud_admin === true
     },
   },
   actions: {

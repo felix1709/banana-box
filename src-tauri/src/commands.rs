@@ -31,6 +31,8 @@ const MAX_DOWNLOADED_IMAGE_BYTES: usize = 15 * 1024 * 1024;
 const MAX_UPDATE_RESPONSE_BYTES: usize = 1024 * 1024;
 const APP_SERVICES_UNAVAILABLE: &str = "STARTUP_NOT_READY";
 const FFMPEG_DOWNLOAD_URL: &str = "https://ffmpeg.org/download.html";
+const DEPTH_VIDEO_ENGINE_ENV: &str = "BANANA_BOX_DEPTH_VIDEO_ENGINE";
+const DEPTH_VIDEO_ENGINE_COMMAND: &str = "banana-depth-video";
 
 pub(crate) fn data_dir(app: &tauri::AppHandle) -> PathBuf {
     app.path().app_data_dir().expect("no app data dir")
@@ -211,6 +213,13 @@ pub struct CompressMediaInput {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DepthVideoInput {
+    pub source_path: String,
+    pub output_path: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SuggestCompressedOutputPathInput {
     pub source_path: String,
 }
@@ -218,6 +227,18 @@ pub struct SuggestCompressedOutputPathInput {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompressMediaResult {
+    pub output_path: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestDepthVideoOutputPathInput {
+    pub source_path: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DepthVideoResult {
     pub output_path: String,
 }
 
@@ -521,6 +542,40 @@ fn compressed_output_path(source: &Path, ext: &str, suffix: &str) -> Result<Path
     Ok(dir.join(format!("{}_{}.{}", stem, suffix, ext)))
 }
 
+fn depth_video_output_path(source: &Path, suffix: &str) -> Result<PathBuf, String> {
+    let dir = source
+        .parent()
+        .ok_or_else(|| "无法识别源文件目录".to_string())?;
+    let stem = source
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "无法识别源文件名".to_string())?;
+    Ok(dir.join(format!("{}_depth_{}.mp4", stem, suffix)))
+}
+
+fn depth_video_engine_command() -> Command {
+    let configured = std::env::var_os(DEPTH_VIDEO_ENGINE_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    Command::new(configured.unwrap_or_else(|| PathBuf::from(DEPTH_VIDEO_ENGINE_COMMAND)))
+}
+
+fn convert_video_with_depth_engine(source: &Path, output: &Path) -> Result<(), String> {
+    let status = depth_video_engine_command()
+        .arg("--input")
+        .arg(source)
+        .arg("--output")
+        .arg(output)
+        .status()
+        .map_err(|_| "DEPTH_VIDEO_ENGINE_MISSING".to_string())?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err("DEPTH_VIDEO_CONVERSION_FAILED".to_string())
+    }
+}
+
 // 读取目录下所有 .md/.txt 文件内容，供前端解析
 #[tauri::command]
 pub fn read_import_dir(
@@ -677,6 +732,37 @@ pub fn suggest_compressed_output_path(
     let source = PathBuf::from(&input.source_path);
     let ext = compressed_output_ext(&source);
     let output = compressed_output_path(&source, ext, &timestamp_suffix_now())?;
+    Ok(output.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn convert_video_to_depth_video(
+    gate: tauri::State<StartupGate>,
+    input: DepthVideoInput,
+) -> Result<DepthVideoResult, String> {
+    require_startup_ready(&gate)?;
+    let source = PathBuf::from(&input.source_path);
+    if !source.exists() {
+        return Err("源视频文件不存在".to_string());
+    }
+    if !is_video_path(&source) {
+        return Err("请选择视频文件".to_string());
+    }
+    let output = PathBuf::from(&input.output_path);
+    convert_video_with_depth_engine(&source, &output)?;
+    Ok(DepthVideoResult {
+        output_path: output.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn suggest_depth_video_output_path(
+    gate: tauri::State<StartupGate>,
+    input: SuggestDepthVideoOutputPathInput,
+) -> Result<String, String> {
+    require_startup_ready(&gate)?;
+    let source = PathBuf::from(&input.source_path);
+    let output = depth_video_output_path(&source, &timestamp_suffix_now())?;
     Ok(output.to_string_lossy().to_string())
 }
 

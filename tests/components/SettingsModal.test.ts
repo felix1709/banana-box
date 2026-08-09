@@ -17,7 +17,7 @@ import {
   discardLegacyImportPreview,
   inspectLegacyImport,
 } from '@/lib/backup-ipc'
-import { copyToClipboard } from '@/lib/ipc'
+import { copyToClipboard, loadCloudConfig } from '@/lib/ipc'
 import { useAuthStore } from '@/stores/auth'
 import { useCloudSessionStore } from '@/stores/cloudSession'
 
@@ -168,15 +168,15 @@ describe('SettingsModal', () => {
     expect(enable).not.toHaveBeenCalled()
   })
 
-  it('shows cloud configuration controls in feature settings', async () => {
+  it('hides cloud configuration controls when logged out', async () => {
     const wrapper = mount(SettingsModal)
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
-    expect(wrapper.find('.cloud-config-section').exists()).toBe(true)
-    expect(wrapper.find('.cloud-url-input').exists()).toBe(true)
-    expect(wrapper.find('.cloud-anon-key-input').exists()).toBe(true)
-    expect(wrapper.find('.cloud-enabled-toggle').exists()).toBe(true)
-    expect(wrapper.find('.cloud-status').text()).toContain('本地离线模式')
+    expect(wrapper.find('.cloud-config-section').exists()).toBe(false)
+    expect(wrapper.find('.cloud-url-input').exists()).toBe(false)
+    expect(wrapper.find('.cloud-anon-key-input').exists()).toBe(false)
+    expect(wrapper.find('.cloud-enabled-toggle').exists()).toBe(false)
+    expect(loadCloudConfig).not.toHaveBeenCalled()
   })
 
   it('hides cloud administration controls from non-admin signed-in users', async () => {
@@ -192,9 +192,25 @@ describe('SettingsModal', () => {
     expect(wrapper.find('.cloud-sql-copy-button').exists()).toBe(false)
   })
 
-  it('keeps cloud administration controls available for account 000001', async () => {
+  it('does not treat legacy 000001 account as admin without a cloud_admin claim', async () => {
     const auth = useAuthStore()
     auth.user = { id: 'user-1', email: '000001@banana-box.local' } as never
+
+    const wrapper = mount(SettingsModal)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(wrapper.find('.cloud-config-section').exists()).toBe(false)
+    expect(wrapper.find('.cloud-url-input').exists()).toBe(false)
+    expect(wrapper.find('.cloud-sql-copy-button').exists()).toBe(false)
+  })
+
+  it('keeps cloud administration controls available only for cloud_admin users', async () => {
+    const auth = useAuthStore()
+    auth.user = {
+      id: 'user-admin',
+      email: 'admin@example.com',
+      app_metadata: { cloud_admin: true },
+    } as never
 
     const wrapper = mount(SettingsModal)
     await new Promise((resolve) => window.setTimeout(resolve, 0))
@@ -205,6 +221,13 @@ describe('SettingsModal', () => {
   })
 
   it('saves valid cloud configuration from settings', async () => {
+    const auth = useAuthStore()
+    auth.user = {
+      id: 'user-admin',
+      email: 'admin@example.com',
+      app_metadata: { cloud_admin: true },
+    } as never
+
     const wrapper = mount(SettingsModal)
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
@@ -221,6 +244,13 @@ describe('SettingsModal', () => {
   })
 
   it('copies the Supabase setup SQL from cloud settings', async () => {
+    const auth = useAuthStore()
+    auth.user = {
+      id: 'user-admin',
+      email: 'admin@example.com',
+      app_metadata: { cloud_admin: true },
+    } as never
+
     const wrapper = mount(SettingsModal)
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
