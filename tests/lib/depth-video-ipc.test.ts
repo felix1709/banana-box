@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   convertVideoToDepthVideo,
   prepareDepthVideoEngine,
+  prepareDepthVideoPython,
   suggestDepthVideoOutputPath,
 } from '@/lib/ipc'
 
@@ -51,5 +52,16 @@ describe('depth video IPC', () => {
     await prepareDepthVideoEngine()
 
     expect(invoke).toHaveBeenCalledWith('prepare_depth_video_engine')
+  })
+
+  it('installs the managed Python 3.10 environment for depth-video setup', async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      pythonVersion: '3.10',
+      message: 'Python 3.10 环境已准备好',
+    })
+
+    await prepareDepthVideoPython()
+
+    expect(invoke).toHaveBeenCalledWith('prepare_depth_video_python')
   })
 })

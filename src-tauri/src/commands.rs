@@ -251,6 +251,13 @@ pub struct DepthVideoEngineSetupResult {
     pub message: String,
 }
 
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DepthVideoPythonSetupResult {
+    pub python_version: String,
+    pub message: String,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SaveCloudConfigCommandArgs {
@@ -627,15 +634,75 @@ $VenvDir = Join-Path $Root '.venv'
 $CheckpointDir = Join-Path $RepoDir 'checkpoints'
 $SmallCheckpoint = Join-Path $CheckpointDir 'video_depth_anything_vits.pth'
 
+function Get-PythonMinorVersion {
+  param([string]$CommandName, [string[]]$CommandPrefix)
+  $VersionText = & $CommandName @CommandPrefix -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))" 2>$null
+  if ($LASTEXITCODE -eq 0) {
+    return $VersionText.Trim()
+  }
+  return $null
+}
+
+function Test-CompatiblePythonMinorVersion {
+  param([string]$VersionText)
+  return (($VersionText -eq '3.11') -or ($VersionText -eq '3.10'))
+}
+
+function Get-ManagedPython310Path {
+  if (!$env:LocalAppData) {
+    return $null
+  }
+  $ManagedPython = Join-Path $env:LocalAppData 'Programs\Python\Python310\python.exe'
+  if (Test-Path $ManagedPython) {
+    return $ManagedPython
+  }
+  return $null
+}
+
+function Get-CompatiblePython {
+  if (Get-Command py -ErrorAction SilentlyContinue) {
+    foreach ($Version in @('3.11', '3.10')) {
+      $VersionText = Get-PythonMinorVersion -CommandName 'py' -CommandPrefix @("-$Version")
+      if ($VersionText -eq $Version) {
+        return @{ Command = 'py'; Prefix = @("-$Version") }
+      }
+    }
+  }
+
+  $ManagedPython310 = Get-ManagedPython310Path
+  if ($ManagedPython310) {
+    $VersionText = Get-PythonMinorVersion -CommandName $ManagedPython310 -CommandPrefix @()
+    if ($VersionText -eq '3.10') {
+      return @{ Command = $ManagedPython310; Prefix = @() }
+    }
+  }
+
+  if (Get-Command python -ErrorAction SilentlyContinue) {
+    $VersionText = Get-PythonMinorVersion -CommandName 'python' -CommandPrefix @()
+    if (Test-CompatiblePythonMinorVersion $VersionText) {
+      return @{ Command = 'python'; Prefix = @() }
+    }
+    if ($VersionText) {
+      throw "PYTHON_VERSION_UNSUPPORTED: $VersionText"
+    }
+  }
+
+  if (Get-Command py -ErrorAction SilentlyContinue) {
+    $VersionText = Get-PythonMinorVersion -CommandName 'py' -CommandPrefix @('-3')
+    if ($VersionText) {
+      throw "PYTHON_VERSION_UNSUPPORTED: $VersionText"
+    }
+  }
+
+  throw 'PYTHON_NOT_FOUND'
+}
+
 function Invoke-HostPython {
   param([string[]]$Arguments)
-  if (Get-Command py -ErrorAction SilentlyContinue) {
-    & py -3 @Arguments
-  } elseif (Get-Command python -ErrorAction SilentlyContinue) {
-    & python @Arguments
-  } else {
-    throw 'PYTHON_NOT_FOUND'
-  }
+  $Python = Get-CompatiblePython
+  $PythonCommand = $Python.Command
+  $PythonArgs = @($Python.Prefix) + $Arguments
+  & $PythonCommand @PythonArgs
   if ($LASTEXITCODE -ne 0) {
     throw "PYTHON_COMMAND_FAILED: $($Arguments -join ' ')"
   }
@@ -654,11 +721,18 @@ if (!(Test-Path (Join-Path $RepoDir 'run.py'))) {
   Remove-Item -LiteralPath $ExtractDir -Recurse -Force
 }
 
-if (!(Test-Path (Join-Path $VenvDir 'Scripts\python.exe'))) {
+$VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+if (Test-Path $VenvPython) {
+  $VenvVersionText = Get-PythonMinorVersion -CommandName $VenvPython -CommandPrefix @()
+  if (!(Test-CompatiblePythonMinorVersion $VenvVersionText)) {
+    Remove-Item -LiteralPath $VenvDir -Recurse -Force
+  }
+}
+
+if (!(Test-Path $VenvPython)) {
   Invoke-HostPython @('-m', 'venv', $VenvDir)
 }
 
-$VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
 & $VenvPython -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) { throw 'PIP_UPGRADE_FAILED' }
 & $VenvPython -m pip install -r (Join-Path $RepoDir 'requirements.txt')
@@ -723,6 +797,74 @@ Copy-Item -LiteralPath $Generated -Destination $OutputPath -Force
 "#
 }
 
+fn depth_video_python_setup_script() -> &'static str {
+    r#"$ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$InstallerUrl = 'https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe'
+$InstallerPath = Join-Path $Root 'python-3.10.11-amd64.exe'
+
+function Test-Python310Command {
+  param([string]$CommandName, [string[]]$CommandPrefix)
+  $VersionText = & $CommandName @CommandPrefix -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))" 2>$null
+  return (($LASTEXITCODE -eq 0) -and ($VersionText.Trim() -eq '3.10'))
+}
+
+function Get-ManagedPython310Path {
+  if (!$env:LocalAppData) {
+    return $null
+  }
+  $ManagedPython = Join-Path $env:LocalAppData 'Programs\Python\Python310\python.exe'
+  if (Test-Path $ManagedPython) {
+    return $ManagedPython
+  }
+  return $null
+}
+
+function Test-Python310Ready {
+  if ((Get-Command py -ErrorAction SilentlyContinue) -and (Test-Python310Command -CommandName 'py' -CommandPrefix @('-3.10'))) {
+    return $true
+  }
+  $ManagedPython = Get-ManagedPython310Path
+  if ($ManagedPython -and (Test-Python310Command -CommandName $ManagedPython -CommandPrefix @())) {
+    return $true
+  }
+  return $false
+}
+
+if (Test-Python310Ready) {
+  Write-Output 'PYTHON_310_READY'
+  exit 0
+}
+
+if (!(Test-Path $InstallerPath)) {
+  Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -UseBasicParsing
+}
+
+$InstallArgs = @(
+  '/quiet',
+  'InstallAllUsers=0',
+  'Include_launcher=1',
+  'InstallLauncherAllUsers=0',
+  'Include_pip=1',
+  'PrependPath=1',
+  'Include_test=0',
+  'SimpleInstall=1'
+)
+$Process = Start-Process -FilePath $InstallerPath -ArgumentList $InstallArgs -Wait -PassThru
+if ($Process.ExitCode -ne 0) {
+  throw "PYTHON_310_INSTALL_FAILED: exit $($Process.ExitCode)"
+}
+
+if (!(Test-Python310Ready)) {
+  throw 'PYTHON_310_VERIFY_FAILED'
+}
+
+Write-Output 'PYTHON_310_READY'
+"#
+}
+
 fn depth_video_cmd_launcher() -> &'static str {
     "@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%~dp0banana-depth-video.ps1\" %*\r\n"
 }
@@ -738,6 +880,11 @@ fn write_depth_video_engine_scripts(data_dir: &Path) -> Result<DepthVideoEngineS
     std::fs::write(
         engine_dir.join("banana-depth-video.ps1"),
         depth_video_launcher_script(),
+    )
+    .map_err(|error| error.to_string())?;
+    std::fs::write(
+        engine_dir.join("install-python-3.10.ps1"),
+        depth_video_python_setup_script(),
     )
     .map_err(|error| error.to_string())?;
     std::fs::write(
@@ -930,6 +1077,45 @@ pub fn convert_video_to_depth_video(
     Ok(DepthVideoResult {
         output_path: output.to_string_lossy().to_string(),
     })
+}
+
+#[tauri::command]
+pub async fn prepare_depth_video_python(
+    app: tauri::AppHandle,
+    gate: tauri::State<'_, StartupGate>,
+) -> Result<DepthVideoPythonSetupResult, String> {
+    require_startup_ready(&gate)?;
+    let data_dir = data_dir(&app);
+    let script_result = write_depth_video_engine_scripts(&data_dir)?;
+    let setup_script = PathBuf::from(&script_result.engine_dir).join("install-python-3.10.ps1");
+    let setup_output = tauri::async_runtime::spawn_blocking(move || {
+        Command::new("powershell.exe")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(setup_script)
+            .output()
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|_| "DEPTH_VIDEO_PYTHON_SETUP_POWERSHELL_MISSING".to_string())?;
+
+    if setup_output.status.success() {
+        Ok(DepthVideoPythonSetupResult {
+            python_version: "3.10".to_string(),
+            message: "Python 3.10 环境已准备好".to_string(),
+        })
+    } else {
+        let stderr = String::from_utf8_lossy(&setup_output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&setup_output.stdout).trim().to_string();
+        Err(format!(
+            "DEPTH_VIDEO_PYTHON_SETUP_FAILED\n{}{}",
+            stdout,
+            if stderr.is_empty() {
+                String::new()
+            } else {
+                format!("\n{stderr}")
+            }
+        ))
+    }
 }
 
 #[tauri::command]
@@ -1144,9 +1330,69 @@ mod tests {
             std::fs::read_to_string(engine_dir.join("setup-depth-video-engine.ps1")).unwrap();
         let launcher =
             std::fs::read_to_string(engine_dir.join("banana-depth-video.ps1")).unwrap();
+        let python_setup =
+            std::fs::read_to_string(engine_dir.join("install-python-3.10.ps1")).unwrap();
 
         assert!(setup_script.is_ascii());
         assert!(launcher.is_ascii());
+        assert!(python_setup.is_ascii());
+    }
+
+    #[test]
+    fn depth_video_setup_script_requires_a_dependency_compatible_python_version() {
+        let directory = tempfile::tempdir().unwrap();
+        write_depth_video_engine_scripts(directory.path()).unwrap();
+
+        let setup_script = std::fs::read_to_string(
+            directory
+                .path()
+                .join("depth-video-engine")
+                .join("setup-depth-video-engine.ps1"),
+        )
+        .unwrap();
+
+        assert!(setup_script.contains("PYTHON_VERSION_UNSUPPORTED"));
+        assert!(setup_script.contains("'3.11', '3.10'"));
+        assert!(!setup_script.contains("py -3 @Arguments"));
+    }
+
+    #[test]
+    fn depth_video_setup_script_rebuilds_an_existing_incompatible_virtualenv() {
+        let directory = tempfile::tempdir().unwrap();
+        write_depth_video_engine_scripts(directory.path()).unwrap();
+
+        let setup_script = std::fs::read_to_string(
+            directory
+                .path()
+                .join("depth-video-engine")
+                .join("setup-depth-video-engine.ps1"),
+        )
+        .unwrap();
+
+        assert!(setup_script.contains("Get-PythonMinorVersion -CommandName $VenvPython"));
+        assert!(setup_script.contains("Remove-Item -LiteralPath $VenvDir -Recurse -Force"));
+    }
+
+    #[test]
+    fn depth_video_python_setup_script_installs_official_python_310_for_current_user() {
+        let directory = tempfile::tempdir().unwrap();
+        write_depth_video_engine_scripts(directory.path()).unwrap();
+
+        let python_setup_script = std::fs::read_to_string(
+            directory
+                .path()
+                .join("depth-video-engine")
+                .join("install-python-3.10.ps1"),
+        )
+        .unwrap();
+
+        assert!(python_setup_script.contains(
+            "https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe"
+        ));
+        assert!(python_setup_script.contains("InstallAllUsers=0"));
+        assert!(python_setup_script.contains("Include_pip=1"));
+        assert!(python_setup_script.contains("PrependPath=1"));
+        assert!(python_setup_script.contains("PYTHON_310_READY"));
     }
 
     #[test]

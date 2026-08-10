@@ -5,6 +5,7 @@ import DepthVideoPanel from '@/components/DepthVideoPanel.vue'
 import {
   convertVideoToDepthVideo,
   prepareDepthVideoEngine,
+  prepareDepthVideoPython,
   suggestDepthVideoOutputPath,
 } from '@/lib/ipc'
 import { useUiStore } from '@/stores/ui'
@@ -22,6 +23,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 vi.mock('@/lib/ipc', () => ({
   convertVideoToDepthVideo: vi.fn(),
   prepareDepthVideoEngine: vi.fn(),
+  prepareDepthVideoPython: vi.fn(),
   suggestDepthVideoOutputPath: vi.fn(),
 }))
 
@@ -113,6 +115,20 @@ describe('DepthVideoPanel', () => {
     expect(wrapper.text()).toContain('本地深度视频引擎已配置')
   })
 
+  it('installs Python 3.10 from the depth-video environment card', async () => {
+    vi.mocked(prepareDepthVideoPython).mockResolvedValue({
+      pythonVersion: '3.10',
+      message: 'Python 3.10 环境已准备好',
+    })
+    const wrapper = mount(DepthVideoPanel)
+
+    await wrapper.find('.install-python-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(prepareDepthVideoPython).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Python 3.10 环境已准备好')
+  })
+
   it('shows a friendly Python install hint when automatic engine setup cannot find Python', async () => {
     vi.mocked(prepareDepthVideoEngine).mockRejectedValue(
       new Error('DEPTH_VIDEO_ENGINE_SETUP_FAILED\nPYTHON_NOT_FOUND'),
@@ -123,6 +139,18 @@ describe('DepthVideoPanel', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
     expect(wrapper.text()).toContain('未找到 Python。请先安装 Python 3.10+')
+  })
+
+  it('shows a friendly Python version hint when automatic engine setup finds only unsupported Python versions', async () => {
+    vi.mocked(prepareDepthVideoEngine).mockRejectedValue(
+      new Error('DEPTH_VIDEO_ENGINE_SETUP_FAILED\nPYTHON_VERSION_UNSUPPORTED: 3.12'),
+    )
+    const wrapper = mount(DepthVideoPanel)
+
+    await wrapper.find('.prepare-depth-engine-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(wrapper.text()).toContain('请先点击“安装 Python 3.10”')
   })
 
   it('uses a depth-video source path prefilled from the floating action dialog', () => {

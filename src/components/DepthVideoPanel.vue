@@ -4,6 +4,7 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import {
   convertVideoToDepthVideo,
   prepareDepthVideoEngine,
+  prepareDepthVideoPython,
   suggestDepthVideoOutputPath,
 } from '@/lib/ipc'
 import { useUiStore } from '@/stores/ui'
@@ -17,6 +18,7 @@ const progress = ref(0)
 const progressText = ref('')
 const depthEngineStorageKey = 'banana-box-depth-video-engine'
 const enginePath = ref(window.localStorage.getItem(depthEngineStorageKey) ?? '')
+const installingPython = ref(false)
 const preparingEngine = ref(false)
 const engineSetupMessage = ref('')
 
@@ -54,6 +56,18 @@ function depthVideoErrorMessage(reason: unknown) {
   if (raw.includes('PYTHON_NOT_FOUND')) {
     return '未找到 Python。请先安装 Python 3.10+，并勾选 Add python.exe to PATH。'
   }
+  if (raw.includes('PYTHON_VERSION_UNSUPPORTED')) {
+    return '当前 Python 版本不兼容本地深度视频引擎。请先点击“安装 Python 3.10”，再重新点击“下载并配置”。'
+  }
+  if (raw.includes('DEPTH_VIDEO_PYTHON_SETUP_FAILED')) {
+    return raw.replace('DEPTH_VIDEO_PYTHON_SETUP_FAILED', 'Python 3.10 环境安装失败：').trim()
+  }
+  if (raw.includes('PYTHON_310_INSTALL_FAILED')) {
+    return 'Python 3.10 安装失败。请确认网络可用，并稍后重试。'
+  }
+  if (raw.includes('PYTHON_310_VERIFY_FAILED')) {
+    return 'Python 3.10 安装后没有通过检测。请重启 Banana Box 后重试。'
+  }
   if (raw.includes('DEPTH_VIDEO_ENGINE_NOT_CONFIGURED')) {
     return '本地深度视频引擎还没有配置完成。请先在 Banana Box 中点击“下载并配置”。'
   }
@@ -62,6 +76,22 @@ function depthVideoErrorMessage(reason: unknown) {
   }
   if (raw.trim()) return raw
   return '深度视频转换失败，请确认视频文件可用后重试。'
+}
+
+async function installPython() {
+  if (installingPython.value) return
+  installingPython.value = true
+  error.value = ''
+  engineSetupMessage.value = '正在下载并安装官方 Python 3.10，可能需要几分钟。'
+  try {
+    const result = await prepareDepthVideoPython()
+    engineSetupMessage.value = result.message
+  } catch (reason) {
+    error.value = depthVideoErrorMessage(reason)
+    engineSetupMessage.value = ''
+  } finally {
+    installingPython.value = false
+  }
 }
 
 async function prepareEngine() {
@@ -169,6 +199,14 @@ async function onConvert() {
       <div class="engine-actions">
         <button
           type="button"
+          class="install-python-button"
+          :disabled="installingPython || preparingEngine || loading"
+          @click="installPython"
+        >
+          {{ installingPython ? '安装中...' : '安装 Python 3.10' }}
+        </button>
+        <button
+          type="button"
           class="pick-depth-engine-button"
           @click="pickDepthEngine"
         >
@@ -177,7 +215,7 @@ async function onConvert() {
         <button
           type="button"
           class="prepare-depth-engine-button"
-          :disabled="preparingEngine || loading"
+          :disabled="installingPython || preparingEngine || loading"
           @click="prepareEngine"
         >
           {{ preparingEngine ? '配置中...' : '下载并配置' }}
@@ -311,8 +349,11 @@ async function onConvert() {
   flex: 0 0 auto;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
+.install-python-button,
 .pick-depth-engine-button {
   flex: 0 0 auto;
 }

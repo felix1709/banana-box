@@ -49,6 +49,11 @@ export interface DepthVideoEngineSetupResult {
   message: string
 }
 
+export interface DepthVideoPythonSetupResult {
+  pythonVersion: string
+  message: string
+}
+
 export interface SuggestCompressedOutputPathInput {
   sourcePath: string
 }
@@ -143,6 +148,10 @@ export async function convertVideoToDepthVideo(input: DepthVideoInput): Promise<
 
 export async function prepareDepthVideoEngine(): Promise<DepthVideoEngineSetupResult> {
   return await invoke<DepthVideoEngineSetupResult>('prepare_depth_video_engine')
+}
+
+export async function prepareDepthVideoPython(): Promise<DepthVideoPythonSetupResult> {
+  return await invoke<DepthVideoPythonSetupResult>('prepare_depth_video_python')
 }
 
 export async function suggestDepthVideoOutputPath(
