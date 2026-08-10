@@ -153,4 +153,23 @@ describe('DepthVideoPanel', () => {
     expect(wrapper.text()).toContain('movie.mp4')
     expect(wrapper.text()).toContain('本地深度视频引擎不可用')
   })
+
+  it('shows a friendly hint when the selected depth engine is not configured yet', async () => {
+    mocks.open.mockResolvedValue('C:\\Users\\admin\\Desktop\\movie.mp4')
+    vi.mocked(suggestDepthVideoOutputPath).mockResolvedValue(
+      'C:\\Users\\admin\\Desktop\\movie_depth_08081230.mp4',
+    )
+    mocks.save.mockResolvedValue('C:\\Users\\admin\\Desktop\\movie_depth_08081230.mp4')
+    vi.mocked(convertVideoToDepthVideo).mockRejectedValue(
+      new Error('DEPTH_VIDEO_ENGINE_NOT_CONFIGURED'),
+    )
+    const wrapper = mount(DepthVideoPanel)
+
+    await wrapper.find('.pick-depth-video-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.find('.convert-depth-video-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(wrapper.text()).toContain('请先在 Banana Box 中点击“下载并配置”')
+  })
 })

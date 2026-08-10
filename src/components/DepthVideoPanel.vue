@@ -54,6 +54,9 @@ function depthVideoErrorMessage(reason: unknown) {
   if (raw.includes('PYTHON_NOT_FOUND')) {
     return '未找到 Python。请先安装 Python 3.10+，并勾选 Add python.exe to PATH。'
   }
+  if (raw.includes('DEPTH_VIDEO_ENGINE_NOT_CONFIGURED')) {
+    return '本地深度视频引擎还没有配置完成。请先在 Banana Box 中点击“下载并配置”。'
+  }
   if (raw.includes('DEPTH_VIDEO_ENGINE_SETUP_FAILED')) {
     return raw.replace('DEPTH_VIDEO_ENGINE_SETUP_FAILED', '本地深度视频引擎配置失败：').trim()
   }

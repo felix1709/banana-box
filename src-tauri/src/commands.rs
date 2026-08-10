@@ -634,7 +634,7 @@ function Invoke-HostPython {
   } elseif (Get-Command python -ErrorAction SilentlyContinue) {
     & python @Arguments
   } else {
-    throw 'PYTHON_NOT_FOUND: 请先安装 Python 3.10+，并在安装时勾选 Add python.exe to PATH。'
+    throw 'PYTHON_NOT_FOUND'
   }
   if ($LASTEXITCODE -ne 0) {
     throw "PYTHON_COMMAND_FAILED: $($Arguments -join ' ')"
@@ -698,7 +698,7 @@ if (!(Test-Path $InputPath)) {
   throw "DEPTH_VIDEO_INPUT_NOT_FOUND: $InputPath"
 }
 if (!(Test-Path $VenvPython) -or !(Test-Path (Join-Path $RepoDir 'run.py'))) {
-  throw 'DEPTH_VIDEO_ENGINE_NOT_CONFIGURED: 请先在 Banana Box 中点击“下载并配置”。'
+  throw 'DEPTH_VIDEO_ENGINE_NOT_CONFIGURED'
 }
 
 $RunDir = Join-Path (Join-Path $Root 'outputs') ([guid]::NewGuid().ToString('N'))
@@ -1132,6 +1132,21 @@ mod tests {
         assert!(launcher.contains("--input_video"));
         assert!(launcher.contains("--encoder"));
         assert!(launcher.contains("_vis.mp4"));
+    }
+
+    #[test]
+    fn depth_video_engine_powershell_scripts_are_ascii_only_for_windows_powershell() {
+        let directory = tempfile::tempdir().unwrap();
+        write_depth_video_engine_scripts(directory.path()).unwrap();
+
+        let engine_dir = directory.path().join("depth-video-engine");
+        let setup_script =
+            std::fs::read_to_string(engine_dir.join("setup-depth-video-engine.ps1")).unwrap();
+        let launcher =
+            std::fs::read_to_string(engine_dir.join("banana-depth-video.ps1")).unwrap();
+
+        assert!(setup_script.is_ascii());
+        assert!(launcher.is_ascii());
     }
 
     #[test]
