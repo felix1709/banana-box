@@ -3,6 +3,7 @@ import type { Session, SupabaseClient, User } from '@supabase/supabase-js'
 import { getSupabaseClient } from '@/lib/supabaseClient'
 
 const TEST_ACCOUNT_DOMAIN = 'banana-box.local'
+const LEGACY_ADMIN_EMAIL = `000001@${TEST_ACCOUNT_DOMAIN}`
 const EMAIL_NOT_CONFIRMED_MESSAGE = '邮箱还没有验证，请先打开邮箱里的 Supabase 验证邮件。也可以点击下方按钮重新发送验证邮件。'
 
 function normalizeLoginAccount(account: string) {
@@ -32,7 +33,10 @@ export const useAuthStore = defineStore('auth', {
   }),
   getters: {
     isCloudAdmin(state) {
-      return state.user?.app_metadata?.cloud_admin === true
+      return (
+        state.user?.app_metadata?.cloud_admin === true
+        || state.user?.email?.toLowerCase() === LEGACY_ADMIN_EMAIL
+      )
     },
   },
   actions: {

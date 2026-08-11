@@ -192,16 +192,16 @@ describe('SettingsModal', () => {
     expect(wrapper.find('.cloud-sql-copy-button').exists()).toBe(false)
   })
 
-  it('does not treat legacy 000001 account as admin without a cloud_admin claim', async () => {
+  it('shows cloud administration controls for the 000001 administrator account', async () => {
     const auth = useAuthStore()
     auth.user = { id: 'user-1', email: '000001@banana-box.local' } as never
 
     const wrapper = mount(SettingsModal)
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
-    expect(wrapper.find('.cloud-config-section').exists()).toBe(false)
-    expect(wrapper.find('.cloud-url-input').exists()).toBe(false)
-    expect(wrapper.find('.cloud-sql-copy-button').exists()).toBe(false)
+    expect(wrapper.find('.cloud-config-section').exists()).toBe(true)
+    expect(wrapper.find('.cloud-url-input').exists()).toBe(true)
+    expect(wrapper.find('.cloud-sql-copy-button').exists()).toBe(true)
   })
 
   it('keeps cloud administration controls available only for cloud_admin users', async () => {

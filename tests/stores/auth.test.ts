@@ -107,10 +107,13 @@ describe('auth store', () => {
     })
   })
 
-  it('derives cloud administrator access only from the cloud_admin app metadata claim', () => {
+  it('derives cloud administrator access from the 000001 account or cloud_admin app metadata claim', () => {
     const store = useAuthStore()
 
     store.user = { id: 'legacy', email: '000001@banana-box.local' } as never
+    expect(store.isCloudAdmin).toBe(true)
+
+    store.user = { id: 'member', email: '000002@banana-box.local' } as never
     expect(store.isCloudAdmin).toBe(false)
 
     store.user = {
