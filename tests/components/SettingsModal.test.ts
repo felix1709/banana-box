@@ -401,6 +401,44 @@ describe('SettingsModal', () => {
     expect((wrapper.find('.api-model-select').element as HTMLSelectElement).value).toBe('vision-b')
   })
 
+  it('saves the detected reverse model after a successful connection check', async () => {
+    vi.mocked(listAiProviders).mockResolvedValue([{
+      ...reverseImageProvider,
+      defaultModel: 'old-text-only-model',
+      availableModels: ['old-text-only-model'],
+    }])
+    vi.mocked(checkAiProviderConnection).mockResolvedValue({
+      ok: true,
+      message: '连接成功',
+      models: ['vision-a', 'vision-b'],
+    })
+    vi.mocked(saveAiProvider).mockResolvedValue({
+      ...reverseImageProvider,
+      defaultModel: 'vision-a',
+      availableModels: [],
+    })
+    const wrapper = mount(SettingsModal)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await openSettingsTab(wrapper, 1)
+
+    await wrapper.find('.api-check-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(saveAiProvider).toHaveBeenCalledWith({
+      provider: {
+        id: 'reverse-image',
+        kind: 'reverse-image',
+        displayName: reverseImageProvider.displayName,
+        baseUrl: 'https://ai.leihuo.netease.com/v1',
+        modelsUrl: 'https://ai.leihuo.netease.com/v1/models',
+        chatCompletionsUrl: 'https://ai.leihuo.netease.com/v1/chat/completions',
+        defaultModel: 'vision-a',
+        confirmCrossOrigin: false,
+      },
+      apiKey: '',
+    })
+  })
+
   it('asks the user to save before detecting unsaved API URL or key changes', async () => {
     const wrapper = mount(SettingsModal)
     await new Promise((resolve) => window.setTimeout(resolve, 0))

@@ -280,7 +280,19 @@ pub(crate) struct ChatCompletionChoice {
 
 #[derive(serde::Deserialize)]
 pub(crate) struct ChatCompletionMessage {
-    content: String,
+    content: ChatCompletionContent,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+pub(crate) enum ChatCompletionContent {
+    Text(String),
+    Parts(Vec<ChatCompletionContentPart>),
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct ChatCompletionContentPart {
+    text: Option<String>,
 }
 
 pub(crate) fn reverse_image_prompt_instruction() -> &'static str {
@@ -363,7 +375,15 @@ pub(crate) fn parse_chat_completion_prompt(body: &str) -> Result<String, String>
         .choices
         .into_iter()
         .next()
-        .map(|choice| choice.message.content.trim().to_string())
+        .map(|choice| match choice.message.content {
+            ChatCompletionContent::Text(content) => content.trim().to_string(),
+            ChatCompletionContent::Parts(parts) => parts
+                .into_iter()
+                .filter_map(|part| part.text.map(|text| text.trim().to_string()))
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        })
         .filter(|content| !content.is_empty())
         .ok_or_else(|| "模型没有返回提示词".to_string())
 }
@@ -1347,6 +1367,27 @@ mod tests {
         assert_eq!(
             parse_chat_completion_prompt(body).unwrap(),
             "a clean generated prompt"
+        );
+    }
+
+    #[test]
+    fn parse_chat_completion_prompt_reads_array_text_content() {
+        let body = r#"{
+          "choices": [
+            {
+              "message": {
+                "content": [
+                  { "type": "text", "text": "first visual prompt line" },
+                  { "type": "text", "text": "second visual prompt line" }
+                ]
+              }
+            }
+          ]
+        }"#;
+
+        assert_eq!(
+            parse_chat_completion_prompt(body).unwrap(),
+            "first visual prompt line\nsecond visual prompt line"
         );
     }
 

@@ -4,6 +4,7 @@ import { useProviderStore } from '@/stores/providers'
 import { useUiStore } from '@/stores/ui'
 import { importImageFromPath, readImageBytes, saveImage } from '@/lib/ipc'
 import { reverseImagePrompt } from '@/lib/provider-ipc'
+import type { AiProvider } from '@/types/providers'
 
 const providers = useProviderStore()
 const ui = useUiStore()
@@ -28,6 +29,18 @@ function reverseImageErrorMessage(reason: unknown) {
       INVALID_PROVIDER_RESPONSE: '服务返回的内容无法识别，请更换支持视觉的模型后重试',
     }[code] ?? '反推失败，请检查 API 设置后重试'
   )
+}
+
+function reverseImageModel(provider: AiProvider | undefined) {
+  if (!provider) return ''
+  const models = provider.availableModels
+  if (provider.defaultModel && (!models.length || models.includes(provider.defaultModel))) {
+    return provider.defaultModel
+  }
+  if (provider.probedModel && (!models.length || models.includes(provider.probedModel))) {
+    return provider.probedModel
+  }
+  return models[0] ?? provider.defaultModel ?? provider.probedModel ?? ''
 }
 
 onMounted(async () => {
@@ -119,7 +132,7 @@ async function onPaste(e: ClipboardEvent) {
 async function onReverse() {
   if (!imagePath.value) return
   const provider = providers.byId(reverseImageProviderId)
-  const model = provider?.defaultModel ?? provider?.probedModel ?? provider?.availableModels[0]
+  const model = reverseImageModel(provider)
   if (!model) {
     error.value = '图片反推服务尚未就绪，请先在设置中完成配置'
     return

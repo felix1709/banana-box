@@ -78,6 +78,39 @@ describe('ReverseImagePanel', () => {
     expect(ui.editorPrefill?.image).toBe('images/reverse.png')
   })
 
+  it('uses the detected vision model when the saved default model is stale', async () => {
+    vi.mocked(listAiProviders).mockResolvedValue([
+      {
+        ...reverseImageProvider,
+        defaultModel: 'old-text-only-model',
+        availableModels: ['vision-a', 'vision-b'],
+        probedModel: 'vision-a',
+      },
+    ])
+    vi.mocked(saveImage).mockResolvedValue('images/reverse.png')
+    vi.mocked(reverseImagePrompt).mockResolvedValue({
+      prompt: 'a clean product photo prompt',
+    })
+    const wrapper = mount(ReverseImagePanel)
+    const file = new File(['fake'], 'reverse.png', { type: 'image/png' })
+
+    Object.defineProperty(wrapper.find('input[type="file"]').element, 'files', {
+      value: [file],
+      configurable: true,
+    })
+    await wrapper.find('input[type="file"]').trigger('change')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    await wrapper.find('.reverse-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(reverseImagePrompt).toHaveBeenCalledWith({
+      providerId: 'reverse-image',
+      model: 'vision-a',
+      imagePath: 'images/reverse.png',
+    })
+  })
+
   it('prefills an image from an external path selected through the floating action dialog', async () => {
     vi.mocked(importImageFromPath).mockResolvedValue('images/floating.png')
     const ui = useUiStore()

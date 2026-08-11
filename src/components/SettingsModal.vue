@@ -267,6 +267,35 @@ async function saveApiSettings() {
   }
 }
 
+async function saveDetectedApiModel() {
+  const existing = providers.byId(apiProviderId.value)
+  if (!existing) return false
+  const endpoints = providerEndpointsFromBaseUrl(apiBaseUrl.value)
+  const provider = {
+    id: existing.id,
+    kind: existing.kind,
+    displayName: existing.displayName,
+    baseUrl: endpoints.baseUrl,
+    modelsUrl: endpoints.modelsUrl,
+    chatCompletionsUrl: endpoints.chatCompletionsUrl,
+    defaultModel: apiModel.value || null,
+    confirmCrossOrigin: false,
+  }
+  const providerInput = existing.kind === 'storyboard'
+    ? {
+        ...provider,
+        temperature: Number(apiTemperature.value),
+        contextWindowTokens: Number(apiContextWindowTokens.value),
+      }
+    : provider
+  const saved = await providers.save({
+    provider: providerInput,
+    apiKey: '',
+  })
+  applyProvider(saved)
+  return true
+}
+
 async function refreshAutostart() {
   loadingAutostart.value = true
   autostartError.value = ''
@@ -309,11 +338,22 @@ async function onCheckApiConnection() {
       return
     }
     const result = await checkAiProviderConnection(apiProviderId.value)
+    let savedDetectedModel = false
     if (result.models.length) {
       availableModels.value = result.models
       apiModel.value = pickPreferredModel(result.models)
+      if (result.ok) {
+        try {
+          savedDetectedModel = await saveDetectedApiModel()
+        } catch {
+          apiStatus.value = '连接成功，但保存检测到的模型失败，请手动点击保存 API 设置'
+          return
+        }
+      }
     }
-    apiStatus.value = connectionStatusMessage(result)
+    apiStatus.value = savedDetectedModel
+      ? '连接成功，已保存检测到的模型'
+      : connectionStatusMessage(result)
   } catch {
     apiStatus.value = '连接失败，请检查 Provider 设置'
   } finally {
