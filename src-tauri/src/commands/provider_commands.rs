@@ -18,6 +18,8 @@ use url::Url;
 
 const APP_SERVICES_UNAVAILABLE: &str = "STARTUP_NOT_READY";
 const MAX_REVERSE_IMAGE_SOURCE_BYTES: u64 = 10 * 1024 * 1024;
+const REVERSE_IMAGE_PROBE_PNG_BASE64: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAJklEQVR4nO3NMQ0AAAwDoPo33arYsQQMkB6LQCAQCAQCgUAg+BIMi1X0pjxKe0gAAAAASUVORK5CYII=";
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -148,6 +150,26 @@ pub async fn check_ai_provider_connection(
     };
 
     let models = parse_model_ids(&body);
+    if resolved.provider.kind == ProviderKind::ReverseImage {
+        let Some(model) = connection_probe_model(&resolved.provider, &models) else {
+            return Ok(connection_failure_with_models("INVALID_MODEL", models));
+        };
+        let chat_url = match Url::parse(&resolved.provider.chat_completions_url) {
+            Ok(url) => url,
+            Err(_) => {
+                return Ok(connection_failure_with_models(
+                    "INVALID_PROVIDER_URL",
+                    models,
+                ))
+            }
+        };
+        if let Err(error) =
+            probe_reverse_image_chat(&services.provider_http, chat_url, &resolved.api_key, &model)
+                .await
+        {
+            return Ok(connection_failure_with_models(error, models));
+        }
+    }
     Ok(CheckAiProviderConnectionResult {
         ok: true,
         message: "CONNECTION_SUCCEEDED".into(),
@@ -264,11 +286,77 @@ fn validate_managed_image_path(image_path: &str) -> Result<(), String> {
 }
 
 fn connection_failure(message: impl Into<String>) -> CheckAiProviderConnectionResult {
+    connection_failure_with_models(message, vec![])
+}
+
+fn connection_failure_with_models(
+    message: impl Into<String>,
+    models: Vec<String>,
+) -> CheckAiProviderConnectionResult {
     CheckAiProviderConnectionResult {
         ok: false,
         message: message.into(),
-        models: vec![],
+        models,
     }
+}
+
+fn connection_probe_model(provider: &AiProvider, models: &[String]) -> Option<String> {
+    let default_model = provider.default_model.as_deref().map(str::trim);
+    if let Some(model) = default_model.filter(|model| {
+        !model.is_empty()
+            && (models.is_empty() || models.iter().any(|candidate| candidate == model))
+    }) {
+        return Some(model.to_string());
+    }
+    let probed_model = provider.probed_model.as_deref().map(str::trim);
+    if let Some(model) = probed_model.filter(|model| {
+        !model.is_empty()
+            && (models.is_empty() || models.iter().any(|candidate| candidate == model))
+    }) {
+        return Some(model.to_string());
+    }
+    models.first().cloned()
+}
+
+async fn probe_reverse_image_chat(
+    client: &crate::provider_http::ProviderHttpClient,
+    endpoint: Url,
+    api_key: &str,
+    model: &str,
+) -> Result<(), String> {
+    let request = serde_json::json!({
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "请用一句中文描述这张图片。"
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!("data:image/png;base64,{REVERSE_IMAGE_PROBE_PNG_BASE64}")
+                        }
+                    }
+                ]
+            }
+        ]
+    });
+    let body = client
+        .post_json_bounded(
+            endpoint,
+            api_key,
+            request,
+            MAX_REVERSE_IMAGE_RESPONSE_BYTES,
+            CancellationToken::new(),
+        )
+        .await?;
+    let body = String::from_utf8(body).map_err(|_| "INVALID_PROVIDER_RESPONSE")?;
+    parse_chat_completion_prompt(&body)
+        .map(|_| ())
+        .map_err(|_| "INVALID_PROVIDER_RESPONSE".into())
 }
 
 fn parse_model_ids(body: &[u8]) -> Vec<String> {
@@ -298,6 +386,126 @@ fn parse_model_ids(body: &[u8]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        io::{Read, Write},
+        net::{TcpListener, TcpStream},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, Mutex,
+        },
+        thread,
+        time::Duration,
+    };
+
+    struct TestServer {
+        url: Url,
+        requests: Arc<Mutex<Vec<String>>>,
+        stop: Arc<AtomicBool>,
+        worker: Option<thread::JoinHandle<()>>,
+    }
+
+    impl TestServer {
+        fn start(handler: impl Fn(&mut TcpStream) + Send + Sync + 'static) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let stop = Arc::new(AtomicBool::new(false));
+            let worker_stop = stop.clone();
+            let worker_requests = requests.clone();
+            let handler: Arc<dyn Fn(&mut TcpStream) + Send + Sync> = Arc::new(handler);
+            let worker = thread::spawn(move || {
+                while !worker_stop.load(Ordering::SeqCst) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            stream.set_nonblocking(false).unwrap();
+                            if let Some(body) = read_request_body(&mut stream) {
+                                worker_requests.lock().unwrap().push(body);
+                                handler(&mut stream);
+                            }
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(1));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+
+            Self {
+                url,
+                requests,
+                stop,
+                worker: Some(worker),
+            }
+        }
+
+        fn url(&self) -> Url {
+            self.url.clone()
+        }
+
+        fn request_bodies(&self) -> Vec<String> {
+            self.requests.lock().unwrap().clone()
+        }
+    }
+
+    impl Drop for TestServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(worker) = self.worker.take() {
+                worker.join().unwrap();
+            }
+        }
+    }
+
+    fn read_request_body(stream: &mut TcpStream) -> Option<String> {
+        stream
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .ok()?;
+        let mut bytes = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        loop {
+            let read = stream.read(&mut buffer).ok()?;
+            if read == 0 {
+                return None;
+            }
+            bytes.extend_from_slice(&buffer[..read]);
+            if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let headers_end = bytes.windows(4).position(|window| window == b"\r\n\r\n")?;
+        let headers = std::str::from_utf8(&bytes[..headers_end]).ok()?;
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.split_once(':').and_then(|(name, value)| {
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+            })
+            .unwrap_or_default();
+        let expected_bytes = headers_end + 4 + content_length;
+        while bytes.len() < expected_bytes {
+            let read = stream.read(&mut buffer).ok()?;
+            if read == 0 {
+                return None;
+            }
+            bytes.extend_from_slice(&buffer[..read]);
+        }
+        String::from_utf8(bytes[headers_end + 4..expected_bytes].to_vec()).ok()
+    }
+
+    fn write_json_response(stream: &mut TcpStream, status: u16, body: &str) {
+        let response = format!(
+            "HTTP/1.1 {status} Test\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+        stream.flush().unwrap();
+    }
 
     #[test]
     fn save_provider_command_accepts_only_the_write_only_input_shape() {
@@ -390,6 +598,37 @@ mod tests {
             parse_model_ids(body.to_string().as_bytes()),
             vec!["vision-model"]
         );
+    }
+
+    #[tokio::test]
+    async fn reverse_image_connection_probe_posts_a_real_vision_request() {
+        let server = TestServer::start(|stream| {
+            write_json_response(
+                stream,
+                200,
+                r#"{"choices":[{"message":{"content":"probe ok"}}]}"#,
+            );
+        });
+        let client = crate::provider_http::ProviderHttpClient::new().unwrap();
+
+        probe_reverse_image_chat(
+            &client,
+            server.url(),
+            "test-key",
+            "doubao-seed-1-6-vision-250815",
+        )
+        .await
+        .unwrap();
+
+        let bodies = server.request_bodies();
+        assert_eq!(bodies.len(), 1);
+        let body: serde_json::Value = serde_json::from_str(&bodies[0]).unwrap();
+        assert_eq!(body["model"], "doubao-seed-1-6-vision-250815");
+        assert_eq!(body["messages"][0]["content"][1]["type"], "image_url");
+        assert!(body["messages"][0]["content"][1]["image_url"]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
     }
 
     #[test]
