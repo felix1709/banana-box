@@ -634,10 +634,67 @@ $VenvDir = Join-Path $Root '.venv'
 $CheckpointDir = Join-Path $RepoDir 'checkpoints'
 $SmallCheckpoint = Join-Path $CheckpointDir 'video_depth_anything_vits.pth'
 
+function Update-TextFileNoBom {
+  param([string]$Path, [string]$Content)
+  $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($Path, $Content, $Utf8NoBom)
+}
+
+function Repair-DepthVideoCpuFallback {
+  if (!(Test-Path $RepoDir)) {
+    return
+  }
+
+  $AttentionPath = Join-Path $RepoDir 'video_depth_anything\dinov2_layers\attention.py'
+  if (Test-Path $AttentionPath) {
+    $AttentionText = Get-Content -Raw $AttentionPath
+    $UpdatedAttentionText = $AttentionText.Replace(
+      'if not XFORMERS_AVAILABLE:',
+      'if (not XFORMERS_AVAILABLE) or (not x.is_cuda):'
+    )
+    if ($UpdatedAttentionText -ne $AttentionText) {
+      Update-TextFileNoBom -Path $AttentionPath -Content $UpdatedAttentionText
+    }
+  }
+
+  $MotionModulePath = Join-Path $RepoDir 'video_depth_anything\motion_module\motion_module.py'
+  if (Test-Path $MotionModulePath) {
+    $MotionModuleText = Get-Content -Raw $MotionModulePath
+    $UpdatedMotionModuleText = $MotionModuleText.Replace(
+      'use_memory_efficient = XFORMERS_AVAILABLE and self._use_memory_efficient_attention_xformers',
+      'use_memory_efficient = XFORMERS_AVAILABLE and self._use_memory_efficient_attention_xformers and query.is_cuda'
+    )
+    if ($UpdatedMotionModuleText -ne $MotionModuleText) {
+      Update-TextFileNoBom -Path $MotionModulePath -Content $UpdatedMotionModuleText
+    }
+  }
+
+  $MotionAttentionPath = Join-Path $RepoDir 'video_depth_anything\motion_module\attention.py'
+  if (Test-Path $MotionAttentionPath) {
+    $MotionAttentionText = Get-Content -Raw $MotionAttentionPath
+    $UpdatedMotionAttentionText = $MotionAttentionText.Replace(
+      'if XFORMERS_AVAILABLE and self._use_memory_efficient_attention_xformers:',
+      'if XFORMERS_AVAILABLE and self._use_memory_efficient_attention_xformers and query.is_cuda:'
+    )
+    if ($UpdatedMotionAttentionText -ne $MotionAttentionText) {
+      Update-TextFileNoBom -Path $MotionAttentionPath -Content $UpdatedMotionAttentionText
+    }
+  }
+}
+
 function Get-PythonMinorVersion {
   param([string]$CommandName, [string[]]$CommandPrefix)
-  $VersionText = & $CommandName @CommandPrefix -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))" 2>$null
-  if ($LASTEXITCODE -eq 0) {
+  $PreviousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $VersionText = & $CommandName @CommandPrefix -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))" 2>$null
+    $ExitCode = $LASTEXITCODE
+  } catch {
+    return $null
+  } finally {
+    $ErrorActionPreference = $PreviousErrorActionPreference
+  }
+  if (($ExitCode -eq 0) -and $VersionText) {
     return $VersionText.Trim()
   }
   return $null
@@ -721,6 +778,8 @@ if (!(Test-Path (Join-Path $RepoDir 'run.py'))) {
   Remove-Item -LiteralPath $ExtractDir -Recurse -Force
 }
 
+Repair-DepthVideoCpuFallback
+
 $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
 if (Test-Path $VenvPython) {
   $VenvVersionText = Get-PythonMinorVersion -CommandName $VenvPython -CommandPrefix @()
@@ -780,9 +839,74 @@ New-Item -ItemType Directory -Path $RunDir -Force | Out-Null
 $Stem = [IO.Path]::GetFileNameWithoutExtension($InputPath)
 $Generated = Join-Path $RunDir "$($Stem)_vis.mp4"
 
+function Update-TextFileNoBom {
+  param([string]$Path, [string]$Content)
+  $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($Path, $Content, $Utf8NoBom)
+}
+
+function Repair-DepthVideoCpuFallback {
+  if (!(Test-Path $RepoDir)) {
+    return
+  }
+
+  $AttentionPath = Join-Path $RepoDir 'video_depth_anything\dinov2_layers\attention.py'
+  if (Test-Path $AttentionPath) {
+    $AttentionText = Get-Content -Raw $AttentionPath
+    $UpdatedAttentionText = $AttentionText.Replace(
+      'if not XFORMERS_AVAILABLE:',
+      'if (not XFORMERS_AVAILABLE) or (not x.is_cuda):'
+    )
+    if ($UpdatedAttentionText -ne $AttentionText) {
+      Update-TextFileNoBom -Path $AttentionPath -Content $UpdatedAttentionText
+    }
+  }
+
+  $MotionModulePath = Join-Path $RepoDir 'video_depth_anything\motion_module\motion_module.py'
+  if (Test-Path $MotionModulePath) {
+    $MotionModuleText = Get-Content -Raw $MotionModulePath
+    $UpdatedMotionModuleText = $MotionModuleText.Replace(
+      'use_memory_efficient = XFORMERS_AVAILABLE and self._use_memory_efficient_attention_xformers',
+      'use_memory_efficient = XFORMERS_AVAILABLE and self._use_memory_efficient_attention_xformers and query.is_cuda'
+    )
+    if ($UpdatedMotionModuleText -ne $MotionModuleText) {
+      Update-TextFileNoBom -Path $MotionModulePath -Content $UpdatedMotionModuleText
+    }
+  }
+
+  $MotionAttentionPath = Join-Path $RepoDir 'video_depth_anything\motion_module\attention.py'
+  if (Test-Path $MotionAttentionPath) {
+    $MotionAttentionText = Get-Content -Raw $MotionAttentionPath
+    $UpdatedMotionAttentionText = $MotionAttentionText.Replace(
+      'if XFORMERS_AVAILABLE and self._use_memory_efficient_attention_xformers:',
+      'if XFORMERS_AVAILABLE and self._use_memory_efficient_attention_xformers and query.is_cuda:'
+    )
+    if ($UpdatedMotionAttentionText -ne $MotionAttentionText) {
+      Update-TextFileNoBom -Path $MotionAttentionPath -Content $UpdatedMotionAttentionText
+    }
+  }
+}
+
+Repair-DepthVideoCpuFallback
+
+$RunArgs = @(
+  (Join-Path $RepoDir 'run.py'),
+  '--input_video',
+  $InputPath,
+  '--output_dir',
+  $RunDir,
+  '--encoder',
+  'vits',
+  '--grayscale'
+)
+& $VenvPython -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)" 2>$null
+if ($LASTEXITCODE -ne 0) {
+  $RunArgs += '--fp32'
+}
+
 Push-Location $RepoDir
 try {
-  & $VenvPython (Join-Path $RepoDir 'run.py') --input_video $InputPath --output_dir $RunDir --encoder vits --grayscale
+  & $VenvPython @RunArgs
   if ($LASTEXITCODE -ne 0) { throw "DEPTH_VIDEO_RUN_FAILED: exit $LASTEXITCODE" }
 } finally {
   Pop-Location
@@ -807,8 +931,17 @@ $InstallerPath = Join-Path $Root 'python-3.10.11-amd64.exe'
 
 function Test-Python310Command {
   param([string]$CommandName, [string[]]$CommandPrefix)
-  $VersionText = & $CommandName @CommandPrefix -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))" 2>$null
-  return (($LASTEXITCODE -eq 0) -and ($VersionText.Trim() -eq '3.10'))
+  $PreviousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $VersionText = & $CommandName @CommandPrefix -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))" 2>$null
+    $ExitCode = $LASTEXITCODE
+  } catch {
+    return $false
+  } finally {
+    $ErrorActionPreference = $PreviousErrorActionPreference
+  }
+  return (($ExitCode -eq 0) -and $VersionText -and ($VersionText.Trim() -eq '3.10'))
 }
 
 function Get-ManagedPython310Path {
@@ -845,7 +978,7 @@ if (!(Test-Path $InstallerPath)) {
 $InstallArgs = @(
   '/quiet',
   'InstallAllUsers=0',
-  'Include_launcher=1',
+  'Include_launcher=0',
   'InstallLauncherAllUsers=0',
   'Include_pip=1',
   'PrependPath=1',
@@ -1357,6 +1490,27 @@ mod tests {
     }
 
     #[test]
+    fn depth_video_python_probe_does_not_stop_when_py_launcher_has_no_matching_runtime() {
+        let directory = tempfile::tempdir().unwrap();
+        write_depth_video_engine_scripts(directory.path()).unwrap();
+
+        let engine_dir = directory.path().join("depth-video-engine");
+        let setup_script =
+            std::fs::read_to_string(engine_dir.join("setup-depth-video-engine.ps1")).unwrap();
+        let python_setup_script =
+            std::fs::read_to_string(engine_dir.join("install-python-3.10.ps1")).unwrap();
+
+        assert!(setup_script.contains("$PreviousErrorActionPreference = $ErrorActionPreference"));
+        assert!(setup_script.contains("$ErrorActionPreference = 'Continue'"));
+        assert!(setup_script.contains("$ErrorActionPreference = $PreviousErrorActionPreference"));
+        assert!(python_setup_script
+            .contains("$PreviousErrorActionPreference = $ErrorActionPreference"));
+        assert!(python_setup_script.contains("$ErrorActionPreference = 'Continue'"));
+        assert!(python_setup_script
+            .contains("$ErrorActionPreference = $PreviousErrorActionPreference"));
+    }
+
+    #[test]
     fn depth_video_setup_script_rebuilds_an_existing_incompatible_virtualenv() {
         let directory = tempfile::tempdir().unwrap();
         write_depth_video_engine_scripts(directory.path()).unwrap();
@@ -1371,6 +1525,27 @@ mod tests {
 
         assert!(setup_script.contains("Get-PythonMinorVersion -CommandName $VenvPython"));
         assert!(setup_script.contains("Remove-Item -LiteralPath $VenvDir -Recurse -Force"));
+    }
+
+    #[test]
+    fn depth_video_scripts_patch_cpu_runs_away_from_cuda_only_xformers() {
+        let directory = tempfile::tempdir().unwrap();
+        write_depth_video_engine_scripts(directory.path()).unwrap();
+
+        let engine_dir = directory.path().join("depth-video-engine");
+        let setup_script =
+            std::fs::read_to_string(engine_dir.join("setup-depth-video-engine.ps1")).unwrap();
+        let launcher =
+            std::fs::read_to_string(engine_dir.join("banana-depth-video.ps1")).unwrap();
+
+        for script in [&setup_script, &launcher] {
+            assert!(script.contains("Repair-DepthVideoCpuFallback"));
+            assert!(script.contains("not XFORMERS_AVAILABLE) or (not x.is_cuda"));
+            assert!(script.contains("query.is_cuda"));
+            assert!(script.contains("UTF8Encoding($false)"));
+        }
+        assert!(launcher.contains("'--fp32'"));
+        assert!(launcher.contains("torch.cuda.is_available()"));
     }
 
     #[test]
@@ -1390,6 +1565,8 @@ mod tests {
             "https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe"
         ));
         assert!(python_setup_script.contains("InstallAllUsers=0"));
+        assert!(python_setup_script.contains("Include_launcher=0"));
+        assert!(python_setup_script.contains("InstallLauncherAllUsers=0"));
         assert!(python_setup_script.contains("Include_pip=1"));
         assert!(python_setup_script.contains("PrependPath=1"));
         assert!(python_setup_script.contains("PYTHON_310_READY"));
