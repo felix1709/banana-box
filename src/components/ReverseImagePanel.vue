@@ -22,10 +22,17 @@ function reverseImageErrorMessage(reason: unknown) {
   return (
     {
       PROVIDER_HTTP_ERROR: '服务拒绝了图片请求，请检查模型、图片格式和尺寸',
+      PROVIDER_REQUEST_FAILED: '网络请求失败，请检查网络连接或服务地址后重试',
       PROVIDER_TIMEOUT: '图片反推请求超时，请稍后重试',
+      INVALID_PROVIDER_URL: '图片反推服务地址无效，请在设置中重新保存服务地址',
+      PROVIDER_REDIRECT_FORBIDDEN: '图片反推服务发生跳转，请检查服务地址是否填写完整',
+      PROVIDER_RESPONSE_TOO_LARGE: '服务返回内容过大，请换一张图片或稍后重试',
       PROVIDER_CREDENTIALS_REQUIRED: '未找到 API Key，请在设置中重新保存',
+      PROVIDER_CREDENTIAL_STORE_UNAVAILABLE: '无法读取本机 API Key，请在设置中重新保存',
+      INVALID_MODEL: '当前模型不可用，请在设置中重新检测并选择支持视觉的模型',
       IMAGE_TOO_LARGE: '图片超过 10MB，请压缩后再试',
       IMAGE_NOT_FOUND: '找不到已导入的图片，请重新选择图片',
+      INVALID_IMAGE_PATH: '图片路径无效，请重新导入图片后再试',
       INVALID_PROVIDER_RESPONSE: '服务返回的内容无法识别，请更换支持视觉的模型后重试',
     }[code] ?? '反推失败，请检查 API 设置后重试'
   )

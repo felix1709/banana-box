@@ -351,6 +351,59 @@ describe('ProjectBoardPage', () => {
     expect(store.projects.find((item) => item.id === 'p1')?.archived).toBe(false)
   })
 
+  it('uploads the archived project state to cloud when a signed-in creator archives a project', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user-1' } as never
+    const client = cloudProjectUpsertClientMock()
+    auth.client = client as never
+    useWorkspacesStore().activeWorkspaceId = 'workspace-1'
+    const store = useProjectsStore()
+    store.hydrate([project({ id: 'p1', ownerUserId: 'user-1', archived: false })])
+    vi.mocked(archiveProject).mockImplementation(async (projectId, archived) => ({
+      ...store.projects.find((item) => item.id === projectId)!,
+      archived,
+      updatedAt: '2026-08-11T10:00:00Z',
+    }))
+    const wrapper = mountBoard()
+
+    await wrapper.get('[data-action="archive-project"][data-project-id="p1"]').trigger('click')
+    await flushPromises()
+
+    expect(client.projectUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'p1',
+      workspace_id: 'workspace-1',
+      archived: true,
+      updated_by: 'user-1',
+    }))
+  })
+
+  it('uploads the restored project state to cloud when a signed-in creator restores a project', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user-1' } as never
+    const client = cloudProjectUpsertClientMock()
+    auth.client = client as never
+    useWorkspacesStore().activeWorkspaceId = 'workspace-1'
+    const store = useProjectsStore()
+    store.hydrate([project({ id: 'p1', ownerUserId: 'user-1', archived: true })])
+    vi.mocked(archiveProject).mockImplementation(async (projectId, archived) => ({
+      ...store.projects.find((item) => item.id === projectId)!,
+      archived,
+      updatedAt: '2026-08-11T10:00:00Z',
+    }))
+    const wrapper = mountBoard()
+
+    await wrapper.get('[data-action="toggle-archived-projects"]').trigger('click')
+    await wrapper.get('[data-action="restore-project"][data-project-id="p1"]').trigger('click')
+    await flushPromises()
+
+    expect(client.projectUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'p1',
+      workspace_id: 'workspace-1',
+      archived: false,
+      updated_by: 'user-1',
+    }))
+  })
+
   it('lets only the project creator permanently delete archived projects after confirmation', async () => {
     const auth = useAuthStore()
     auth.user = { id: 'user-1' } as never
@@ -367,6 +420,32 @@ describe('ProjectBoardPage', () => {
     expect(confirmSpy).toHaveBeenCalled()
     expect(deleteProject).toHaveBeenCalledWith('p1')
     expect(store.projects.find((item) => item.id === 'p1')).toBeUndefined()
+  })
+
+  it('soft-deletes the cloud project before deleting an archived project locally', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user-1' } as never
+    const client = cloudProjectDeleteClientMock()
+    auth.client = client as never
+    useWorkspacesStore().activeWorkspaceId = 'workspace-1'
+    const store = useProjectsStore()
+    store.hydrate([project({ id: 'p1', ownerUserId: 'user-1', archived: true })])
+    vi.mocked(deleteProject).mockResolvedValue(undefined)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mountBoard()
+
+    await wrapper.get('[data-action="toggle-archived-projects"]').trigger('click')
+    await wrapper.get('[data-action="delete-archived-project"][data-project-id="p1"]').trigger('click')
+    await flushPromises()
+
+    expect(client.projectUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      deleted_at: expect.any(String),
+      updated_at: expect.any(String),
+      updated_by: 'user-1',
+    }))
+    expect(client.eqId).toHaveBeenCalledWith('id', 'p1')
+    expect(client.eqWorkspace).toHaveBeenCalledWith('workspace_id', 'workspace-1')
+    expect(deleteProject).toHaveBeenCalledWith('p1')
   })
 
   it('does not show archive or delete controls to collaborators', async () => {
@@ -439,5 +518,40 @@ function cloudClientMock() {
         })),
       })),
     })),
+  }
+}
+
+function cloudProjectUpsertClientMock() {
+  const projectUpsert = vi.fn(async () => ({ data: [], error: null }))
+  const stageUpsert = vi.fn(async () => ({ data: [], error: null }))
+  return {
+    projectUpsert,
+    stageUpsert,
+    from: vi.fn((table: string) => {
+      if (table === 'projects') {
+        return { upsert: projectUpsert }
+      }
+      if (table === 'project_stages') {
+        return { upsert: stageUpsert }
+      }
+      return { upsert: vi.fn(async () => ({ data: [], error: null })) }
+    }),
+  }
+}
+
+function cloudProjectDeleteClientMock() {
+  const eqWorkspace = vi.fn(async () => ({ data: [], error: null }))
+  const eqId = vi.fn(() => ({ eq: eqWorkspace }))
+  const projectUpdate = vi.fn(() => ({ eq: eqId }))
+  return {
+    projectUpdate,
+    eqId,
+    eqWorkspace,
+    from: vi.fn((table: string) => {
+      if (table === 'projects') {
+        return { update: projectUpdate }
+      }
+      return { update: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(async () => ({ data: [], error: null })) })) })) }
+    }),
   }
 }

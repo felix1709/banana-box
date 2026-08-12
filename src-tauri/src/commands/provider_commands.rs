@@ -11,6 +11,7 @@ use crate::{
     providers::{AiProvider, ProviderKind, SaveProviderInput},
 };
 use base64::Engine;
+use image::codecs::jpeg::JpegEncoder;
 use std::path::{Component, Path, PathBuf};
 use tauri::{Manager, WebviewWindow};
 use tokio_util::sync::CancellationToken;
@@ -18,6 +19,7 @@ use url::Url;
 
 const APP_SERVICES_UNAVAILABLE: &str = "STARTUP_NOT_READY";
 const MAX_REVERSE_IMAGE_SOURCE_BYTES: u64 = 10 * 1024 * 1024;
+const REVERSE_IMAGE_INLINE_TARGET_BYTES: usize = 1536 * 1024;
 const REVERSE_IMAGE_PROBE_PNG_BASE64: &str =
     "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAJklEQVR4nO3NMQ0AAAwDoPo33arYsQQMkB6LQCAQCAQCgUAg+BIMi1X0pjxKe0gAAAAASUVORK5CYII=";
 
@@ -206,11 +208,7 @@ pub async fn reverse_image_prompt(
         return Err("IMAGE_TOO_LARGE".into());
     }
     let bytes = std::fs::read(&full_image_path).map_err(|_| "IMAGE_NOT_FOUND")?;
-    let data_url = format!(
-        "data:{};base64,{}",
-        mime_from_path(&input.image_path),
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    );
+    let data_url = reverse_image_data_url_for_request(&input.image_path, &full_image_path, &bytes)?;
     let request = serde_json::json!({
         "model": model,
         "messages": [
@@ -283,6 +281,44 @@ fn validate_managed_image_path(image_path: &str) -> Result<(), String> {
         return Err("INVALID_IMAGE_PATH".into());
     }
     Ok(())
+}
+
+fn reverse_image_data_url_for_request(
+    logical_image_path: &str,
+    full_image_path: &Path,
+    source_bytes: &[u8],
+) -> Result<String, String> {
+    let (mime, bytes) = if source_bytes.len() > REVERSE_IMAGE_INLINE_TARGET_BYTES {
+        match compress_reverse_image_to_jpeg(full_image_path, REVERSE_IMAGE_INLINE_TARGET_BYTES) {
+            Ok(compressed) if compressed.len() < source_bytes.len() => ("image/jpeg", compressed),
+            _ => (mime_from_path(logical_image_path), source_bytes.to_vec()),
+        }
+    } else {
+        (mime_from_path(logical_image_path), source_bytes.to_vec())
+    };
+
+    Ok(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+fn compress_reverse_image_to_jpeg(source: &Path, target_bytes: usize) -> Result<Vec<u8>, String> {
+    let image = image::open(source).map_err(|_| "INVALID_IMAGE")?;
+    let rgb = image.to_rgb8();
+    let mut best = Vec::new();
+    for quality in [88_u8, 76, 64, 52, 40, 32, 24, 16, 10] {
+        let mut bytes = Vec::new();
+        let mut encoder = JpegEncoder::new_with_quality(&mut bytes, quality);
+        encoder
+            .encode_image(&rgb)
+            .map_err(|_| "INVALID_IMAGE".to_string())?;
+        best = bytes;
+        if best.len() <= target_bytes {
+            break;
+        }
+    }
+    Ok(best)
 }
 
 fn connection_failure(message: impl Into<String>) -> CheckAiProviderConnectionResult {
@@ -646,5 +682,33 @@ mod tests {
                 "INVALID_IMAGE_PATH"
             );
         }
+    }
+
+    #[test]
+    fn reverse_image_request_data_url_compresses_large_png_to_jpeg() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.png");
+        let mut image = image::RgbImage::new(1024, 1024);
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            *pixel = image::Rgb([
+                ((x * 31 + y * 17) % 256) as u8,
+                ((x * 13 + y * 47) % 256) as u8,
+                ((x * 61 + y * 7) % 256) as u8,
+            ]);
+        }
+        image.save(&source).unwrap();
+        let original = std::fs::read(&source).unwrap();
+        assert!(original.len() > REVERSE_IMAGE_INLINE_TARGET_BYTES);
+
+        let data_url = reverse_image_data_url_for_request("images/source.png", &source, &original)
+            .expect("large PNG should be compressed for provider request");
+
+        assert!(data_url.starts_with("data:image/jpeg;base64,"));
+        let encoded = data_url.strip_prefix("data:image/jpeg;base64,").unwrap();
+        let compressed = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        assert!(compressed.len() < original.len());
+        assert!(compressed.len() <= REVERSE_IMAGE_INLINE_TARGET_BYTES);
     }
 }

@@ -21,6 +21,7 @@ interface CloudProjectRow {
   last_activity_actor_name: string | null
   created_at: string
   updated_at: string
+  deleted_at?: string | null
 }
 
 interface CloudProjectStageRow {
@@ -103,11 +104,13 @@ function mapCloudProjects(rowsByTable: Record<string, unknown[]>): Project[] {
     stagesByProject.set(row.project_id, stages)
   }
 
-  return projectRows.map((project) => {
-    const stages = (stagesByProject.get(project.id) ?? fallbackStages(project))
-      .sort((left, right) => left.position - right.position)
-    return cloudProjectToProject(project, stages)
-  })
+  return projectRows
+    .filter((project) => !project.deleted_at)
+    .map((project) => {
+      const stages = (stagesByProject.get(project.id) ?? fallbackStages(project))
+        .sort((left, right) => left.position - right.position)
+      return cloudProjectToProject(project, stages)
+    })
 }
 
 export const useSyncStatusStore = defineStore('syncStatus', {

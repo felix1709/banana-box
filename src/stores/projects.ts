@@ -38,6 +38,16 @@ function sortProjects(projects: Project[]) {
   })
 }
 
+function projectTimestamp(project: Project) {
+  const timestamp = Date.parse(project.updatedAt)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function shouldReplaceProject(existing: Project | undefined, incoming: Project) {
+  if (!existing) return true
+  return projectTimestamp(incoming) >= projectTimestamp(existing)
+}
+
 function stageColumns(): Record<StageKey, Project[]> {
   return STAGE_DEFINITIONS.reduce(
     (columns, stage) => {
@@ -111,7 +121,11 @@ export const useProjectsStore = defineStore('projects', {
 
     mergeProjects(projects: Project[]) {
       const merged = new Map(this.projects.map((project) => [project.id, project]))
-      for (const project of projects) merged.set(project.id, project)
+      for (const project of projects) {
+        if (shouldReplaceProject(merged.get(project.id), project)) {
+          merged.set(project.id, project)
+        }
+      }
       this.projects = sortProjects([...merged.values()])
     },
 

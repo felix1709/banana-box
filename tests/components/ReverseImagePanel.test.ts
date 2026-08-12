@@ -206,4 +206,23 @@ describe('ReverseImagePanel', () => {
 
     expect(wrapper.text()).toContain('服务拒绝了图片请求，请检查模型、图片格式和尺寸')
   })
+
+  it('explains network failures without blaming the saved API settings', async () => {
+    vi.mocked(saveImage).mockResolvedValue('images/network.png')
+    vi.mocked(reverseImagePrompt).mockRejectedValue(new Error('PROVIDER_REQUEST_FAILED'))
+    const wrapper = mount(ReverseImagePanel)
+    const file = new File(['fake'], 'network.png', { type: 'image/png' })
+
+    Object.defineProperty(wrapper.find('input[type="file"]').element, 'files', {
+      value: [file],
+      configurable: true,
+    })
+    await wrapper.find('input[type="file"]').trigger('change')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.find('.reverse-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(wrapper.text()).toContain('网络请求失败，请检查网络连接或服务地址后重试')
+    expect(wrapper.text()).not.toContain('请检查 API 设置后重试')
+  })
 })

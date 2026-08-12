@@ -206,7 +206,8 @@ function toggleArchiveMode() {
 async function archiveProjectCard(project: Project) {
   if (!projectCanManageArchive(project)) return
   try {
-    await projects.setArchived(project.id, true)
+    const archivedProject = await projects.setArchived(project.id, true)
+    await syncProjectArchiveState(archivedProject.id)
   } catch (error) {
     projects.error = error instanceof Error ? error.message : String(error)
   }
@@ -215,10 +216,31 @@ async function archiveProjectCard(project: Project) {
 async function restoreProjectCard(project: Project) {
   if (!projectCanManageArchive(project)) return
   try {
-    await projects.setArchived(project.id, false)
+    const restoredProject = await projects.setArchived(project.id, false)
+    await syncProjectArchiveState(restoredProject.id)
   } catch (error) {
     projects.error = error instanceof Error ? error.message : String(error)
   }
+}
+
+async function syncProjectArchiveState(projectId: string) {
+  if (!auth.client || !auth.user || !workspaces.activeWorkspaceId) return
+  await projects.ensureCloudProject(auth.client, workspaces.activeWorkspaceId, auth.user.id, projectId)
+}
+
+async function syncProjectDeletedState(projectId: string) {
+  if (!auth.client || !auth.user || !workspaces.activeWorkspaceId) return
+  const deletedAt = new Date().toISOString()
+  const response = await auth.client
+    .from('projects')
+    .update({
+      deleted_at: deletedAt,
+      updated_at: deletedAt,
+      updated_by: auth.user.id,
+    })
+    .eq('id', projectId)
+    .eq('workspace_id', workspaces.activeWorkspaceId)
+  if (response.error) throw new Error(response.error.message)
 }
 
 async function deleteArchivedProjectCard(project: Project) {
@@ -226,6 +248,7 @@ async function deleteArchivedProjectCard(project: Project) {
   const confirmed = window.confirm('确认永久删除这个归档项目吗？删除后不能恢复。')
   if (!confirmed) return
   try {
+    await syncProjectDeletedState(project.id)
     await projects.remove(project.id)
   } catch (error) {
     projects.error = error instanceof Error ? error.message : String(error)
