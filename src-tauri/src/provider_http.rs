@@ -96,8 +96,28 @@ impl ProviderHttpClient {
         decoded_limit: usize,
         cancellation: CancellationToken,
     ) -> Result<Vec<u8>, String> {
+        self.post_json_bounded_with_timeouts(
+            url,
+            api_key,
+            body,
+            decoded_limit,
+            cancellation,
+            self.timeouts,
+        )
+        .await
+    }
+
+    pub async fn post_json_bounded_with_timeouts(
+        &self,
+        url: Url,
+        api_key: &str,
+        body: serde_json::Value,
+        decoded_limit: usize,
+        cancellation: CancellationToken,
+        timeouts: ProviderHttpTimeouts,
+    ) -> Result<Vec<u8>, String> {
         let request = self.client.post(url).bearer_auth(api_key).json(&body);
-        self.read_non_streaming(request, decoded_limit, cancellation)
+        self.read_non_streaming_with_timeouts(request, decoded_limit, cancellation, timeouts)
             .await
     }
 
@@ -126,24 +146,41 @@ impl ProviderHttpClient {
         decoded_limit: usize,
         cancellation: CancellationToken,
     ) -> Result<Vec<u8>, String> {
+        self.read_non_streaming_with_timeouts(request, decoded_limit, cancellation, self.timeouts)
+            .await
+    }
+
+    async fn read_non_streaming_with_timeouts(
+        &self,
+        request: RequestBuilder,
+        decoded_limit: usize,
+        cancellation: CancellationToken,
+        timeouts: ProviderHttpTimeouts,
+    ) -> Result<Vec<u8>, String> {
         if cancellation.is_cancelled() {
             return Err(PROVIDER_REQUEST_CANCELLED.into());
         }
 
         let total_cancellation = cancellation.clone();
         let read = async {
-            let response = self.send_request(request, &total_cancellation).await?;
+            let response = self
+                .send_request_with_response_timeout(
+                    request,
+                    &total_cancellation,
+                    timeouts.response_header,
+                )
+                .await?;
             reject_declared_response_that_exceeds_limit(&response, decoded_limit)?;
             collect_response(
                 response,
                 total_cancellation,
-                self.timeouts.idle,
+                timeouts.idle,
                 decoded_limit,
             )
             .await
         };
 
-        select_cancel_or_timeout(&cancellation, self.timeouts.total_non_streaming, read).await?
+        select_cancel_or_timeout(&cancellation, timeouts.total_non_streaming, read).await?
     }
 
     async fn send_request(
@@ -151,12 +188,22 @@ impl ProviderHttpClient {
         request: RequestBuilder,
         cancellation: &CancellationToken,
     ) -> Result<Response, String> {
+        self.send_request_with_response_timeout(request, cancellation, self.timeouts.response_header)
+            .await
+    }
+
+    async fn send_request_with_response_timeout(
+        &self,
+        request: RequestBuilder,
+        cancellation: &CancellationToken,
+        response_header_timeout: Duration,
+    ) -> Result<Response, String> {
         if cancellation.is_cancelled() {
             return Err(PROVIDER_REQUEST_CANCELLED.into());
         }
 
         let response =
-            select_cancel_or_timeout(cancellation, self.timeouts.response_header, request.send())
+            select_cancel_or_timeout(cancellation, response_header_timeout, request.send())
                 .await?
                 .map_err(map_request_error)?;
         if response.status().is_redirection() {
@@ -866,6 +913,51 @@ mod tests {
                 .unwrap_err(),
             "PROVIDER_TIMEOUT"
         );
+    }
+
+    #[tokio::test]
+    async fn post_json_bounded_can_use_request_specific_timeouts() {
+        let header_stall = TestServer::start(|_, _stream, stop| {
+            while !stop.load(Ordering::SeqCst) {
+                thread::sleep(Duration::from_millis(1));
+            }
+        });
+        let client = test_client(short_timeouts());
+        assert_eq!(
+            client
+                .post_json_bounded(
+                    header_stall.url(),
+                    "test-key",
+                    serde_json::json!({"hello": "world"}),
+                    64,
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap_err(),
+            "PROVIDER_TIMEOUT"
+        );
+
+        let slow_header = TestServer::start(|_, stream, _| {
+            thread::sleep(Duration::from_millis(30));
+            write_response(stream, 200, &[], b"slow ok");
+        });
+        let body = client
+            .post_json_bounded_with_timeouts(
+                slow_header.url(),
+                "test-key",
+                serde_json::json!({"hello": "world"}),
+                64,
+                CancellationToken::new(),
+                ProviderHttpTimeouts {
+                    response_header: Duration::from_millis(100),
+                    idle: Duration::from_millis(100),
+                    total_non_streaming: Duration::from_millis(100),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(body, b"slow ok");
     }
 
     #[test]

@@ -6,13 +6,16 @@ use crate::{
     },
     provider_http::{
         MAX_MODEL_ID_BYTES, MAX_PROVIDER_MODELS, MAX_PROVIDER_MODELS_BODY_BYTES,
-        MAX_REVERSE_IMAGE_CONTENT_BYTES, MAX_REVERSE_IMAGE_RESPONSE_BYTES,
+        MAX_REVERSE_IMAGE_CONTENT_BYTES, MAX_REVERSE_IMAGE_RESPONSE_BYTES, ProviderHttpTimeouts,
     },
     providers::{AiProvider, ProviderKind, SaveProviderInput},
 };
 use base64::Engine;
 use image::codecs::jpeg::JpegEncoder;
-use std::path::{Component, Path, PathBuf};
+use std::{
+    path::{Component, Path, PathBuf},
+    time::Duration,
+};
 use tauri::{Manager, WebviewWindow};
 use tokio_util::sync::CancellationToken;
 use url::Url;
@@ -231,12 +234,13 @@ pub async fn reverse_image_prompt(
         Url::parse(&resolved.provider.chat_completions_url).map_err(|_| "INVALID_PROVIDER_URL")?;
     let body = services
         .provider_http
-        .post_json_bounded(
+        .post_json_bounded_with_timeouts(
             endpoint,
             &resolved.api_key,
             request,
             MAX_REVERSE_IMAGE_RESPONSE_BYTES,
             CancellationToken::new(),
+            reverse_image_request_timeouts(),
         )
         .await?;
     if body.len() > MAX_REVERSE_IMAGE_RESPONSE_BYTES {
@@ -319,6 +323,14 @@ fn compress_reverse_image_to_jpeg(source: &Path, target_bytes: usize) -> Result<
         }
     }
     Ok(best)
+}
+
+fn reverse_image_request_timeouts() -> ProviderHttpTimeouts {
+    ProviderHttpTimeouts {
+        response_header: Duration::from_secs(150),
+        idle: Duration::from_secs(90),
+        total_non_streaming: Duration::from_secs(180),
+    }
 }
 
 fn connection_failure(message: impl Into<String>) -> CheckAiProviderConnectionResult {
