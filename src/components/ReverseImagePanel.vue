@@ -18,7 +18,7 @@ const error = ref('')
 const reverseImageProviderId = 'reverse-image'
 
 function reverseImageErrorMessage(reason: unknown) {
-  const code = reason instanceof Error ? reason.message : ''
+  const code = typeof reason === 'string' ? reason : reason instanceof Error ? reason.message : ''
   return (
     {
       PROVIDER_HTTP_ERROR: '服务拒绝了图片请求，请检查模型、图片格式和尺寸',
