@@ -224,6 +224,7 @@ describe('cloud collaboration schema', () => {
       '0001_auth_workspaces.sql',
       '0002_content_collaboration_schema.sql',
       '0004_workspace_bootstrap_fix.sql',
+      '0014_project_collaboration_rls_fixes.sql',
     ]) {
       const sql = readMigration(migration)
       for (const policy of createPolicyStatements(sql)) {

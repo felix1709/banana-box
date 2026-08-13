@@ -1,4 +1,5 @@
 drop policy if exists "comments readable by workspace members" on public.comments;
+drop policy if exists "comments readable by project collaborators" on public.comments;
 create policy "comments readable by project collaborators"
 on public.comments for select
 to authenticated
@@ -11,6 +12,7 @@ using (
 );
 
 drop policy if exists "comments insertable by commenters" on public.comments;
+drop policy if exists "comments insertable by project collaborators" on public.comments;
 create policy "comments insertable by project collaborators"
 on public.comments for insert
 to authenticated
@@ -27,6 +29,7 @@ with check (
 );
 
 drop policy if exists "comments editable by authors" on public.comments;
+drop policy if exists "comments editable by project collaborators" on public.comments;
 create policy "comments editable by project collaborators"
 on public.comments for update
 to authenticated
@@ -52,6 +55,7 @@ with check (
 );
 
 drop policy if exists "comment mentions readable by workspace members" on public.comment_mentions;
+drop policy if exists "comment mentions readable by project collaborators" on public.comment_mentions;
 create policy "comment mentions readable by project collaborators"
 on public.comment_mentions for select
 to authenticated
@@ -71,6 +75,7 @@ using (
 );
 
 drop policy if exists "notifications insertable by workspace collaborators" on public.notifications;
+drop policy if exists "notifications insertable by project collaborators" on public.notifications;
 create policy "notifications insertable by project collaborators"
 on public.notifications for insert
 to authenticated
