@@ -37,10 +37,18 @@ const MAX_UPDATE_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_FFMPEG_ARCHIVE_BYTES: usize = 220 * 1024 * 1024;
 const APP_SERVICES_UNAVAILABLE: &str = "STARTUP_NOT_READY";
 const FFMPEG_DOWNLOAD_URL: &str = "https://ffmpeg.org/download.html";
+const FFMPEG_WINDOWS_ACCELERATED_ZIP_URL: &str =
+    "https://gh-proxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-7.1.zip";
 const FFMPEG_WINDOWS_ESSENTIALS_ZIP_URL: &str =
     "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
 const DEPTH_VIDEO_ENGINE_ENV: &str = "BANANA_BOX_DEPTH_VIDEO_ENGINE";
 const DEPTH_VIDEO_ENGINE_COMMAND: &str = "banana-depth-video";
+
+#[derive(Debug, Clone, Copy)]
+struct FfmpegArchiveSource {
+    label: &'static str,
+    url: &'static str,
+}
 
 pub(crate) fn data_dir(app: &tauri::AppHandle) -> PathBuf {
     app.path().app_data_dir().expect("no app data dir")
@@ -590,6 +598,19 @@ fn ffmpeg_missing_message(tool_name: &str) -> String {
     format!(
         "未找到 {tool_name}，请安装完整 FFmpeg（需要 ffmpeg 和 ffprobe）并加入 PATH。下载地址：{FFMPEG_DOWNLOAD_URL}"
     )
+}
+
+fn ffmpeg_archive_sources() -> Vec<FfmpegArchiveSource> {
+    vec![
+        FfmpegArchiveSource {
+            label: "国内加速源",
+            url: FFMPEG_WINDOWS_ACCELERATED_ZIP_URL,
+        },
+        FfmpegArchiveSource {
+            label: "官方源",
+            url: FFMPEG_WINDOWS_ESSENTIALS_ZIP_URL,
+        },
+    ]
 }
 
 fn configure_hidden_child_process(command: &mut Command) {
@@ -1404,68 +1425,96 @@ pub async fn prepare_ffmpeg_tools(
     }
     fs::create_dir_all(&extract_dir).map_err(|error| error.to_string())?;
 
-    emit_media_tool_progress(
-        &app,
-        operation_id,
-        "ffmpeg",
-        "download",
-        12,
-        "正在下载 FFmpeg Essentials",
-        Some(FFMPEG_WINDOWS_ESSENTIALS_ZIP_URL.to_string()),
-        "info",
-    );
-    let archive = download_with_progress(
-        &app,
-        operation_id,
-        FFMPEG_WINDOWS_ESSENTIALS_ZIP_URL,
-    )
-    .await?;
+    let mut last_error = "FFMPEG_DOWNLOAD_FAILED".to_string();
+    for source in ffmpeg_archive_sources() {
+        emit_media_tool_progress(
+            &app,
+            operation_id,
+            "ffmpeg",
+            "download",
+            12,
+            format!("正在尝试 FFmpeg {}", source.label),
+            Some(source.url.to_string()),
+            "info",
+        );
 
-    emit_media_tool_progress(
-        &app,
-        operation_id,
-        "ffmpeg",
-        "extract",
-        68,
-        "正在解压 FFmpeg",
-        None,
-        "info",
-    );
-    extract_zip_safely(&archive, &extract_dir)?;
-    let extracted_ffmpeg = find_child_file(&extract_dir, &ffmpeg_tool_filename("ffmpeg"))?;
-    let extracted_ffprobe = find_child_file(&extract_dir, &ffmpeg_tool_filename("ffprobe"))?;
-    fs::copy(extracted_ffmpeg, &ffmpeg_path).map_err(|error| error.to_string())?;
-    fs::copy(extracted_ffprobe, &ffprobe_path).map_err(|error| error.to_string())?;
+        let attempt = async {
+            if extract_dir.exists() {
+                fs::remove_dir_all(&extract_dir).map_err(|error| error.to_string())?;
+            }
+            fs::create_dir_all(&extract_dir).map_err(|error| error.to_string())?;
 
-    emit_media_tool_progress(
-        &app,
-        operation_id,
-        "ffmpeg",
-        "verify",
-        88,
-        "正在验证 ffmpeg 和 ffprobe",
-        None,
-        "info",
-    );
-    verify_ffmpeg_tool(&ffmpeg_path)?;
-    verify_ffmpeg_tool(&ffprobe_path)?;
+            let archive = download_with_progress(&app, operation_id, source.url).await?;
 
-    emit_media_tool_progress(
-        &app,
-        operation_id,
-        "ffmpeg",
-        "done",
-        100,
-        "FFmpeg 已配置完成",
-        None,
-        "success",
-    );
-    Ok(FfmpegSetupResult {
-        ffmpeg_path: ffmpeg_path.to_string_lossy().to_string(),
-        ffprobe_path: ffprobe_path.to_string_lossy().to_string(),
-        bin_dir: bin_dir.to_string_lossy().to_string(),
-        message: "FFmpeg 已配置完成，可以开始压缩视频".to_string(),
-    })
+            emit_media_tool_progress(
+                &app,
+                operation_id,
+                "ffmpeg",
+                "extract",
+                68,
+                "正在解压 FFmpeg",
+                Some(source.label.to_string()),
+                "info",
+            );
+            extract_zip_safely(&archive, &extract_dir)?;
+            let extracted_ffmpeg = find_child_file(&extract_dir, &ffmpeg_tool_filename("ffmpeg"))?;
+            let extracted_ffprobe =
+                find_child_file(&extract_dir, &ffmpeg_tool_filename("ffprobe"))?;
+            fs::copy(extracted_ffmpeg, &ffmpeg_path).map_err(|error| error.to_string())?;
+            fs::copy(extracted_ffprobe, &ffprobe_path).map_err(|error| error.to_string())?;
+
+            emit_media_tool_progress(
+                &app,
+                operation_id,
+                "ffmpeg",
+                "verify",
+                88,
+                "正在验证 ffmpeg 和 ffprobe",
+                Some(source.label.to_string()),
+                "info",
+            );
+            verify_ffmpeg_tool(&ffmpeg_path)?;
+            verify_ffmpeg_tool(&ffprobe_path)?;
+            Ok::<(), String>(())
+        }
+        .await;
+
+        match attempt {
+            Ok(()) => {
+                emit_media_tool_progress(
+                    &app,
+                    operation_id,
+                    "ffmpeg",
+                    "done",
+                    100,
+                    "FFmpeg 已配置完成",
+                    Some(source.label.to_string()),
+                    "success",
+                );
+                return Ok(FfmpegSetupResult {
+                    ffmpeg_path: ffmpeg_path.to_string_lossy().to_string(),
+                    ffprobe_path: ffprobe_path.to_string_lossy().to_string(),
+                    bin_dir: bin_dir.to_string_lossy().to_string(),
+                    message: "FFmpeg 已配置完成，可以开始压缩视频".to_string(),
+                });
+            }
+            Err(error) => {
+                last_error = error;
+                emit_media_tool_progress(
+                    &app,
+                    operation_id,
+                    "ffmpeg",
+                    "download",
+                    18,
+                    format!("{}不可用，正在切换下载源", source.label),
+                    Some(last_error.clone()),
+                    "info",
+                );
+            }
+        }
+    }
+
+    Err(last_error)
 }
 
 #[tauri::command]
@@ -1806,6 +1855,19 @@ mod tests {
         assert!(message.contains("ffprobe"));
         assert!(message.contains("ffmpeg"));
         assert!(message.contains(FFMPEG_DOWNLOAD_URL));
+    }
+
+    #[test]
+    fn ffmpeg_archive_sources_try_accelerated_mirror_before_official_source() {
+        let sources = ffmpeg_archive_sources();
+
+        assert!(sources.len() >= 2);
+        assert!(sources[0].label.contains("国内"));
+        assert_ne!(sources[0].url, FFMPEG_WINDOWS_ESSENTIALS_ZIP_URL);
+        assert_eq!(
+            sources.last().map(|source| source.url),
+            Some(FFMPEG_WINDOWS_ESSENTIALS_ZIP_URL)
+        );
     }
 
     #[test]

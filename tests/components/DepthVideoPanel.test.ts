@@ -8,6 +8,7 @@ import {
   prepareDepthVideoPython,
   suggestDepthVideoOutputPath,
 } from '@/lib/ipc'
+import { revealOutputPath } from '@/lib/outputReveal'
 import { useUiStore } from '@/stores/ui'
 
 const mocks = vi.hoisted(() => ({
@@ -27,11 +28,24 @@ vi.mock('@/lib/ipc', () => ({
   suggestDepthVideoOutputPath: vi.fn(),
 }))
 
+vi.mock('@/lib/outputReveal', () => ({
+  revealOutputPath: vi.fn(),
+}))
+
 describe('DepthVideoPanel', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.resetAllMocks()
     window.localStorage.clear()
+  })
+
+  it('shows only one setup action for the depth-video environment', () => {
+    const wrapper = mount(DepthVideoPanel)
+
+    expect(wrapper.find('.prepare-depth-environment-button').exists()).toBe(true)
+    expect(wrapper.find('.install-python-button').exists()).toBe(false)
+    expect(wrapper.find('.pick-depth-engine-button').exists()).toBe(false)
+    expect(wrapper.find('.prepare-depth-engine-button').exists()).toBe(false)
   })
 
   it('converts a selected video into a locally generated depth video and saves it', async () => {
@@ -43,6 +57,7 @@ describe('DepthVideoPanel', () => {
     vi.mocked(convertVideoToDepthVideo).mockResolvedValue({
       outputPath: 'C:\\Users\\admin\\Desktop\\movie_depth_08081230.mp4',
     })
+    vi.mocked(revealOutputPath).mockResolvedValue(true)
     const wrapper = mount(DepthVideoPanel)
 
     await wrapper.find('.pick-depth-video-button').trigger('click')
@@ -62,13 +77,14 @@ describe('DepthVideoPanel', () => {
       sourcePath: 'C:\\Users\\admin\\Desktop\\movie.mp4',
       outputPath: 'C:\\Users\\admin\\Desktop\\movie_depth_08081230.mp4',
     })
+    expect(revealOutputPath).toHaveBeenCalledWith(
+      'C:\\Users\\admin\\Desktop\\movie_depth_08081230.mp4',
+    )
     expect(wrapper.text()).toContain('movie_depth_08081230.mp4')
   })
 
-  it('lets users choose a local depth engine and passes it to conversion', async () => {
-    mocks.open
-      .mockResolvedValueOnce('C:\\tools\\banana-depth-video.exe')
-      .mockResolvedValueOnce('C:\\Users\\admin\\Desktop\\movie.mp4')
+  it('lets users reopen the output folder after depth-video conversion succeeds', async () => {
+    mocks.open.mockResolvedValue('C:\\Users\\admin\\Desktop\\movie.mp4')
     vi.mocked(suggestDepthVideoOutputPath).mockResolvedValue(
       'C:\\Users\\admin\\Desktop\\movie_depth_08081230.mp4',
     )
@@ -76,57 +92,20 @@ describe('DepthVideoPanel', () => {
     vi.mocked(convertVideoToDepthVideo).mockResolvedValue({
       outputPath: 'C:\\Users\\admin\\Desktop\\movie_depth_08081230.mp4',
     })
+    vi.mocked(revealOutputPath).mockResolvedValue(true)
     const wrapper = mount(DepthVideoPanel)
 
-    await wrapper.find('.pick-depth-engine-button').trigger('click')
-    await new Promise((resolve) => window.setTimeout(resolve, 0))
     await wrapper.find('.pick-depth-video-button').trigger('click')
     await new Promise((resolve) => window.setTimeout(resolve, 0))
     await wrapper.find('.convert-depth-video-button').trigger('click')
     await new Promise((resolve) => window.setTimeout(resolve, 0))
+    vi.mocked(revealOutputPath).mockClear()
 
-    expect(wrapper.text()).toContain('banana-depth-video.exe')
-    expect(window.localStorage.getItem('banana-box-depth-video-engine')).toBe(
-      'C:\\tools\\banana-depth-video.exe',
+    await wrapper.find('.open-output-folder-button').trigger('click')
+
+    expect(revealOutputPath).toHaveBeenCalledWith(
+      'C:\\Users\\admin\\Desktop\\movie_depth_08081230.mp4',
     )
-    expect(convertVideoToDepthVideo).toHaveBeenCalledWith({
-      sourcePath: 'C:\\Users\\admin\\Desktop\\movie.mp4',
-      outputPath: 'C:\\Users\\admin\\Desktop\\movie_depth_08081230.mp4',
-      enginePath: 'C:\\tools\\banana-depth-video.exe',
-    })
-  })
-
-  it('downloads and auto-configures the official small depth-video engine', async () => {
-    vi.mocked(prepareDepthVideoEngine).mockResolvedValue({
-      enginePath: 'C:\\Users\\admin\\AppData\\Roaming\\banana-box\\depth-video-engine\\banana-depth-video.cmd',
-      engineDir: 'C:\\Users\\admin\\AppData\\Roaming\\banana-box\\depth-video-engine',
-      message: '本地深度视频引擎已配置',
-    })
-    const wrapper = mount(DepthVideoPanel)
-
-    await wrapper.find('.prepare-depth-engine-button').trigger('click')
-    await new Promise((resolve) => window.setTimeout(resolve, 0))
-
-    expect(prepareDepthVideoEngine).toHaveBeenCalled()
-    expect(window.localStorage.getItem('banana-box-depth-video-engine')).toBe(
-      'C:\\Users\\admin\\AppData\\Roaming\\banana-box\\depth-video-engine\\banana-depth-video.cmd',
-    )
-    expect(wrapper.text()).toContain('banana-depth-video.cmd')
-    expect(wrapper.text()).toContain('本地深度视频引擎已配置')
-  })
-
-  it('installs Python 3.10 from the depth-video environment card', async () => {
-    vi.mocked(prepareDepthVideoPython).mockResolvedValue({
-      pythonVersion: '3.10',
-      message: 'Python 3.10 环境已准备好',
-    })
-    const wrapper = mount(DepthVideoPanel)
-
-    await wrapper.find('.install-python-button').trigger('click')
-    await new Promise((resolve) => window.setTimeout(resolve, 0))
-
-    expect(prepareDepthVideoPython).toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Python 3.10 环境已准备好')
   })
 
   it('prepares the full depth-video environment from one primary action', async () => {
@@ -159,27 +138,29 @@ describe('DepthVideoPanel', () => {
   })
 
   it('shows a friendly Python install hint when automatic engine setup cannot find Python', async () => {
-    vi.mocked(prepareDepthVideoEngine).mockRejectedValue(
-      new Error('DEPTH_VIDEO_ENGINE_SETUP_FAILED\nPYTHON_NOT_FOUND'),
-    )
+    vi.mocked(prepareDepthVideoPython).mockRejectedValue(new Error('PYTHON_NOT_FOUND'))
     const wrapper = mount(DepthVideoPanel)
 
-    await wrapper.find('.prepare-depth-engine-button').trigger('click')
+    await wrapper.find('.prepare-depth-environment-button').trigger('click')
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
     expect(wrapper.text()).toContain('未找到 Python。请先安装 Python 3.10+')
   })
 
   it('shows a friendly Python version hint when automatic engine setup finds only unsupported Python versions', async () => {
+    vi.mocked(prepareDepthVideoPython).mockResolvedValue({
+      pythonVersion: '3.10',
+      message: 'Python 3.10 环境已准备好',
+    })
     vi.mocked(prepareDepthVideoEngine).mockRejectedValue(
       new Error('DEPTH_VIDEO_ENGINE_SETUP_FAILED\nPYTHON_VERSION_UNSUPPORTED: 3.12'),
     )
     const wrapper = mount(DepthVideoPanel)
 
-    await wrapper.find('.prepare-depth-engine-button').trigger('click')
+    await wrapper.find('.prepare-depth-environment-button').trigger('click')
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
-    expect(wrapper.text()).toContain('请先点击“安装 Python 3.10”')
+    expect(wrapper.text()).toContain('请点击“一键配置深度视频环境”')
   })
 
   it('uses a depth-video source path prefilled from the floating action dialog', () => {

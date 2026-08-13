@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import FastCompressionPanel from '@/components/FastCompressionPanel.vue'
 import { compressMedia, prepareFfmpegTools, suggestCompressedOutputPath } from '@/lib/ipc'
+import { revealOutputPath } from '@/lib/outputReveal'
 import { createPinia, setActivePinia } from 'pinia'
 import { useUiStore } from '@/stores/ui'
 
@@ -25,10 +26,22 @@ vi.mock('@/lib/ipc', () => ({
   suggestCompressedOutputPath: vi.fn(),
 }))
 
+vi.mock('@/lib/outputReveal', () => ({
+  revealOutputPath: vi.fn(),
+}))
+
 describe('FastCompressionPanel', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+  })
+
+  it('shows one-click FFmpeg setup before users try to compress', () => {
+    const wrapper = mount(FastCompressionPanel)
+
+    expect(wrapper.find('.ffmpeg-setup-card').exists()).toBe(true)
+    expect(wrapper.find('.prepare-ffmpeg-button').exists()).toBe(true)
+    expect(prepareFfmpegTools).not.toHaveBeenCalled()
   })
 
   it('imports a file and compresses it with a target size in MB', async () => {
@@ -40,6 +53,7 @@ describe('FastCompressionPanel', () => {
     vi.mocked(compressMedia).mockResolvedValue({
       outputPath: 'C:\\Users\\admin\\Desktop\\photo_06301205.jpg',
     })
+    vi.mocked(revealOutputPath).mockResolvedValue(true)
     const wrapper = mount(FastCompressionPanel)
 
     await wrapper.find('.pick-file-button').trigger('click')
@@ -60,7 +74,31 @@ describe('FastCompressionPanel', () => {
       targetMb: 2,
       outputPath: 'C:\\Users\\admin\\Desktop\\photo_06301205.jpg',
     })
+    expect(revealOutputPath).toHaveBeenCalledWith('C:\\Users\\admin\\Desktop\\photo_06301205.jpg')
     expect(wrapper.text()).toContain('photo_06301205.jpg')
+  })
+
+  it('lets users reopen the output folder after compression succeeds', async () => {
+    mocks.open.mockResolvedValue('C:\\Users\\admin\\Desktop\\movie.mp4')
+    vi.mocked(suggestCompressedOutputPath).mockResolvedValue(
+      'C:\\Users\\admin\\Desktop\\movie_07010930.mp4',
+    )
+    mocks.save.mockResolvedValue('C:\\Users\\admin\\Desktop\\movie_07010930.mp4')
+    vi.mocked(compressMedia).mockResolvedValue({
+      outputPath: 'C:\\Users\\admin\\Desktop\\movie_07010930.mp4',
+    })
+    vi.mocked(revealOutputPath).mockResolvedValue(true)
+    const wrapper = mount(FastCompressionPanel)
+
+    await wrapper.find('.pick-file-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.find('.compress-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    vi.mocked(revealOutputPath).mockClear()
+
+    await wrapper.find('.open-output-folder-button').trigger('click')
+
+    expect(revealOutputPath).toHaveBeenCalledWith('C:\\Users\\admin\\Desktop\\movie_07010930.mp4')
   })
 
   it('shows a visual progress bar while compression is running', async () => {

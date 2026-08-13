@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { compressMedia, prepareFfmpegTools, suggestCompressedOutputPath } from '@/lib/ipc'
+import { revealOutputPath } from '@/lib/outputReveal'
 import { useUiStore } from '@/stores/ui'
 import MediaToolProgressDialog from '@/components/MediaToolProgressDialog.vue'
 
@@ -12,6 +13,7 @@ const targetMb = ref(10)
 const outputPath = ref('')
 const loading = ref(false)
 const error = ref('')
+const revealError = ref('')
 const progress = ref(0)
 const progressText = ref('')
 const ffmpegDownloadUrl = 'https://ffmpeg.org/download.html'
@@ -47,6 +49,7 @@ watch(
     sourcePath.value = nextPath
     outputPath.value = ''
     error.value = ''
+    revealError.value = ''
     progress.value = 0
     progressText.value = ''
   },
@@ -120,13 +123,24 @@ async function pickFile() {
   sourcePath.value = picked
   outputPath.value = ''
   error.value = ''
+  revealError.value = ''
   resetProgress()
+}
+
+async function revealOutputFolder(path = outputPath.value) {
+  if (!path) return
+  revealError.value = ''
+  const opened = await revealOutputPath(path)
+  if (!opened) {
+    revealError.value = '文件已生成，但无法自动打开文件夹。'
+  }
 }
 
 async function onCompress() {
   if (!sourcePath.value || targetMb.value <= 0) return
   loading.value = true
   error.value = ''
+  revealError.value = ''
   outputPath.value = ''
   progress.value = 10
   progressText.value = '准备压缩'
@@ -153,6 +167,7 @@ async function onCompress() {
     outputPath.value = result.outputPath
     progress.value = 100
     progressText.value = '压缩完成'
+    await revealOutputFolder(result.outputPath)
   } catch (reason) {
     error.value = compressionErrorMessage(reason)
     resetProgress()
@@ -209,6 +224,26 @@ async function onPrepareFfmpeg() {
       </p>
     </div>
 
+    <section
+      class="ffmpeg-setup-card dependency-help"
+      aria-label="FFmpeg 配置"
+    >
+      <div>
+        <strong>FFmpeg 视频压缩组件</strong>
+        <p>
+          使用视频压缩前可先一键配置。Banana Box 会自动下载 ffmpeg 和 ffprobe 到应用目录，不需要手动设置 PATH。
+        </p>
+      </div>
+      <button
+        type="button"
+        class="prepare-ffmpeg-button"
+        :disabled="setupStatus === 'running'"
+        @click="onPrepareFfmpeg"
+      >
+        {{ setupStatus === 'running' ? '正在配置...' : '一键配置 FFmpeg' }}
+      </button>
+    </section>
+
     <label class="target-row">
       目标大小 MB
       <input
@@ -253,6 +288,19 @@ async function onPrepareFfmpeg() {
       class="status"
     >
       已输出：{{ outputPath }}
+      <button
+        type="button"
+        class="open-output-folder-button"
+        @click="revealOutputFolder()"
+      >
+        打开所在文件夹
+      </button>
+    </p>
+    <p
+      v-if="revealError"
+      class="reveal-error"
+    >
+      {{ revealError }}
     </p>
     <p
       v-if="error"
@@ -281,14 +329,6 @@ async function onPrepareFfmpeg() {
       >
         打开 FFmpeg 官方下载页
       </a>
-      <button
-        type="button"
-        class="prepare-ffmpeg-button"
-        :disabled="setupStatus === 'running'"
-        @click="onPrepareFfmpeg"
-      >
-        {{ setupStatus === 'running' ? '正在配置...' : '一键配置 FFmpeg' }}
-      </button>
     </section>
 
     <MediaToolProgressDialog
@@ -337,15 +377,37 @@ async function onPrepareFfmpeg() {
 }
 
 .upload-zone p,
-.status {
+.status,
+.reveal-error {
   margin: 0;
   color: var(--bb-text-muted);
   font-size: 13px;
 }
 
 .file-name,
-.status {
+.status,
+.reveal-error {
   overflow-wrap: anywhere;
+}
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.open-output-folder-button {
+  min-height: 28px;
+  padding: 0 9px;
+  border-color: rgba(102, 247, 211, 0.38);
+  background: rgba(102, 247, 211, 0.1);
+  color: var(--bb-primary-strong);
+  font-size: 12px;
+}
+
+.reveal-error {
+  color: var(--bb-warning);
 }
 
 .target-row {

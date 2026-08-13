@@ -7,6 +7,7 @@ import {
   prepareDepthVideoPython,
   suggestDepthVideoOutputPath,
 } from '@/lib/ipc'
+import { revealOutputPath } from '@/lib/outputReveal'
 import { useUiStore } from '@/stores/ui'
 import MediaToolProgressDialog from '@/components/MediaToolProgressDialog.vue'
 
@@ -15,6 +16,7 @@ const sourcePath = ref(ui.depthVideoSourcePath)
 const outputPath = ref('')
 const loading = ref(false)
 const error = ref('')
+const revealError = ref('')
 const progress = ref(0)
 const progressText = ref('')
 const depthEngineStorageKey = 'banana-box-depth-video-engine'
@@ -36,10 +38,9 @@ const fileName = computed(() => {
   return sourcePath.value.split(/[\\/]/).pop() ?? sourcePath.value
 })
 
-const engineName = computed(() => {
-  if (!enginePath.value) return 'banana-depth-video.exe'
-  return enginePath.value.split(/[\\/]/).pop() ?? enginePath.value
-})
+const environmentStatus = computed(() =>
+  enginePath.value ? '深度视频环境已配置，可以开始转换。' : '首次使用前请先一键配置，Banana Box 会自动检查并补齐缺少的 Python、模型和本地引擎。',
+)
 
 watch(
   () => ui.depthVideoSourcePath,
@@ -48,6 +49,7 @@ watch(
     sourcePath.value = nextPath
     outputPath.value = ''
     error.value = ''
+    revealError.value = ''
     resetProgress()
   },
 )
@@ -92,7 +94,7 @@ function depthVideoErrorMessage(reason: unknown) {
     return '未找到 Python。请先安装 Python 3.10+，并勾选 Add python.exe to PATH。'
   }
   if (raw.includes('PYTHON_VERSION_UNSUPPORTED')) {
-    return '当前 Python 版本不兼容本地深度视频引擎。请先点击“安装 Python 3.10”，再重新点击“下载并配置”。'
+    return '当前 Python 版本不兼容本地深度视频引擎。请点击“一键配置深度视频环境”，Banana Box 会自动准备兼容环境。'
   }
   if (raw.includes('DEPTH_VIDEO_PYTHON_SETUP_FAILED')) {
     return raw.replace('DEPTH_VIDEO_PYTHON_SETUP_FAILED', 'Python 3.10 环境安装失败：').trim()
@@ -111,40 +113,6 @@ function depthVideoErrorMessage(reason: unknown) {
   }
   if (raw.trim()) return raw
   return '深度视频转换失败，请确认视频文件可用后重试。'
-}
-
-async function installPython() {
-  if (installingPython.value) return
-  installingPython.value = true
-  error.value = ''
-  engineSetupMessage.value = '正在下载并安装官方 Python 3.10，可能需要几分钟。'
-  try {
-    const result = await prepareDepthVideoPython()
-    engineSetupMessage.value = result.message
-  } catch (reason) {
-    error.value = depthVideoErrorMessage(reason)
-    engineSetupMessage.value = ''
-  } finally {
-    installingPython.value = false
-  }
-}
-
-async function prepareEngine() {
-  if (preparingEngine.value) return
-  preparingEngine.value = true
-  error.value = ''
-  engineSetupMessage.value = '正在下载官方 Small 模型并配置本地环境，首次可能需要较长时间。'
-  try {
-    const result = await prepareDepthVideoEngine()
-    enginePath.value = result.enginePath
-    window.localStorage.setItem(depthEngineStorageKey, result.enginePath)
-    engineSetupMessage.value = result.message
-  } catch (reason) {
-    error.value = depthVideoErrorMessage(reason)
-    engineSetupMessage.value = ''
-  } finally {
-    preparingEngine.value = false
-  }
 }
 
 async function prepareDepthEnvironment() {
@@ -182,22 +150,6 @@ async function prepareDepthEnvironment() {
   }
 }
 
-async function pickDepthEngine() {
-  const picked = await open({
-    multiple: false,
-    filters: [
-      {
-        name: '本地深度视频引擎',
-        extensions: ['exe', 'cmd', 'bat', 'ps1'],
-      },
-    ],
-  })
-  if (!picked || Array.isArray(picked)) return
-  enginePath.value = picked
-  window.localStorage.setItem(depthEngineStorageKey, picked)
-  error.value = ''
-}
-
 async function pickFile() {
   const picked = await open({
     multiple: false,
@@ -212,7 +164,17 @@ async function pickFile() {
   sourcePath.value = picked
   outputPath.value = ''
   error.value = ''
+  revealError.value = ''
   resetProgress()
+}
+
+async function revealOutputFolder(path = outputPath.value) {
+  if (!path) return
+  revealError.value = ''
+  const opened = await revealOutputPath(path)
+  if (!opened) {
+    revealError.value = '文件已生成，但无法自动打开文件夹。'
+  }
 }
 
 async function onConvert() {
@@ -220,6 +182,7 @@ async function onConvert() {
   loading.value = true
   outputPath.value = ''
   error.value = ''
+  revealError.value = ''
   progress.value = 12
   progressText.value = '准备本地转换'
   try {
@@ -256,6 +219,7 @@ async function onConvert() {
     updateMediaDialog(100, `转换完成：${result.outputPath}`)
     mediaDialogStatus.value = 'success'
     progressText.value = '转换完成'
+    await revealOutputFolder(result.outputPath)
   } catch (reason) {
     const friendly = depthVideoErrorMessage(reason)
     error.value = friendly
@@ -276,9 +240,9 @@ async function onConvert() {
   <section class="tool-panel">
     <section class="engine-card">
       <div>
-        <strong>本地深度视频引擎</strong>
+        <strong>深度视频运行环境</strong>
         <p>
-          当前使用：{{ engineName }}
+          {{ environmentStatus }}
         </p>
       </div>
       <div class="engine-actions">
@@ -289,29 +253,6 @@ async function onConvert() {
           @click="prepareDepthEnvironment"
         >
           {{ installingPython || preparingEngine ? '配置中...' : '一键配置深度视频环境' }}
-        </button>
-        <button
-          type="button"
-          class="install-python-button"
-          :disabled="installingPython || preparingEngine || loading"
-          @click="installPython"
-        >
-          {{ installingPython ? '安装中...' : '安装 Python 3.10' }}
-        </button>
-        <button
-          type="button"
-          class="pick-depth-engine-button"
-          @click="pickDepthEngine"
-        >
-          选择引擎
-        </button>
-        <button
-          type="button"
-          class="prepare-depth-engine-button"
-          :disabled="installingPython || preparingEngine || loading"
-          @click="prepareEngine"
-        >
-          {{ preparingEngine ? '配置中...' : '下载并配置' }}
         </button>
       </div>
     </section>
@@ -373,6 +314,19 @@ async function onConvert() {
       class="status"
     >
       已输出：{{ outputPath }}
+      <button
+        type="button"
+        class="open-output-folder-button"
+        @click="revealOutputFolder()"
+      >
+        打开所在文件夹
+      </button>
+    </p>
+    <p
+      v-if="revealError"
+      class="reveal-error"
+    >
+      {{ revealError }}
     </p>
     <p
       v-if="error"
@@ -459,23 +413,12 @@ async function onConvert() {
   justify-content: flex-end;
 }
 
-.install-python-button,
-.pick-depth-engine-button {
-  flex: 0 0 auto;
-}
-
 .prepare-depth-environment-button {
   flex: 0 0 auto;
   border-color: rgba(102, 247, 211, 0.55);
   background: linear-gradient(180deg, var(--bb-primary-strong), var(--bb-primary));
   color: #041017;
   font-weight: 600;
-}
-
-.prepare-depth-engine-button {
-  flex: 0 0 auto;
-  border-color: rgba(102, 247, 211, 0.42);
-  background: rgba(102, 247, 211, 0.12);
 }
 
 .engine-setup-message {
@@ -485,7 +428,8 @@ async function onConvert() {
 }
 
 .upload-zone p,
-.status {
+.status,
+.reveal-error {
   margin: 0;
   color: var(--bb-text-muted);
   font-size: 13px;
@@ -493,8 +437,29 @@ async function onConvert() {
 
 .file-name,
 .status,
-.error {
+.error,
+.reveal-error {
   overflow-wrap: anywhere;
+}
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.open-output-folder-button {
+  min-height: 28px;
+  padding: 0 9px;
+  border-color: rgba(102, 247, 211, 0.38);
+  background: rgba(102, 247, 211, 0.1);
+  color: var(--bb-primary-strong);
+  font-size: 12px;
+}
+
+.reveal-error {
+  color: var(--bb-warning);
 }
 
 .convert-depth-video-button {
