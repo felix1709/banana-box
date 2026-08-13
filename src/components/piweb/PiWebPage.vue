@@ -2,24 +2,38 @@
 import { computed, onMounted, ref } from 'vue'
 import { Activity, ExternalLink, Play, RefreshCw, Square } from '@lucide/vue'
 import {
+  getPiWebConfigStatus,
   getPiWebChatHealth,
   getPiWebStatus,
   openPiWeb,
-  openPiWebRepairWindow,
+  repairPiWebConfig,
   repairPiWebModelCompatibility,
   startPiWeb,
   stopPiWeb,
   type PiWebChatHealth,
+  type PiWebConfigRepairResult,
+  type PiWebConfigStatus,
   type PiWebRepairResult,
   type PiWebStatus,
 } from '@/lib/piWebIpc'
 
+const DEFAULT_PI_WEB_BASE_URL = 'https://ai.leihuo.netease.com/v1'
+const DEFAULT_PI_WEB_PROVIDER = 'leihuo'
+const DEFAULT_PI_WEB_MODEL = 'deepseek-v4-flash'
+
 const status = ref<PiWebStatus | null>(null)
 const chatHealth = ref<PiWebChatHealth | null>(null)
 const repairResult = ref<PiWebRepairResult | null>(null)
+const configStatus = ref<PiWebConfigStatus | null>(null)
+const configRepairResult = ref<PiWebConfigRepairResult | null>(null)
+const configBaseUrl = ref(DEFAULT_PI_WEB_BASE_URL)
+const configApiKey = ref('')
+const configError = ref('')
 const busy = ref(false)
 const healthBusy = ref(false)
 const repairBusy = ref(false)
+const configBusy = ref(false)
+const configRepairBusy = ref(false)
 
 const stateLabel = computed(() => status.value?.state ?? 'checking')
 const stateText = computed(() => {
@@ -44,6 +58,24 @@ const canCheckChat = computed(() => Boolean(status.value?.canOpen))
 const canRepairDeveloperRole = computed(() => {
   const detail = chatHealth.value?.detail ?? ''
   return chatHealth.value?.state === 'error' && detail.includes('developer is not one of')
+})
+const normalizedBaseUrl = computed(() => configBaseUrl.value.trim().replace(/\/+$/, ''))
+const configModelLabel = computed(() => {
+  const provider = configStatus.value?.defaultProvider || DEFAULT_PI_WEB_PROVIDER
+  const model = configStatus.value?.defaultModel || DEFAULT_PI_WEB_MODEL
+  return `${provider} / ${model}`
+})
+const canRepairConfig = computed(() => {
+  return Boolean(normalizedBaseUrl.value && configApiKey.value.trim() && !configRepairBusy.value)
+})
+const configProgressText = computed(() => {
+  if (configRepairBusy.value) return '正在写入 PI-WEB 配置，请稍候…'
+  if (configBusy.value) return '正在检查 PI-WEB 配置状态…'
+  if (configError.value) return configError.value
+  if (configRepairResult.value) return `${configRepairResult.value.message} ${configRepairResult.value.detail}`
+  if (configStatus.value?.needsRepair) return '检测到配置不完整，请填写 URL 和 API Key 后点击一键配置。'
+  if (configStatus.value) return configStatus.value.message
+  return '填写 URL 和 API Key 后即可一键写入 PI-WEB 配置。'
 })
 const primaryAction = computed(() => {
   if (!status.value) return 'refresh'
@@ -79,8 +111,33 @@ async function runPrimaryAction() {
   }
 }
 
-async function openRepairWindow() {
-  await openPiWebRepairWindow()
+async function refreshConfigStatus() {
+  if (configBusy.value) return
+  configBusy.value = true
+  configError.value = ''
+  try {
+    configStatus.value = await getPiWebConfigStatus()
+  } catch (error) {
+    configError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    configBusy.value = false
+  }
+}
+
+async function repairConfig() {
+  if (!canRepairConfig.value) return
+  configRepairBusy.value = true
+  configError.value = ''
+  configRepairResult.value = null
+  try {
+    configRepairResult.value = await repairPiWebConfig(configApiKey.value, normalizedBaseUrl.value)
+    configStatus.value = configRepairResult.value.status
+  } catch (error) {
+    configError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    configApiKey.value = ''
+    configRepairBusy.value = false
+  }
 }
 
 async function checkChatHealth() {
@@ -118,6 +175,7 @@ async function stop() {
 
 onMounted(() => {
   refresh()
+  void refreshConfigStatus()
 })
 </script>
 
@@ -184,25 +242,86 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="pi-web-diagnostics pi-web-config-entry">
+    <section
+      class="pi-web-diagnostics pi-web-config-card"
+      :data-repair-needed="configStatus?.needsRepair ? 'true' : 'false'"
+      aria-live="polite"
+    >
       <div class="pi-web-card-heading">
         <div>
-          <h3>配置修复</h3>
+          <h3>PI-WEB 一键配置</h3>
           <p class="pi-web-health-title">
-            配置检测和 API Key 修复已移到独立窗口。
+            直接填写 URL 和 Key，一键写入 models.json、settings.json 和 auth.json。
           </p>
         </div>
         <button
-          data-action="open-pi-web-repair"
+          data-action="check-pi-web-config"
           type="button"
-          @click="openRepairWindow"
+          :disabled="configBusy || configRepairBusy"
+          @click="refreshConfigStatus"
         >
           <RefreshCw :size="14" />
-          打开配置修复
+          {{ configBusy ? '检查中' : '重新检测' }}
         </button>
       </div>
-      <p>
-        主页面只保留启动和检测操作，复杂配置在二级窗口里处理。
+
+      <p class="pi-web-config-meta">
+        当前写入：{{ configModelLabel }}
+      </p>
+      <p v-if="configStatus?.agentDir">
+        配置目录：{{ configStatus.agentDir }}
+      </p>
+
+      <div
+        v-if="configStatus"
+        class="pi-web-config-grid"
+      >
+        <span :data-ready="configStatus.settingsExists">settings.json</span>
+        <span :data-ready="configStatus.modelsExists">models.json</span>
+        <span :data-ready="configStatus.authExists">auth.json</span>
+        <span :data-ready="configStatus.authConfigured">API Key</span>
+      </div>
+
+      <label class="pi-web-key-field">
+        <span>URL 地址</span>
+        <input
+          v-model="configBaseUrl"
+          data-field="pi-web-base-url"
+          type="url"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="https://ai.leihuo.netease.com/v1"
+          :disabled="configRepairBusy"
+        >
+      </label>
+
+      <label class="pi-web-key-field">
+        <span>API Key</span>
+        <input
+          v-model="configApiKey"
+          data-field="pi-web-api-key"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="请输入当前用户自己的 API Key"
+          :disabled="configRepairBusy"
+        >
+      </label>
+
+      <div class="pi-web-card-actions">
+        <button
+          data-action="repair-pi-web-config"
+          type="button"
+          :disabled="!canRepairConfig"
+          @click="repairConfig"
+        >
+          <RefreshCw :size="14" />
+          {{ configRepairBusy ? '配置中' : '一键配置' }}
+        </button>
+      </div>
+
+      <p class="pi-web-config-progress">
+        {{ configProgressText }}
       </p>
     </section>
 
@@ -442,6 +561,15 @@ onMounted(() => {
   border-color: rgba(255, 214, 102, 0.42);
 }
 
+.pi-web-config-card {
+  max-height: 420px;
+  scrollbar-gutter: stable;
+}
+
+.pi-web-config-meta {
+  font: 12px var(--bb-mono);
+}
+
 .pi-web-config-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -520,6 +648,20 @@ onMounted(() => {
   color: #06231f;
   background: var(--bb-primary);
   font-weight: 700;
+}
+
+.pi-web-card-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.pi-web-config-progress {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(102, 247, 211, 0.24);
+  border-radius: var(--bb-radius-sm);
+  color: var(--bb-primary-strong);
+  background: rgba(102, 247, 211, 0.08);
 }
 
 .pi-web-repair-result {

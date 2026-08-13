@@ -180,22 +180,33 @@ describe('PiWebPage', () => {
     expect(api.repairPiWebModelCompatibility).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('已写入兼容配置')
   })
-  it('opens PI-Web configuration repair in a secondary window', async () => {
+  it('renders PI-Web one-click config controls directly on the main page', async () => {
     const wrapper = mount(PiWebPage)
     await vi.dynamicImportSettled()
 
-    await wrapper.get('[data-action="open-pi-web-repair"]').trigger('click')
-
-    expect(api.openPiWebRepairWindow).toHaveBeenCalledOnce()
+    expect(api.getPiWebConfigStatus).toHaveBeenCalledOnce()
+    expect(wrapper.find('[data-field="pi-web-base-url"]').exists()).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('[data-field="pi-web-base-url"]').element.value).toBe(
+      'https://ai.leihuo.netease.com/v1',
+    )
+    expect(wrapper.find('[data-field="pi-web-api-key"]').exists()).toBe(true)
+    expect(wrapper.find('[data-action="repair-pi-web-config"]').exists()).toBe(true)
+    expect(wrapper.find('[data-action="open-pi-web-repair"]').exists()).toBe(false)
   })
 
-  it('does not render embedded PI-Web config repair controls on the main page', async () => {
+  it('writes PI-Web URL and key from the main page without opening a secondary window', async () => {
     const wrapper = mount(PiWebPage)
     await vi.dynamicImportSettled()
 
-    expect(api.getPiWebConfigStatus).not.toHaveBeenCalled()
-    expect(wrapper.find('[data-field="pi-web-api-key"]').exists()).toBe(false)
-    expect(wrapper.find('[data-action="repair-pi-web-config"]').exists()).toBe(false)
-    expect(wrapper.find('[data-action="open-pi-web-repair"]').exists()).toBe(true)
+    await wrapper.get('[data-field="pi-web-base-url"]').setValue('https://ai.leihuo.netease.com/v1/')
+    await wrapper.get('[data-field="pi-web-api-key"]').setValue('sk-test-main-page')
+    await wrapper.get('[data-action="repair-pi-web-config"]').trigger('click')
+
+    expect(api.repairPiWebConfig).toHaveBeenCalledWith(
+      'sk-test-main-page',
+      'https://ai.leihuo.netease.com/v1',
+    )
+    expect(api.openPiWebRepairWindow).not.toHaveBeenCalled()
+    expect(wrapper.get<HTMLInputElement>('[data-field="pi-web-api-key"]').element.value).toBe('')
   })
 })
