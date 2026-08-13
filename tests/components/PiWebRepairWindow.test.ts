@@ -17,8 +17,8 @@ describe('PiWebRepairWindow', () => {
       settingsExists: false,
       modelsExists: false,
       authExists: false,
-      defaultProvider: '雷火',
-      defaultModel: 'glm-5.2',
+      defaultProvider: 'leihuo',
+      defaultModel: 'deepseek-v4-flash',
       providerConfigured: false,
       authConfigured: false,
       needsRepair: true,
@@ -34,8 +34,8 @@ describe('PiWebRepairWindow', () => {
         settingsExists: true,
         modelsExists: true,
         authExists: true,
-        defaultProvider: '雷火',
-        defaultModel: 'glm-5.2',
+        defaultProvider: 'leihuo',
+        defaultModel: 'deepseek-v4-flash',
         providerConfigured: true,
         authConfigured: true,
         needsRepair: false,
@@ -52,19 +52,28 @@ describe('PiWebRepairWindow', () => {
     expect(api.getPiWebConfigStatus).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('配置修复')
     expect(wrapper.text()).toContain('PI-Web 配置需要修复')
-    expect(wrapper.text()).toContain('雷火 / glm-5.2')
+    expect(wrapper.text()).toContain('leihuo / deepseek-v4-flash')
+    expect(wrapper.get('[data-field="pi-web-base-url"]').attributes('type')).toBe('url')
     expect(wrapper.get('[data-field="pi-web-api-key"]').attributes('type')).toBe('password')
     expect(wrapper.find('.pi-web-repair-body').exists()).toBe(true)
   })
 
-  it('submits the user API key without echoing it back into the page', async () => {
+  it('submits the user API key and gateway URL without echoing the key back into the page', async () => {
     const wrapper = mount(PiWebRepairWindow)
     await vi.dynamicImportSettled()
 
+    expect((wrapper.get('[data-field="pi-web-base-url"]').element as HTMLInputElement).value).toBe(
+      'https://ai.leihuo.netease.com/v1',
+    )
+
+    await wrapper.get('[data-field="pi-web-base-url"]').setValue(' https://ai.leihuo.netease.com/v1/ ')
     await wrapper.get('[data-field="pi-web-api-key"]').setValue('sk-user-secret')
     await wrapper.get('[data-action="repair-pi-web-config"]').trigger('click')
 
-    expect(api.repairPiWebConfig).toHaveBeenCalledWith('sk-user-secret')
+    expect(api.repairPiWebConfig).toHaveBeenCalledWith(
+      'sk-user-secret',
+      'https://ai.leihuo.netease.com/v1',
+    )
     expect(wrapper.text()).toContain('PI-Web 配置已修复')
     expect(wrapper.text()).not.toContain('sk-user-secret')
     expect((wrapper.get('[data-field="pi-web-api-key"]').element as HTMLInputElement).value).toBe('')

@@ -18,9 +18,8 @@ const PI_WEB_HOST: &str = "127.0.0.1";
 const PI_WEB_VERSION: &str = "0.7.16";
 const PI_WEB_ARCHIVE: &str = "pi-web-runtime.zip";
 const NODE_INSTALL_URL: &str = "https://nodejs.org/";
-const DEFAULT_PI_PROVIDER_ID: &str = "雷火";
-const DEFAULT_PI_MODEL_ID: &str = "glm-5.2";
-const DEFAULT_PI_BASE_URL: &str = "https://ai.leihuo.netease.com/v1";
+const DEFAULT_PI_PROVIDER_ID: &str = "leihuo";
+const DEFAULT_PI_MODEL_ID: &str = "deepseek-v4-flash";
 const DEFAULT_PI_API: &str = "openai-completions";
 pub(crate) const PI_WEB_REPAIR_WINDOW_LABEL: &str = "pi-web-repair";
 
@@ -120,6 +119,7 @@ pub struct PiWebEmptyCommandArgs {}
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PiWebConfigRepairArgs {
     api_key: String,
+    base_url: String,
 }
 
 impl Default for PiWebService {
@@ -515,7 +515,7 @@ pub fn repair_pi_web_config(
     args: MainOrPiWebRepairArgs<PiWebConfigRepairArgs>,
 ) -> Result<PiWebConfigRepairResult, String> {
     let agent_dir = pi_agent_config_dir()?;
-    let result = repair_pi_agent_config_at(&agent_dir, &args.0.api_key)?;
+    let result = repair_pi_agent_config_at(&agent_dir, &args.0.api_key, &args.0.base_url)?;
     let _ = service.stop();
     Ok(result)
 }
@@ -743,11 +743,13 @@ fn diagnose_pi_agent_config_at(agent_dir: &Path) -> Result<PiWebConfigStatus, St
 fn repair_pi_agent_config_at(
     agent_dir: &Path,
     api_key: &str,
+    base_url: &str,
 ) -> Result<PiWebConfigRepairResult, String> {
     let trimmed_key = api_key.trim();
     if trimmed_key.is_empty() {
         return Err("PI_WEB_API_KEY_REQUIRED".into());
     }
+    let normalized_base_url = normalize_pi_base_url(base_url)?;
 
     fs::create_dir_all(agent_dir).map_err(|error| format!("无法创建 PI-Web 配置目录：{error}"))?;
     let settings_path = agent_dir.join("settings.json");
@@ -756,19 +758,11 @@ fn repair_pi_agent_config_at(
     let mut changed = false;
 
     let mut settings = ensure_json_object(read_json_file(&settings_path)?);
-    if settings
-        .get("defaultProvider")
-        .and_then(Value::as_str)
-        .is_none_or(|provider| provider.trim().is_empty())
-    {
+    if settings.get("defaultProvider").and_then(Value::as_str) != Some(DEFAULT_PI_PROVIDER_ID) {
         settings["defaultProvider"] = Value::String(DEFAULT_PI_PROVIDER_ID.into());
         changed = true;
     }
-    if settings
-        .get("defaultModel")
-        .and_then(Value::as_str)
-        .is_none_or(|model| model.trim().is_empty())
-    {
+    if settings.get("defaultModel").and_then(Value::as_str) != Some(DEFAULT_PI_MODEL_ID) {
         settings["defaultModel"] = Value::String(DEFAULT_PI_MODEL_ID.into());
         changed = true;
     }
@@ -784,10 +778,13 @@ fn repair_pi_agent_config_at(
         .and_then(Value::as_object_mut)
         .ok_or_else(|| "PI_WEB_MODELS_PROVIDERS_INVALID".to_string())?;
     if !providers.contains_key(DEFAULT_PI_PROVIDER_ID) {
-        providers.insert(DEFAULT_PI_PROVIDER_ID.into(), default_pi_provider_config());
+        providers.insert(
+            DEFAULT_PI_PROVIDER_ID.into(),
+            default_pi_provider_config(&normalized_base_url),
+        );
         changed = true;
     } else if let Some(provider_config) = providers.get_mut(DEFAULT_PI_PROVIDER_ID) {
-        changed |= ensure_default_provider_compat(provider_config);
+        changed |= ensure_default_provider_config(provider_config, &normalized_base_url);
     }
     write_json_file(&models_path, &models)?;
 
@@ -842,6 +839,17 @@ fn ensure_json_object(value: Value) -> Value {
     }
 }
 
+fn normalize_pi_base_url(base_url: &str) -> Result<String, String> {
+    let normalized = base_url.trim().trim_end_matches('/').to_string();
+    if normalized.is_empty() {
+        return Err("PI_WEB_BASE_URL_REQUIRED".into());
+    }
+    if !(normalized.starts_with("https://") || normalized.starts_with("http://")) {
+        return Err("PI_WEB_BASE_URL_INVALID".into());
+    }
+    Ok(normalized)
+}
+
 fn auth_has_api_key(auth: &Value, provider: &str) -> bool {
     auth.get(provider)
         .and_then(|credential| credential.get("key"))
@@ -873,24 +881,12 @@ fn api_key_value_is_resolved(value: &str) -> bool {
     true
 }
 
-fn default_pi_provider_config() -> Value {
+fn default_pi_provider_config(base_url: &str) -> Value {
     json!({
         "api": DEFAULT_PI_API,
-        "baseUrl": DEFAULT_PI_BASE_URL,
+        "baseUrl": base_url,
         "models": [
-            {
-                "id": DEFAULT_PI_MODEL_ID,
-                "name": DEFAULT_PI_MODEL_ID,
-                "reasoning": true,
-                "thinkingLevelMap": {
-                    "max": "max",
-                    "low": "low",
-                    "medium": "medium",
-                    "high": "high",
-                    "xhigh": "xhigh"
-                },
-                "api": DEFAULT_PI_API
-            },
+            default_pi_chat_model_config(),
             {
                 "id": "gpt-image-2",
                 "name": "gpt-image-2",
@@ -903,6 +899,64 @@ fn default_pi_provider_config() -> Value {
             "supportsReasoningEffort": false
         }
     })
+}
+
+fn default_pi_chat_model_config() -> Value {
+    json!({
+        "id": DEFAULT_PI_MODEL_ID,
+        "name": DEFAULT_PI_MODEL_ID,
+        "reasoning": true,
+        "thinkingLevelMap": {
+            "max": "max",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh"
+        },
+        "api": DEFAULT_PI_API
+    })
+}
+
+fn ensure_default_provider_config(provider_config: &mut Value, base_url: &str) -> bool {
+    if !provider_config.is_object() {
+        *provider_config = default_pi_provider_config(base_url);
+        return true;
+    }
+
+    let mut changed = false;
+    if provider_config.get("api").and_then(Value::as_str) != Some(DEFAULT_PI_API) {
+        provider_config["api"] = Value::String(DEFAULT_PI_API.into());
+        changed = true;
+    }
+    if provider_config.get("baseUrl").and_then(Value::as_str) != Some(base_url) {
+        provider_config["baseUrl"] = Value::String(base_url.into());
+        changed = true;
+    }
+    if !provider_config.get("models").is_some_and(Value::is_array) {
+        provider_config["models"] = json!([]);
+        changed = true;
+    }
+    let models = provider_config
+        .get_mut("models")
+        .and_then(Value::as_array_mut)
+        .expect("models was just normalized as an array");
+    if let Some(model) = models
+        .iter_mut()
+        .find(|model| model.get("id").and_then(Value::as_str) == Some(DEFAULT_PI_MODEL_ID))
+    {
+        if model.get("name").and_then(Value::as_str) != Some(DEFAULT_PI_MODEL_ID) {
+            model["name"] = Value::String(DEFAULT_PI_MODEL_ID.into());
+            changed = true;
+        }
+        if model.get("api").and_then(Value::as_str) != Some(DEFAULT_PI_API) {
+            model["api"] = Value::String(DEFAULT_PI_API.into());
+            changed = true;
+        }
+    } else {
+        models.insert(0, default_pi_chat_model_config());
+        changed = true;
+    }
+    changed | ensure_default_provider_compat(provider_config)
 }
 
 fn ensure_default_provider_compat(provider_config: &mut Value) -> bool {
@@ -1407,7 +1461,7 @@ mod tests {
     fn model_repair_adds_provider_level_developer_role_compat() {
         let mut config = json!({
             "providers": {
-                "雷火": {
+                "leihuo": {
                     "api": "openai-completions",
                     "models": [
                         { "id": "glm-5.2", "api": "openai-completions" }
@@ -1416,13 +1470,13 @@ mod tests {
             }
         });
 
-        assert!(apply_developer_role_compat(&mut config, "雷火", "glm-5.2"));
+        assert!(apply_developer_role_compat(&mut config, "leihuo", "glm-5.2"));
         assert_eq!(
-            config["providers"]["雷火"]["compat"]["supportsDeveloperRole"],
+            config["providers"]["leihuo"]["compat"]["supportsDeveloperRole"],
             Value::Bool(false)
         );
         assert_eq!(
-            config["providers"]["雷火"]["compat"]["supportsReasoningEffort"],
+            config["providers"]["leihuo"]["compat"]["supportsReasoningEffort"],
             Value::Bool(false)
         );
     }
@@ -1437,16 +1491,22 @@ mod tests {
         assert!(!status.models_exists);
         assert!(!status.auth_exists);
         assert!(!status.auth_configured);
-        assert_eq!(status.default_provider, "雷火");
-        assert_eq!(status.default_model, "glm-5.2");
+        assert_eq!(DEFAULT_PI_PROVIDER_ID, "leihuo");
+        assert_eq!(status.default_provider, DEFAULT_PI_PROVIDER_ID);
+        assert_eq!(status.default_model, "deepseek-v4-flash");
         assert!(!status.message.contains("sk-"));
         assert!(!status.detail.contains("sk-"));
     }
 
     #[test]
-    fn pi_web_config_repair_writes_default_model_and_auth_key() {
+    fn pi_web_config_repair_writes_leihuo_gateway_model_and_auth_key() {
         let dir = tempfile::tempdir().unwrap();
-        let result = repair_pi_agent_config_at(dir.path(), "sk-test-secret").unwrap();
+        let result = repair_pi_agent_config_at(
+            dir.path(),
+            "sk-test-secret",
+            " https://ai.leihuo.netease.com/v1/ ",
+        )
+        .unwrap();
 
         assert!(result.changed);
         assert!(!result.status.needs_repair);
@@ -1460,23 +1520,27 @@ mod tests {
             &std::fs::read_to_string(dir.path().join("settings.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(settings["defaultProvider"], "雷火");
-        assert_eq!(settings["defaultModel"], "glm-5.2");
+        assert_eq!(settings["defaultProvider"], DEFAULT_PI_PROVIDER_ID);
+        assert_eq!(settings["defaultModel"], "deepseek-v4-flash");
 
         let models: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.path().join("models.json")).unwrap())
                 .unwrap();
-        assert_eq!(models["providers"]["雷火"]["models"][0]["id"], "glm-5.2");
+        let provider = &models["providers"][DEFAULT_PI_PROVIDER_ID];
+        assert_eq!(provider["baseUrl"], "https://ai.leihuo.netease.com/v1");
+        assert_eq!(provider["api"], "openai-completions");
+        assert_eq!(provider["models"][0]["id"], "deepseek-v4-flash");
+        assert_eq!(provider["models"][0]["api"], "openai-completions");
         assert_eq!(
-            models["providers"]["雷火"]["compat"]["supportsDeveloperRole"],
+            provider["compat"]["supportsDeveloperRole"],
             Value::Bool(false)
         );
 
         let auth: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.path().join("auth.json")).unwrap())
                 .unwrap();
-        assert_eq!(auth["雷火"]["type"], "api_key");
-        assert_eq!(auth["雷火"]["key"], "sk-test-secret");
+        assert_eq!(auth[DEFAULT_PI_PROVIDER_ID]["type"], "api_key");
+        assert_eq!(auth[DEFAULT_PI_PROVIDER_ID]["key"], "sk-test-secret");
         assert!(!result.message.contains("sk-test-secret"));
         assert!(!result.detail.contains("sk-test-secret"));
     }
@@ -1499,7 +1563,12 @@ mod tests {
         )
         .unwrap();
 
-        repair_pi_agent_config_at(dir.path(), "sk-test-secret").unwrap();
+        repair_pi_agent_config_at(
+            dir.path(),
+            "sk-test-secret",
+            "https://ai.leihuo.netease.com/v1",
+        )
+        .unwrap();
 
         let models: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.path().join("models.json")).unwrap())
@@ -1508,7 +1577,10 @@ mod tests {
             models["providers"]["custom"]["models"][0]["id"],
             "custom-model"
         );
-        assert_eq!(models["providers"]["雷火"]["models"][0]["id"], "glm-5.2");
+        assert_eq!(
+            models["providers"][DEFAULT_PI_PROVIDER_ID]["models"][0]["id"],
+            "deepseek-v4-flash"
+        );
     }
 
     #[test]

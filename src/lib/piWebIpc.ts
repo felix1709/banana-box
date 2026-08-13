@@ -95,6 +95,9 @@ export async function getPiWebConfigStatus(): Promise<PiWebConfigStatus> {
   return await invoke<PiWebConfigStatus>('get_pi_web_config_status', {})
 }
 
-export async function repairPiWebConfig(apiKey: string): Promise<PiWebConfigRepairResult> {
-  return await invoke<PiWebConfigRepairResult>('repair_pi_web_config', { apiKey })
+export async function repairPiWebConfig(
+  apiKey: string,
+  baseUrl: string,
+): Promise<PiWebConfigRepairResult> {
+  return await invoke<PiWebConfigRepairResult>('repair_pi_web_config', { apiKey, baseUrl })
 }

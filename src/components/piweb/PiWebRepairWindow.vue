@@ -8,20 +8,27 @@ import {
   type PiWebConfigStatus,
 } from '@/lib/piWebIpc'
 
+const DEFAULT_PI_WEB_BASE_URL = 'https://ai.leihuo.netease.com/v1'
+const DEFAULT_PI_WEB_PROVIDER = 'leihuo'
+const DEFAULT_PI_WEB_MODEL = 'deepseek-v4-flash'
+
 const configStatus = ref<PiWebConfigStatus | null>(null)
 const configRepairResult = ref<PiWebConfigRepairResult | null>(null)
+const configBaseUrl = ref(DEFAULT_PI_WEB_BASE_URL)
 const configApiKey = ref('')
 const configBusy = ref(false)
 const configRepairBusy = ref(false)
 
+const normalizedBaseUrl = computed(() => configBaseUrl.value.trim().replace(/\/+$/, ''))
+
 const configModelLabel = computed(() => {
-  const provider = configStatus.value?.defaultProvider || '雷火'
-  const model = configStatus.value?.defaultModel || 'glm-5.2'
+  const provider = configStatus.value?.defaultProvider || DEFAULT_PI_WEB_PROVIDER
+  const model = configStatus.value?.defaultModel || DEFAULT_PI_WEB_MODEL
   return `${provider} / ${model}`
 })
 
 const canRepairConfig = computed(() => {
-  return Boolean(configApiKey.value.trim() && !configRepairBusy.value)
+  return Boolean(normalizedBaseUrl.value && configApiKey.value.trim() && !configRepairBusy.value)
 })
 
 async function refreshConfigStatus() {
@@ -37,7 +44,7 @@ async function repairConfig() {
   if (!canRepairConfig.value) return
   configRepairBusy.value = true
   try {
-    configRepairResult.value = await repairPiWebConfig(configApiKey.value)
+    configRepairResult.value = await repairPiWebConfig(configApiKey.value, normalizedBaseUrl.value)
     configStatus.value = configRepairResult.value.status
   } finally {
     configApiKey.value = ''
@@ -97,6 +104,19 @@ onMounted(() => {
       </p>
 
       <label class="pi-web-key-field">
+        <span>接口地址 URL</span>
+        <input
+          v-model="configBaseUrl"
+          data-field="pi-web-base-url"
+          type="url"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="https://ai.leihuo.netease.com/v1"
+          :disabled="configRepairBusy"
+        >
+      </label>
+
+      <label class="pi-web-key-field">
         <span>PI-Web API Key</span>
         <input
           v-model="configApiKey"
@@ -117,7 +137,7 @@ onMounted(() => {
           @click="repairConfig"
         >
           <RefreshCw :size="14" />
-          {{ configRepairBusy ? '修复中' : '一键修复' }}
+          {{ configRepairBusy ? '配置中' : '一键配置' }}
         </button>
       </div>
 
@@ -263,6 +283,10 @@ onMounted(() => {
 .pi-web-key-field input:focus-visible {
   border-color: rgba(102, 247, 211, 0.62);
   box-shadow: var(--bb-focus);
+}
+
+.pi-web-key-field input:disabled {
+  opacity: 0.66;
 }
 
 .pi-web-card-actions {
