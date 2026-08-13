@@ -171,6 +171,7 @@ pub fn run() {
             commands::read_import_dir,
             commands::download_image,
             commands::check_for_update,
+            commands::prepare_ffmpeg_tools,
             commands::provider_commands::list_ai_providers,
             commands::provider_commands::save_ai_provider,
             commands::provider_commands::clear_ai_provider_credential,

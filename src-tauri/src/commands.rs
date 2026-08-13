@@ -20,17 +20,25 @@ use crate::{
     library::{self, Library},
 };
 use chrono::{DateTime, Datelike, Local, Timelike};
+use futures_util::StreamExt;
 use image::codecs::jpeg::JpegEncoder;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    io::Cursor,
+    path::{Path, PathBuf},
+};
 use std::process::Command;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
 const MAX_DOWNLOADED_IMAGE_BYTES: usize = 15 * 1024 * 1024;
 const MAX_UPDATE_RESPONSE_BYTES: usize = 1024 * 1024;
+const MAX_FFMPEG_ARCHIVE_BYTES: usize = 220 * 1024 * 1024;
 const APP_SERVICES_UNAVAILABLE: &str = "STARTUP_NOT_READY";
 const FFMPEG_DOWNLOAD_URL: &str = "https://ffmpeg.org/download.html";
+const FFMPEG_WINDOWS_ESSENTIALS_ZIP_URL: &str =
+    "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
 const DEPTH_VIDEO_ENGINE_ENV: &str = "BANANA_BOX_DEPTH_VIDEO_ENGINE";
 const DEPTH_VIDEO_ENGINE_COMMAND: &str = "banana-depth-video";
 
@@ -213,6 +221,12 @@ pub struct CompressMediaInput {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MediaToolOperationInput {
+    pub operation_id: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DepthVideoInput {
     pub source_path: String,
     pub output_path: String,
@@ -229,6 +243,27 @@ pub struct SuggestCompressedOutputPathInput {
 #[serde(rename_all = "camelCase")]
 pub struct CompressMediaResult {
     pub output_path: String,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FfmpegSetupResult {
+    pub ffmpeg_path: String,
+    pub ffprobe_path: String,
+    pub bin_dir: String,
+    pub message: String,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaToolProgressEvent {
+    pub operation_id: String,
+    pub tool: String,
+    pub phase: String,
+    pub progress: u8,
+    pub message: String,
+    pub detail: Option<String>,
+    pub level: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -473,12 +508,43 @@ fn video_bitrate_kbps(target_mb: f64, duration_secs: f64, audio_kbps: u32) -> u3
     total_kbps.max(audio_kbps as f64 + 100.0).round() as u32 - audio_kbps
 }
 
+fn emit_media_tool_progress(
+    app: &tauri::AppHandle,
+    operation_id: Option<&str>,
+    tool: &str,
+    phase: &str,
+    progress: u8,
+    message: impl Into<String>,
+    detail: Option<String>,
+    level: &str,
+) {
+    let Some(operation_id) = operation_id.filter(|value| !value.trim().is_empty()) else {
+        return;
+    };
+    let _ = app.emit(
+        "media-tool-progress",
+        MediaToolProgressEvent {
+            operation_id: operation_id.to_string(),
+            tool: tool.to_string(),
+            phase: phase.to_string(),
+            progress,
+            message: message.into(),
+            detail,
+            level: level.to_string(),
+        },
+    );
+}
+
 fn ffmpeg_tool_filename(tool_name: &str) -> String {
     if cfg!(windows) {
         format!("{tool_name}.exe")
     } else {
         tool_name.to_string()
     }
+}
+
+fn managed_ffmpeg_bin_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("ffmpeg").join("bin")
 }
 
 fn default_ffmpeg_bin_dir() -> Option<PathBuf> {
@@ -491,7 +557,17 @@ fn default_ffmpeg_bin_dir() -> Option<PathBuf> {
     }
 }
 
-fn resolve_ffmpeg_tool(tool_name: &str, common_bin_dir: Option<&Path>) -> PathBuf {
+fn resolve_ffmpeg_tool(
+    tool_name: &str,
+    managed_bin_dir: Option<&Path>,
+    common_bin_dir: Option<&Path>,
+) -> PathBuf {
+    if let Some(dir) = managed_bin_dir {
+        let candidate = dir.join(ffmpeg_tool_filename(tool_name));
+        if candidate.exists() {
+            return candidate;
+        }
+    }
     if let Some(dir) = common_bin_dir {
         let candidate = dir.join(ffmpeg_tool_filename(tool_name));
         if candidate.exists() {
@@ -501,8 +577,13 @@ fn resolve_ffmpeg_tool(tool_name: &str, common_bin_dir: Option<&Path>) -> PathBu
     PathBuf::from(tool_name)
 }
 
-fn ffmpeg_tool_path(tool_name: &str) -> PathBuf {
-    resolve_ffmpeg_tool(tool_name, default_ffmpeg_bin_dir().as_deref())
+fn ffmpeg_tool_path(tool_name: &str, data_dir: Option<&Path>) -> PathBuf {
+    let managed_bin_dir = data_dir.map(managed_ffmpeg_bin_dir);
+    resolve_ffmpeg_tool(
+        tool_name,
+        managed_bin_dir.as_deref(),
+        default_ffmpeg_bin_dir().as_deref(),
+    )
 }
 
 fn ffmpeg_missing_message(tool_name: &str) -> String {
@@ -511,8 +592,117 @@ fn ffmpeg_missing_message(tool_name: &str) -> String {
     )
 }
 
-fn ffprobe_duration_secs(source: &Path) -> Result<f64, String> {
-    let output = Command::new(ffmpeg_tool_path("ffprobe"))
+fn configure_hidden_child_process(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+}
+
+fn find_child_file(root: &Path, filename: &str) -> Result<PathBuf, String> {
+    let expected = filename.to_ascii_lowercase();
+    for entry in walkdir::WalkDir::new(root) {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        if name == expected {
+            return Ok(entry.path().to_path_buf());
+        }
+    }
+    Err(format!("FFMPEG_ARCHIVE_MISSING_TOOL: {filename}"))
+}
+
+fn extract_zip_safely(bytes: &[u8], destination: &Path) -> Result<(), String> {
+    let reader = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(reader).map_err(|error| error.to_string())?;
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).map_err(|error| error.to_string())?;
+        let enclosed = file
+            .enclosed_name()
+            .ok_or_else(|| "FFMPEG_ARCHIVE_UNSAFE_PATH".to_string())?
+            .to_path_buf();
+        let output_path = destination.join(enclosed);
+        if file.is_dir() {
+            fs::create_dir_all(&output_path).map_err(|error| error.to_string())?;
+            continue;
+        }
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let mut output = fs::File::create(&output_path).map_err(|error| error.to_string())?;
+        std::io::copy(&mut file, &mut output).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn verify_ffmpeg_tool(path: &Path) -> Result<(), String> {
+    let mut command = Command::new(path);
+    configure_hidden_child_process(&mut command);
+    let output = command
+        .arg("-version")
+        .output()
+        .map_err(|_| "FFMPEG_TOOL_VERIFY_FAILED".to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err("FFMPEG_TOOL_VERIFY_FAILED".to_string())
+    }
+}
+
+async fn download_with_progress(
+    app: &tauri::AppHandle,
+    operation_id: Option<&str>,
+    url: &str,
+) -> Result<Vec<u8>, String> {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let response = client
+        .get(url)
+        .header("User-Agent", "banana-box")
+        .send()
+        .await
+        .map_err(|_| "FFMPEG_DOWNLOAD_FAILED".to_string())?;
+    if !response.status().is_success() {
+        return Err("FFMPEG_DOWNLOAD_FAILED".to_string());
+    }
+    let total = response.content_length().unwrap_or(0);
+    if total > MAX_FFMPEG_ARCHIVE_BYTES as u64 {
+        return Err("FFMPEG_ARCHIVE_TOO_LARGE".to_string());
+    }
+    let mut downloaded = 0_u64;
+    let mut bytes = Vec::with_capacity(total.min(MAX_FFMPEG_ARCHIVE_BYTES as u64) as usize);
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| "FFMPEG_DOWNLOAD_FAILED".to_string())?;
+        downloaded += chunk.len() as u64;
+        if downloaded > MAX_FFMPEG_ARCHIVE_BYTES as u64 {
+            return Err("FFMPEG_ARCHIVE_TOO_LARGE".to_string());
+        }
+        bytes.extend_from_slice(&chunk);
+        if total > 0 {
+            let progress = 12 + ((downloaded.saturating_mul(48) / total).min(48) as u8);
+            emit_media_tool_progress(
+                app,
+                operation_id,
+                "ffmpeg",
+                "download",
+                progress,
+                format!("正在下载 FFmpeg：{}%", downloaded.saturating_mul(100) / total),
+                None,
+                "info",
+            );
+        }
+    }
+    Ok(bytes)
+}
+
+fn ffprobe_duration_secs(source: &Path, data_dir: Option<&Path>) -> Result<f64, String> {
+    let output = Command::new(ffmpeg_tool_path("ffprobe", data_dir))
         .args([
             "-v",
             "error",
@@ -533,11 +723,16 @@ fn ffprobe_duration_secs(source: &Path) -> Result<f64, String> {
         .map_err(|_| "无法读取视频时长".to_string())
 }
 
-fn compress_video_with_ffmpeg(source: &Path, output: &Path, target_mb: f64) -> Result<(), String> {
-    let duration = ffprobe_duration_secs(source)?;
+fn compress_video_with_ffmpeg(
+    source: &Path,
+    output: &Path,
+    target_mb: f64,
+    data_dir: Option<&Path>,
+) -> Result<(), String> {
+    let duration = ffprobe_duration_secs(source, data_dir)?;
     let audio_kbps = 128_u32;
     let video_kbps = video_bitrate_kbps(target_mb, duration, audio_kbps);
-    let status = Command::new(ffmpeg_tool_path("ffmpeg"))
+    let status = Command::new(ffmpeg_tool_path("ffmpeg", data_dir))
         .arg("-y")
         .arg("-i")
         .arg(source)
@@ -626,7 +821,9 @@ fn convert_video_with_depth_engine(
     output: &Path,
     configured_path: Option<&str>,
 ) -> Result<(), String> {
-    let status = depth_video_engine_command(configured_path)
+    let mut command = depth_video_engine_command(configured_path);
+    configure_hidden_child_process(&mut command);
+    let status = command
         .arg("--input")
         .arg(source)
         .arg("--output")
@@ -1151,6 +1348,127 @@ pub async fn check_for_update(
 }
 
 #[tauri::command]
+pub async fn prepare_ffmpeg_tools(
+    app: tauri::AppHandle,
+    gate: tauri::State<'_, StartupGate>,
+    input: MediaToolOperationInput,
+) -> Result<FfmpegSetupResult, String> {
+    require_startup_ready(&gate)?;
+    if !cfg!(windows) {
+        return Err("FFMPEG_MANAGED_SETUP_UNSUPPORTED_PLATFORM".to_string());
+    }
+
+    let operation_id = input.operation_id.as_deref();
+    let data_dir = data_dir(&app);
+    let ffmpeg_root = data_dir.join("ffmpeg");
+    let bin_dir = managed_ffmpeg_bin_dir(&data_dir);
+    let extract_dir = ffmpeg_root.join("extract");
+    let ffmpeg_path = bin_dir.join(ffmpeg_tool_filename("ffmpeg"));
+    let ffprobe_path = bin_dir.join(ffmpeg_tool_filename("ffprobe"));
+
+    emit_media_tool_progress(
+        &app,
+        operation_id,
+        "ffmpeg",
+        "check",
+        8,
+        "正在检查本地 FFmpeg",
+        None,
+        "info",
+    );
+    if ffmpeg_path.exists() && ffprobe_path.exists() {
+        verify_ffmpeg_tool(&ffmpeg_path)?;
+        verify_ffmpeg_tool(&ffprobe_path)?;
+        emit_media_tool_progress(
+            &app,
+            operation_id,
+            "ffmpeg",
+            "done",
+            100,
+            "FFmpeg 已配置完成",
+            None,
+            "success",
+        );
+        return Ok(FfmpegSetupResult {
+            ffmpeg_path: ffmpeg_path.to_string_lossy().to_string(),
+            ffprobe_path: ffprobe_path.to_string_lossy().to_string(),
+            bin_dir: bin_dir.to_string_lossy().to_string(),
+            message: "FFmpeg 已配置完成，可以开始压缩视频".to_string(),
+        });
+    }
+
+    fs::create_dir_all(&ffmpeg_root).map_err(|error| error.to_string())?;
+    fs::create_dir_all(&bin_dir).map_err(|error| error.to_string())?;
+    if extract_dir.exists() {
+        fs::remove_dir_all(&extract_dir).map_err(|error| error.to_string())?;
+    }
+    fs::create_dir_all(&extract_dir).map_err(|error| error.to_string())?;
+
+    emit_media_tool_progress(
+        &app,
+        operation_id,
+        "ffmpeg",
+        "download",
+        12,
+        "正在下载 FFmpeg Essentials",
+        Some(FFMPEG_WINDOWS_ESSENTIALS_ZIP_URL.to_string()),
+        "info",
+    );
+    let archive = download_with_progress(
+        &app,
+        operation_id,
+        FFMPEG_WINDOWS_ESSENTIALS_ZIP_URL,
+    )
+    .await?;
+
+    emit_media_tool_progress(
+        &app,
+        operation_id,
+        "ffmpeg",
+        "extract",
+        68,
+        "正在解压 FFmpeg",
+        None,
+        "info",
+    );
+    extract_zip_safely(&archive, &extract_dir)?;
+    let extracted_ffmpeg = find_child_file(&extract_dir, &ffmpeg_tool_filename("ffmpeg"))?;
+    let extracted_ffprobe = find_child_file(&extract_dir, &ffmpeg_tool_filename("ffprobe"))?;
+    fs::copy(extracted_ffmpeg, &ffmpeg_path).map_err(|error| error.to_string())?;
+    fs::copy(extracted_ffprobe, &ffprobe_path).map_err(|error| error.to_string())?;
+
+    emit_media_tool_progress(
+        &app,
+        operation_id,
+        "ffmpeg",
+        "verify",
+        88,
+        "正在验证 ffmpeg 和 ffprobe",
+        None,
+        "info",
+    );
+    verify_ffmpeg_tool(&ffmpeg_path)?;
+    verify_ffmpeg_tool(&ffprobe_path)?;
+
+    emit_media_tool_progress(
+        &app,
+        operation_id,
+        "ffmpeg",
+        "done",
+        100,
+        "FFmpeg 已配置完成",
+        None,
+        "success",
+    );
+    Ok(FfmpegSetupResult {
+        ffmpeg_path: ffmpeg_path.to_string_lossy().to_string(),
+        ffprobe_path: ffprobe_path.to_string_lossy().to_string(),
+        bin_dir: bin_dir.to_string_lossy().to_string(),
+        message: "FFmpeg 已配置完成，可以开始压缩视频".to_string(),
+    })
+}
+
+#[tauri::command]
 pub fn import_image_from_path(
     app: tauri::AppHandle,
     gate: tauri::State<StartupGate>,
@@ -1177,6 +1495,7 @@ pub fn import_image_from_path(
 
 #[tauri::command]
 pub fn compress_media(
+    app: tauri::AppHandle,
     gate: tauri::State<StartupGate>,
     input: CompressMediaInput,
 ) -> Result<CompressMediaResult, String> {
@@ -1190,7 +1509,8 @@ pub fn compress_media(
     }
     let output = PathBuf::from(&input.output_path);
     if is_video_path(&source) {
-        compress_video_with_ffmpeg(&source, &output, input.target_mb)?;
+        let app_data_dir = data_dir(&app);
+        compress_video_with_ffmpeg(&source, &output, input.target_mb, Some(&app_data_dir))?;
     } else {
         let target_bytes = (input.target_mb * 1024.0 * 1024.0).round() as u64;
         compress_image_to_jpeg(&source, &output, target_bytes)?;
@@ -1242,7 +1562,9 @@ pub async fn prepare_depth_video_python(
     let script_result = write_depth_video_engine_scripts(&data_dir)?;
     let setup_script = PathBuf::from(&script_result.engine_dir).join("install-python-3.10.ps1");
     let setup_output = tauri::async_runtime::spawn_blocking(move || {
-        Command::new("powershell.exe")
+        let mut command = Command::new("powershell.exe");
+        configure_hidden_child_process(&mut command);
+        command
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
             .arg(setup_script)
             .output()
@@ -1281,7 +1603,9 @@ pub async fn prepare_depth_video_engine(
     let script_result = write_depth_video_engine_scripts(&data_dir)?;
     let setup_script = PathBuf::from(&script_result.engine_dir).join("setup-depth-video-engine.ps1");
     let setup_output = tauri::async_runtime::spawn_blocking(move || {
-        Command::new("powershell.exe")
+        let mut command = Command::new("powershell.exe");
+        configure_hidden_child_process(&mut command);
+        command
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
             .arg(setup_script)
             .output()
@@ -1445,7 +1769,24 @@ mod tests {
         let tool = dir.path().join(ffmpeg_tool_filename("ffmpeg"));
         std::fs::write(&tool, b"").unwrap();
 
-        assert_eq!(resolve_ffmpeg_tool("ffmpeg", Some(dir.path())), tool);
+        assert_eq!(resolve_ffmpeg_tool("ffmpeg", None, Some(dir.path())), tool);
+    }
+
+    #[test]
+    fn ffmpeg_tool_resolution_prefers_managed_bin_dir_when_present() {
+        let common = tempfile::tempdir().unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let managed = managed_ffmpeg_bin_dir(managed_root.path());
+        std::fs::create_dir_all(&managed).unwrap();
+        let common_tool = common.path().join(ffmpeg_tool_filename("ffprobe"));
+        let managed_tool = managed.join(ffmpeg_tool_filename("ffprobe"));
+        std::fs::write(common_tool, b"").unwrap();
+        std::fs::write(&managed_tool, b"").unwrap();
+
+        assert_eq!(
+            resolve_ffmpeg_tool("ffprobe", Some(&managed), Some(common.path())),
+            managed_tool
+        );
     }
 
     #[test]
@@ -1453,7 +1794,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         assert_eq!(
-            resolve_ffmpeg_tool("ffprobe", Some(dir.path())),
+            resolve_ffmpeg_tool("ffprobe", None, Some(dir.path())),
             PathBuf::from("ffprobe")
         );
     }

@@ -8,6 +8,7 @@ import {
   suggestDepthVideoOutputPath,
 } from '@/lib/ipc'
 import { useUiStore } from '@/stores/ui'
+import MediaToolProgressDialog from '@/components/MediaToolProgressDialog.vue'
 
 const ui = useUiStore()
 const sourcePath = ref(ui.depthVideoSourcePath)
@@ -21,6 +22,14 @@ const enginePath = ref(window.localStorage.getItem(depthEngineStorageKey) ?? '')
 const installingPython = ref(false)
 const preparingEngine = ref(false)
 const engineSetupMessage = ref('')
+const mediaDialogOpen = ref(false)
+const mediaDialogTitle = ref('')
+const mediaDialogDescription = ref('')
+const mediaDialogStatus = ref<'idle' | 'running' | 'success' | 'error'>('idle')
+const mediaDialogProgress = ref(0)
+const mediaDialogMessage = ref('')
+const mediaDialogLogs = ref<string[]>([])
+const mediaDialogError = ref('')
 
 const fileName = computed(() => {
   if (!sourcePath.value) return ''
@@ -46,6 +55,32 @@ watch(
 function resetProgress() {
   progress.value = 0
   progressText.value = ''
+}
+
+function appendMediaLog(line: string) {
+  mediaDialogLogs.value = [...mediaDialogLogs.value, line].slice(-120)
+}
+
+function openMediaDialog(title: string, description: string, message: string) {
+  mediaDialogOpen.value = true
+  mediaDialogTitle.value = title
+  mediaDialogDescription.value = description
+  mediaDialogStatus.value = 'running'
+  mediaDialogProgress.value = 5
+  mediaDialogMessage.value = message
+  mediaDialogLogs.value = [message]
+  mediaDialogError.value = ''
+}
+
+function closeMediaDialog() {
+  if (mediaDialogStatus.value === 'running') return
+  mediaDialogOpen.value = false
+}
+
+function updateMediaDialog(progressValue: number, message: string) {
+  mediaDialogProgress.value = Math.max(mediaDialogProgress.value, progressValue)
+  mediaDialogMessage.value = message
+  appendMediaLog(message)
 }
 
 function depthVideoErrorMessage(reason: unknown) {
@@ -112,6 +147,41 @@ async function prepareEngine() {
   }
 }
 
+async function prepareDepthEnvironment() {
+  if (installingPython.value || preparingEngine.value || loading.value) return
+  installingPython.value = true
+  preparingEngine.value = true
+  error.value = ''
+  engineSetupMessage.value = ''
+  openMediaDialog(
+    '配置深度视频环境',
+    'Banana Box 会自动准备 Python、模型和本地深度视频引擎。',
+    '开始检查 Python 3.10',
+  )
+  try {
+    mediaDialogProgress.value = 10
+    const python = await prepareDepthVideoPython()
+    updateMediaDialog(36, python.message)
+    updateMediaDialog(48, '开始下载并配置深度视频引擎')
+    const engine = await prepareDepthVideoEngine()
+    enginePath.value = engine.enginePath
+    window.localStorage.setItem(depthEngineStorageKey, engine.enginePath)
+    updateMediaDialog(100, engine.message)
+    mediaDialogStatus.value = 'success'
+    engineSetupMessage.value = engine.message
+  } catch (reason) {
+    const friendly = depthVideoErrorMessage(reason)
+    mediaDialogStatus.value = 'error'
+    mediaDialogError.value = friendly
+    mediaDialogMessage.value = '深度视频环境配置失败'
+    appendMediaLog(friendly)
+    error.value = friendly
+  } finally {
+    installingPython.value = false
+    preparingEngine.value = false
+  }
+}
+
 async function pickDepthEngine() {
   const picked = await open({
     multiple: false,
@@ -168,7 +238,13 @@ async function onConvert() {
       return
     }
 
+    openMediaDialog(
+      '转换深度视频',
+      '转换过程会在 Banana Box 内显示，不再弹出额外命令行窗口。',
+      '正在启动本地深度视频引擎',
+    )
     progress.value = 66
+    updateMediaDialog(66, '转换中，复杂视频可能需要较长时间')
     progressText.value = '转换中'
     const result = await convertVideoToDepthVideo({
       sourcePath: sourcePath.value,
@@ -177,9 +253,18 @@ async function onConvert() {
     })
     outputPath.value = result.outputPath
     progress.value = 100
+    updateMediaDialog(100, `转换完成：${result.outputPath}`)
+    mediaDialogStatus.value = 'success'
     progressText.value = '转换完成'
   } catch (reason) {
-    error.value = depthVideoErrorMessage(reason)
+    const friendly = depthVideoErrorMessage(reason)
+    error.value = friendly
+    if (mediaDialogOpen.value) {
+      mediaDialogStatus.value = 'error'
+      mediaDialogError.value = friendly
+      mediaDialogMessage.value = '深度视频转换失败'
+      appendMediaLog(friendly)
+    }
     resetProgress()
   } finally {
     loading.value = false
@@ -197,6 +282,14 @@ async function onConvert() {
         </p>
       </div>
       <div class="engine-actions">
+        <button
+          type="button"
+          class="prepare-depth-environment-button"
+          :disabled="installingPython || preparingEngine || loading"
+          @click="prepareDepthEnvironment"
+        >
+          {{ installingPython || preparingEngine ? '配置中...' : '一键配置深度视频环境' }}
+        </button>
         <button
           type="button"
           class="install-python-button"
@@ -287,6 +380,19 @@ async function onConvert() {
     >
       {{ error }}
     </p>
+
+    <MediaToolProgressDialog
+      :open="mediaDialogOpen"
+      :title="mediaDialogTitle"
+      :description="mediaDialogDescription"
+      :progress="mediaDialogProgress"
+      :message="mediaDialogMessage"
+      :logs="mediaDialogLogs"
+      :status="mediaDialogStatus"
+      :error="mediaDialogError"
+      @close="closeMediaDialog"
+      @retry="prepareDepthEnvironment"
+    />
   </section>
 </template>
 
@@ -356,6 +462,14 @@ async function onConvert() {
 .install-python-button,
 .pick-depth-engine-button {
   flex: 0 0 auto;
+}
+
+.prepare-depth-environment-button {
+  flex: 0 0 auto;
+  border-color: rgba(102, 247, 211, 0.55);
+  background: linear-gradient(180deg, var(--bb-primary-strong), var(--bb-primary));
+  color: #041017;
+  font-weight: 600;
 }
 
 .prepare-depth-engine-button {

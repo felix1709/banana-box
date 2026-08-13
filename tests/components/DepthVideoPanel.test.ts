@@ -129,6 +129,35 @@ describe('DepthVideoPanel', () => {
     expect(wrapper.text()).toContain('Python 3.10 环境已准备好')
   })
 
+  it('prepares the full depth-video environment from one primary action', async () => {
+    vi.mocked(prepareDepthVideoPython).mockResolvedValue({
+      pythonVersion: '3.10',
+      message: 'Python 3.10 环境已准备好',
+    })
+    vi.mocked(prepareDepthVideoEngine).mockResolvedValue({
+      enginePath: 'C:\\Users\\admin\\AppData\\Roaming\\banana-box\\depth-video-engine\\banana-depth-video.cmd',
+      engineDir: 'C:\\Users\\admin\\AppData\\Roaming\\banana-box\\depth-video-engine',
+      message: '本地深度视频引擎已配置',
+    })
+    const wrapper = mount(DepthVideoPanel, {
+      global: {
+        stubs: {
+          Teleport: true,
+        },
+      },
+    })
+
+    await wrapper.find('.prepare-depth-environment-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(prepareDepthVideoPython).toHaveBeenCalled()
+    expect(prepareDepthVideoEngine).toHaveBeenCalled()
+    expect(window.localStorage.getItem('banana-box-depth-video-engine')).toBe(
+      'C:\\Users\\admin\\AppData\\Roaming\\banana-box\\depth-video-engine\\banana-depth-video.cmd',
+    )
+    expect(wrapper.text()).toContain('本地深度视频引擎已配置')
+  })
+
   it('shows a friendly Python install hint when automatic engine setup cannot find Python', async () => {
     vi.mocked(prepareDepthVideoEngine).mockRejectedValue(
       new Error('DEPTH_VIDEO_ENGINE_SETUP_FAILED\nPYTHON_NOT_FOUND'),

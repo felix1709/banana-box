@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import FastCompressionPanel from '@/components/FastCompressionPanel.vue'
-import { compressMedia, suggestCompressedOutputPath } from '@/lib/ipc'
+import { compressMedia, prepareFfmpegTools, suggestCompressedOutputPath } from '@/lib/ipc'
 import { createPinia, setActivePinia } from 'pinia'
 import { useUiStore } from '@/stores/ui'
 
@@ -15,8 +15,13 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
   save: mocks.save,
 }))
 
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(async () => vi.fn()),
+}))
+
 vi.mock('@/lib/ipc', () => ({
   compressMedia: vi.fn(),
+  prepareFfmpegTools: vi.fn(),
   suggestCompressedOutputPath: vi.fn(),
 }))
 
@@ -112,7 +117,7 @@ describe('FastCompressionPanel', () => {
     await wrapper.find('.compress-button').trigger('click')
     await new Promise((resolve) => window.setTimeout(resolve, 0))
 
-    expect(wrapper.text()).toContain('未找到 FFmpeg/ffprobe')
+    expect(wrapper.text()).toContain('视频压缩组件还没配置好')
   })
 
   it('shows FFmpeg download guidance when video compression tools are missing', async () => {
@@ -137,5 +142,41 @@ describe('FastCompressionPanel', () => {
     expect(wrapper.get('[data-install-link="ffmpeg"]').attributes('href')).toBe(
       'https://ffmpeg.org/download.html',
     )
+  })
+
+  it('auto-configures FFmpeg from the missing-tools guidance', async () => {
+    mocks.open.mockResolvedValue('C:\\Users\\admin\\Desktop\\movie.mp4')
+    vi.mocked(suggestCompressedOutputPath).mockResolvedValue(
+      'C:\\Users\\admin\\Desktop\\movie_07010930.mp4',
+    )
+    mocks.save.mockResolvedValue('C:\\Users\\admin\\Desktop\\movie_07010930.mp4')
+    vi.mocked(compressMedia).mockRejectedValue(
+      new Error('未找到 ffprobe，请安装完整 FFmpeg（需要 ffmpeg 和 ffprobe）并加入 PATH。'),
+    )
+    vi.mocked(prepareFfmpegTools).mockResolvedValue({
+      ffmpegPath: 'C:\\Users\\admin\\AppData\\Roaming\\banana-box\\ffmpeg\\bin\\ffmpeg.exe',
+      ffprobePath: 'C:\\Users\\admin\\AppData\\Roaming\\banana-box\\ffmpeg\\bin\\ffprobe.exe',
+      binDir: 'C:\\Users\\admin\\AppData\\Roaming\\banana-box\\ffmpeg\\bin',
+      message: 'FFmpeg 已配置完成，可以开始压缩视频',
+    })
+    const wrapper = mount(FastCompressionPanel, {
+      global: {
+        stubs: {
+          Teleport: true,
+        },
+      },
+    })
+
+    await wrapper.find('.pick-file-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.find('.compress-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.find('.prepare-ffmpeg-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(prepareFfmpegTools).toHaveBeenCalledWith({
+      operationId: expect.stringMatching(/^ffmpeg-/),
+    })
+    expect(wrapper.text()).toContain('FFmpeg 已配置完成，可以开始压缩视频')
   })
 })

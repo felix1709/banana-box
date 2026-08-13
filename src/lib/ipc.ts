@@ -33,6 +33,17 @@ export interface CompressMediaResult {
   outputPath: string
 }
 
+export interface MediaToolOperationInput {
+  operationId?: string
+}
+
+export interface FfmpegSetupResult {
+  ffmpegPath: string
+  ffprobePath: string
+  binDir: string
+  message: string
+}
+
 export interface DepthVideoInput {
   sourcePath: string
   outputPath: string
@@ -134,6 +145,12 @@ export async function importImageFromPath(input: ImportImageFromPathInput): Prom
 
 export async function compressMedia(input: CompressMediaInput): Promise<CompressMediaResult> {
   return await invoke<CompressMediaResult>('compress_media', { input })
+}
+
+export async function prepareFfmpegTools(
+  input: MediaToolOperationInput = {},
+): Promise<FfmpegSetupResult> {
+  return await invoke<FfmpegSetupResult>('prepare_ffmpeg_tools', { input })
 }
 
 export async function suggestCompressedOutputPath(

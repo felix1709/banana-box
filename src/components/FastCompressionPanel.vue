@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import { compressMedia, suggestCompressedOutputPath } from '@/lib/ipc'
+import { compressMedia, prepareFfmpegTools, suggestCompressedOutputPath } from '@/lib/ipc'
 import { useUiStore } from '@/stores/ui'
+import MediaToolProgressDialog from '@/components/MediaToolProgressDialog.vue'
 
 const ui = useUiStore()
 const sourcePath = ref(ui.compressionSourcePath)
@@ -14,6 +16,24 @@ const progress = ref(0)
 const progressText = ref('')
 const ffmpegDownloadUrl = 'https://ffmpeg.org/download.html'
 const ffmpegMissing = computed(() => /ffmpeg|ffprobe/i.test(error.value))
+const setupDialogOpen = ref(false)
+const setupStatus = ref<'idle' | 'running' | 'success' | 'error'>('idle')
+const setupProgress = ref(0)
+const setupMessage = ref('')
+const setupLogs = ref<string[]>([])
+const setupError = ref('')
+const setupOperationId = ref('')
+let unlistenSetupProgress: UnlistenFn | null = null
+
+interface MediaToolProgressPayload {
+  operationId: string
+  tool: string
+  phase: string
+  progress: number
+  message: string
+  detail?: string
+  level: 'info' | 'success' | 'error'
+}
 
 const fileName = computed(() => {
   if (!sourcePath.value) return ''
@@ -37,9 +57,45 @@ function resetProgress() {
   progressText.value = ''
 }
 
+function newOperationId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function appendSetupLog(line: string) {
+  setupLogs.value = [...setupLogs.value, line].slice(-80)
+}
+
+function applySetupProgress(payload: MediaToolProgressPayload) {
+  if (payload.operationId !== setupOperationId.value || payload.tool !== 'ffmpeg') return
+  setupProgress.value = Math.max(setupProgress.value, payload.progress)
+  setupMessage.value = payload.message
+  appendSetupLog(payload.detail ? `${payload.message}：${payload.detail}` : payload.message)
+  if (payload.level === 'error') setupStatus.value = 'error'
+  if (payload.level === 'success') setupStatus.value = 'success'
+}
+
+async function startSetupProgressListener() {
+  unlistenSetupProgress?.()
+  unlistenSetupProgress = await listen<MediaToolProgressPayload>('media-tool-progress', (event) => {
+    applySetupProgress(event.payload)
+  })
+}
+
+function closeSetupDialog() {
+  if (setupStatus.value === 'running') return
+  setupDialogOpen.value = false
+}
+
+onBeforeUnmount(() => {
+  unlistenSetupProgress?.()
+})
+
 function compressionErrorMessage(reason: unknown) {
-  if (reason instanceof Error && reason.message.trim()) return reason.message
-  if (typeof reason === 'string' && reason.trim()) return reason
+  const raw = reason instanceof Error ? reason.message : typeof reason === 'string' ? reason : ''
+  if (/ffmpeg|ffprobe/i.test(raw)) {
+    return '视频压缩组件还没配置好，请点击“一键配置 FFmpeg”。Banana Box 会自动下载到应用目录，不需要你手动设置 PATH。'
+  }
+  if (raw.trim()) return raw
   return '压缩失败，请确认文件可用后重试'
 }
 
@@ -102,6 +158,33 @@ async function onCompress() {
     resetProgress()
   } finally {
     loading.value = false
+  }
+}
+
+async function onPrepareFfmpeg() {
+  if (setupStatus.value === 'running') return
+  setupOperationId.value = newOperationId('ffmpeg')
+  setupDialogOpen.value = true
+  setupStatus.value = 'running'
+  setupProgress.value = 5
+  setupMessage.value = '准备配置 FFmpeg'
+  setupLogs.value = ['开始配置应用内 FFmpeg，不需要手动设置 PATH']
+  setupError.value = ''
+  error.value = ''
+  await startSetupProgressListener()
+  try {
+    const result = await prepareFfmpegTools({ operationId: setupOperationId.value })
+    setupProgress.value = 100
+    setupStatus.value = 'success'
+    setupMessage.value = result.message
+    appendSetupLog(`ffmpeg：${result.ffmpegPath}`)
+    appendSetupLog(`ffprobe：${result.ffprobePath}`)
+  } catch (reason) {
+    setupStatus.value = 'error'
+    setupProgress.value = Math.max(setupProgress.value, 10)
+    setupError.value = compressionErrorMessage(reason)
+    setupMessage.value = 'FFmpeg 配置失败'
+    appendSetupLog(setupError.value)
   }
 }
 </script>
@@ -198,7 +281,28 @@ async function onCompress() {
       >
         打开 FFmpeg 官方下载页
       </a>
+      <button
+        type="button"
+        class="prepare-ffmpeg-button"
+        :disabled="setupStatus === 'running'"
+        @click="onPrepareFfmpeg"
+      >
+        {{ setupStatus === 'running' ? '正在配置...' : '一键配置 FFmpeg' }}
+      </button>
     </section>
+
+    <MediaToolProgressDialog
+      :open="setupDialogOpen"
+      title="配置 FFmpeg"
+      description="Banana Box 会把 ffmpeg 和 ffprobe 下载到应用目录，不需要你手动设置 PATH。"
+      :progress="setupProgress"
+      :message="setupMessage"
+      :logs="setupLogs"
+      :status="setupStatus"
+      :error="setupError"
+      @close="closeSetupDialog"
+      @retry="onPrepareFfmpeg"
+    />
   </section>
 </template>
 
@@ -344,5 +448,13 @@ async function onCompress() {
   color: var(--bb-primary-strong);
   background: var(--bb-primary-soft);
   text-decoration: none;
+}
+
+.prepare-ffmpeg-button {
+  width: max-content;
+  max-width: 100%;
+  border-color: rgba(102, 247, 211, 0.5);
+  background: var(--bb-primary-soft);
+  color: var(--bb-primary-strong);
 }
 </style>
