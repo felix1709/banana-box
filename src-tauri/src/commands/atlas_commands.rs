@@ -1,5 +1,6 @@
 use crate::{
     app_state::StartupGate,
+    atlas::http_service::AtlasHttpService,
     atlas::repository::{AtlasEntryDto, AtlasRepository},
     command_auth::MainArgs,
 };
@@ -59,6 +60,46 @@ pub fn open_atlas_folder(
     app.opener()
         .open_path(root.to_string_lossy(), None::<&str>)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn load_atlas_image(
+    _window: tauri::WebviewWindow,
+    gate: tauri::State<'_, StartupGate>,
+    id: String,
+) -> Result<Vec<u8>, String> {
+    gate.require_ready()?;
+    let repo = AtlasRepository::new(atlas_root()?);
+    let image_path = repo
+        .get_image_path(&id)?
+        .ok_or_else(|| "ATLAS_IMAGE_NOT_FOUND".to_string())?;
+    std::fs::read(image_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_atlas_service_status(
+    service: tauri::State<'_, AtlasHttpService>,
+) -> Result<bool, String> {
+    Ok(service.is_running())
+}
+
+#[tauri::command]
+pub fn start_atlas_service(
+    service: tauri::State<'_, AtlasHttpService>,
+    _gate: tauri::State<'_, StartupGate>,
+    _args: MainArgs<EmptyAtlasArgs>,
+) -> Result<(), String> {
+    service.start(atlas_root()?, String::new())
+}
+
+#[tauri::command]
+pub fn stop_atlas_service(
+    service: tauri::State<'_, AtlasHttpService>,
+    _gate: tauri::State<'_, StartupGate>,
+    _args: MainArgs<EmptyAtlasArgs>,
+) -> Result<(), String> {
+    service.stop();
+    Ok(())
 }
 
 #[derive(serde::Deserialize)]

@@ -4,6 +4,7 @@
 import { defineStore } from 'pinia'
 
 export type ActiveTool =
+  | 'atlas'
   | 'shared-library'
   | 'prompts'
   | 'reverse-image'

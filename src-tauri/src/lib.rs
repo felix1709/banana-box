@@ -67,6 +67,7 @@ pub fn run() {
         .manage(MainWindowPinState {
             pinned: Mutex::new(false),
         })
+        .manage(atlas::http_service::AtlasHttpService::new())
         .manage(pi_web::PiWebService::default())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -184,6 +185,10 @@ pub fn run() {
             commands::atlas_commands::load_atlas_entries,
             commands::atlas_commands::load_atlas_entry,
             commands::atlas_commands::open_atlas_folder,
+            commands::atlas_commands::load_atlas_image,
+            commands::atlas_commands::get_atlas_service_status,
+            commands::atlas_commands::start_atlas_service,
+            commands::atlas_commands::stop_atlas_service,
             commands::import_image_from_path,
             commands::compress_media,
             commands::suggest_compressed_output_path,

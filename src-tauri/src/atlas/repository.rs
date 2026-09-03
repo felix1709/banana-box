@@ -76,15 +76,19 @@ impl AtlasRepository {
         for ext in ["jpg", "jpeg", "png", "webp", "gif"] {
             let candidate = assets_dir.join(format!("{}.{}", front.id, ext));
             if candidate.exists() {
-                let relative = candidate
-                    .strip_prefix(&self.root)
-                    .map_err(|e| e.to_string())?
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                return Ok(relative);
+                return Ok(candidate.to_string_lossy().replace('\\', "/"));
             }
         }
         Ok(String::new())
+    }
+
+    pub fn get_image_path(&self, id: &str) -> Result<Option<String>, String> {
+        for entry in self.list_entries()? {
+            if entry.id == id && !entry.image.is_empty() {
+                return Ok(Some(entry.image));
+            }
+        }
+        Ok(None)
     }
 }
 
