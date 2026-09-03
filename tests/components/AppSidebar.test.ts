@@ -110,21 +110,22 @@ describe('AppSidebar', () => {
     await wrapper.get('[data-tool="pi-web"]').trigger('click')
 
     expect(ui.activeTool).toBe('pi-web')
-    expect(wrapper.text()).toContain('PI-Web')
+    expect(wrapper.text()).toContain('网页服务')
   })
 
-  it('puts a compact icon-only prompt action next to the prompt library tool', async () => {
+  it('puts a compact prompt create action inside the expanded prompt categories', async () => {
     const wrapper = mount(AppSidebar)
     const ui = useUiStore()
 
+    await wrapper.find('[data-tool="prompts"]').trigger('click')
     const createButton = wrapper.find('[data-action="create-prompt"]')
 
     expect(createButton.exists()).toBe(true)
-    expect(createButton.classes()).toContain('create-prompt-button')
+    expect(createButton.classes()).toContain('create-prompt-header')
     expect(createButton.attributes('title')).toBe('新增提示词')
     expect(createButton.attributes('aria-label')).toBe('新增提示词')
     expect(createButton.find('svg.lucide-plus').exists()).toBe(true)
-    expect(createButton.text()).toBe('')
+    expect(createButton.text()).toContain('新建提示词')
 
     await createButton.trigger('click')
 
@@ -132,8 +133,9 @@ describe('AppSidebar', () => {
     expect(ui.editingPromptId).toBeNull()
   })
 
-  it('does not put plus actions next to the reverse image or compression tools', () => {
+  it('does not put plus actions next to the reverse image or compression tools', async () => {
     const wrapper = mount(AppSidebar)
+    await wrapper.find('[data-tool="prompts"]').trigger('click')
 
     expect(wrapper.findAll('[data-action="create-prompt"]')).toHaveLength(1)
     expect(wrapper.find('[data-tool-row="reverse-image"] [data-action="create-prompt"]').exists()).toBe(

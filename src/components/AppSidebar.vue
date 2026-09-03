@@ -1,6 +1,19 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { ChevronDown, ChevronRight, Plus } from '@lucide/vue'
+import { ref, type Component } from 'vue'
+import {
+  Archive,
+  Bookmark,
+  CalendarDays,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  FolderKanban,
+  Globe,
+  Image as ImageIcon,
+  Library,
+  Plus,
+  Video,
+} from '@lucide/vue'
 import { useUiStore, type ActiveTool } from '@/stores/ui'
 import { useAtlasStore } from '@/stores/atlas'
 import CategoryTree from '@/components/CategoryTree.vue'
@@ -11,16 +24,22 @@ const atlas = useAtlasStore()
 const promptCategoriesExpanded = ref(false)
 const atlasCategoriesExpanded = ref(false)
 
-const tools: { id: ActiveTool; label: string }[] = [
-  { id: 'shared-library', label: '共享库' },
-  { id: 'prompts', label: '提示词库' },
-  { id: 'reverse-image', label: '反推图片' },
-  { id: 'compression', label: '快速压缩' },
-  { id: 'depth-video', label: '深度视频' },
-  { id: 'projects', label: '项目管理' },
-  { id: 'daily-tasks', label: '当日任务' },
-  { id: 'pi-web', label: 'PI-Web' },
-  { id: 'atlas', label: '参考库' },
+interface ToolItem {
+  id: ActiveTool
+  label: string
+  icon: Component
+}
+
+const tools: ToolItem[] = [
+  { id: 'shared-library', label: '共享图库', icon: Library },
+  { id: 'prompts', label: '提示词库', icon: FileText },
+  { id: 'reverse-image', label: '反推图片', icon: ImageIcon },
+  { id: 'compression', label: '快速压缩', icon: Archive },
+  { id: 'depth-video', label: '深度视频', icon: Video },
+  { id: 'projects', label: '项目管理', icon: FolderKanban },
+  { id: 'daily-tasks', label: '当日任务', icon: CalendarDays },
+  { id: 'pi-web', label: '网页服务', icon: Globe },
+  { id: 'atlas', label: '审美参考', icon: Bookmark },
 ]
 
 function selectTool(toolId: ActiveTool) {
@@ -80,7 +99,13 @@ function selectAtlasDimension(dimension: string | null) {
           :aria-expanded="promptCategoriesExpanded"
           @click="selectTool(tool.id)"
         >
-          {{ tool.label }}
+          <component
+            :is="tool.icon"
+            :size="15"
+            class="tool-icon"
+            aria-hidden="true"
+          />
+          <span>{{ tool.label }}</span>
         </button>
         <button
           type="button"
@@ -101,19 +126,6 @@ function selectAtlasDimension(dimension: string | null) {
             aria-hidden="true"
           />
         </button>
-        <button
-          type="button"
-          class="create-prompt-button"
-          data-action="create-prompt"
-          aria-label="新增提示词"
-          title="新增提示词"
-          @click.stop="ui.openEditor(null)"
-        >
-          <Plus
-            :size="14"
-            aria-hidden="true"
-          />
-        </button>
       </div>
       <div
         v-else-if="tool.id === 'atlas'"
@@ -128,7 +140,13 @@ function selectAtlasDimension(dimension: string | null) {
           :aria-expanded="atlasCategoriesExpanded"
           @click="selectTool(tool.id)"
         >
-          {{ tool.label }}
+          <component
+            :is="tool.icon"
+            :size="15"
+            class="tool-icon"
+            aria-hidden="true"
+          />
+          <span>{{ tool.label }}</span>
         </button>
         <button
           type="button"
@@ -159,12 +177,34 @@ function selectAtlasDimension(dimension: string | null) {
         :data-tool-row="tool.id"
         @click="selectTool(tool.id)"
       >
-        {{ tool.label }}
+        <component
+          :is="tool.icon"
+          :size="15"
+          class="tool-icon"
+          aria-hidden="true"
+        />
+        <span>{{ tool.label }}</span>
       </button>
+
       <div
         v-if="tool.id === 'prompts' && ui.activeTool === 'prompts' && promptCategoriesExpanded"
         class="sidebar-category-list"
       >
+        <button
+          type="button"
+          class="create-prompt-header"
+          data-action="create-prompt"
+          aria-label="新增提示词"
+          title="新增提示词"
+          @click.stop="ui.openEditor(null)"
+        >
+          <Plus
+            :size="15"
+            class="create-prompt-plus"
+            aria-hidden="true"
+          />
+          <span>新建提示词</span>
+        </button>
         <CategoryTree compact />
       </div>
       <div
@@ -212,7 +252,10 @@ function selectAtlasDimension(dimension: string | null) {
 
 .tool-button {
   width: 100%;
-  min-height: 32px;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   padding: 6px 9px;
   border: 1px solid transparent;
   border-radius: var(--bb-radius-md);
@@ -230,10 +273,15 @@ function selectAtlasDimension(dimension: string | null) {
   min-width: 0;
 }
 
+.tool-icon {
+  flex: 0 0 auto;
+  color: currentColor;
+}
+
 .category-toggle-button {
   display: grid;
   width: 28px;
-  min-height: 28px;
+  min-height: 34px;
   flex: 0 0 28px;
   place-items: center;
   padding: 0;
@@ -250,33 +298,6 @@ function selectAtlasDimension(dimension: string | null) {
   border-color: var(--bb-primary-strong);
   background: var(--bb-primary-soft);
   color: var(--bb-primary-strong);
-}
-
-.create-prompt-button {
-  display: grid;
-  width: 28px;
-  min-height: 28px;
-  flex: 0 0 28px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid rgba(102, 247, 211, 0.36);
-  border-radius: var(--bb-radius-md);
-  background: transparent;
-  color: var(--bb-text-muted);
-  cursor: pointer;
-  box-shadow: none;
-}
-
-.create-prompt-button:hover,
-.create-prompt-button:focus-visible {
-  border-color: var(--bb-primary-strong);
-  background: var(--bb-primary-soft);
-  color: var(--bb-primary-strong);
-}
-
-.create-prompt-button:focus-visible {
-  outline: none;
-  box-shadow: var(--bb-focus);
 }
 
 .tool-button:hover {
@@ -297,14 +318,41 @@ function selectAtlasDimension(dimension: string | null) {
 }
 
 .sidebar-category-list {
-  max-height: 300px;
-  min-height: 48px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  border-left: 1px solid rgba(102, 247, 211, 0.14);
-  margin: -1px 0 2px 9px;
-  padding: 3px 0 3px 5px;
+  display: block;
+  max-height: none;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
   scrollbar-gutter: stable;
+}
+
+.create-prompt-header {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid var(--bb-danger-border);
+  border-radius: var(--bb-radius-md);
+  background: var(--bb-danger-soft);
+  color: var(--bb-danger);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  margin-bottom: 6px;
+}
+
+.create-prompt-header:hover,
+.create-prompt-header:focus-visible {
+  background: rgba(255, 107, 122, 0.2);
+  border-color: var(--bb-danger);
+}
+
+.create-prompt-plus {
+  flex: 0 0 auto;
+  color: var(--bb-danger);
 }
 
 .atlas-category-list {
@@ -315,8 +363,8 @@ function selectAtlasDimension(dimension: string | null) {
 
 .atlas-category-button {
   width: 100%;
-  min-height: 28px;
-  padding: 4px 6px;
+  min-height: 30px;
+  padding: 5px 9px;
   border: 1px solid transparent;
   border-radius: var(--bb-radius-sm);
   background: transparent;
