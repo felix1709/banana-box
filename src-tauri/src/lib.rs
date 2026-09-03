@@ -189,6 +189,7 @@ pub fn run() {
             commands::atlas_commands::get_atlas_service_status,
             commands::atlas_commands::start_atlas_service,
             commands::atlas_commands::stop_atlas_service,
+            commands::atlas_commands::ingest_atlas_image,
             commands::import_image_from_path,
             commands::compress_media,
             commands::suggest_compressed_output_path,

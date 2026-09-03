@@ -8,7 +8,6 @@ const ui = useUiStore()
 const promptCategoriesExpanded = ref(false)
 
 const tools: { id: ActiveTool; label: string }[] = [
-  { id: 'atlas', label: '参考库' },
   { id: 'shared-library', label: '共享库' },
   { id: 'prompts', label: '提示词库' },
   { id: 'reverse-image', label: '反推图片' },
@@ -17,6 +16,7 @@ const tools: { id: ActiveTool; label: string }[] = [
   { id: 'projects', label: '项目管理' },
   { id: 'daily-tasks', label: '当日任务' },
   { id: 'pi-web', label: 'PI-Web' },
+  { id: 'atlas', label: '参考库' },
 ]
 
 function selectTool(toolId: ActiveTool) {

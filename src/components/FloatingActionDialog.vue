@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useUiStore } from '@/stores/ui'
+import { ingestAtlasImage } from '@/lib/atlas-ingest-ipc'
 
 const ui = useUiStore()
 
@@ -19,6 +20,18 @@ function openDepthVideo() {
   if (!ui.floatingActionFile) return
   ui.openDepthVideoWithSource(ui.floatingActionFile.filePath)
   ui.closeFloatingActionDialog()
+}
+
+async function openAtlasIngest() {
+  if (!ui.floatingActionFile) return
+  try {
+    await ingestAtlasImage({ localPath: ui.floatingActionFile.filePath })
+    ui.showToast('已提交审美参考库入库')
+  } catch {
+    ui.showToast('参考库入库失败')
+  } finally {
+    ui.closeFloatingActionDialog()
+  }
 }
 </script>
 
@@ -62,6 +75,15 @@ function openDepthVideo() {
           >
             <strong>压缩图片</strong>
             <span>输入目标 MB 后另存为</span>
+          </button>
+          <button
+            type="button"
+            class="action-button"
+            data-action="atlas-ingest"
+            @click="openAtlasIngest"
+          >
+            <strong>存入审美参考库</strong>
+            <span>识图、分类并写入 AAA-Aesthetic-Atlas</span>
           </button>
         </template>
 

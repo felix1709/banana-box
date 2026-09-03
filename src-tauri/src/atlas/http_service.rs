@@ -94,7 +94,10 @@ fn handle_request(root: &std::path::Path, mut request: tiny_http::Request) {
     let _ = request.respond(tiny_http::Response::from_string("not_found").with_status_code(404));
 }
 
-fn ingest_from_payload(root: &std::path::Path, payload: &serde_json::Value) -> Result<String, String> {
+pub fn ingest_from_payload(
+    root: &std::path::Path,
+    payload: &serde_json::Value,
+) -> Result<String, String> {
     let bytes = if let Some(local_path) = payload.get("localPath").and_then(|v| v.as_str()) {
         std::fs::read(local_path).map_err(|e| e.to_string())?
     } else if let Some(source_url) = payload.get("sourceUrl").and_then(|v| v.as_str()) {

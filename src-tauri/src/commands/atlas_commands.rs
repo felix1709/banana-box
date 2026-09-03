@@ -1,6 +1,6 @@
 use crate::{
     app_state::StartupGate,
-    atlas::http_service::AtlasHttpService,
+    atlas::http_service::{ingest_from_payload, AtlasHttpService},
     atlas::repository::{AtlasEntryDto, AtlasRepository},
     command_auth::MainArgs,
 };
@@ -100,6 +100,45 @@ pub fn stop_atlas_service(
 ) -> Result<(), String> {
     service.stop();
     Ok(())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtlasIngestInput {
+    pub local_path: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub dimension: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+}
+
+#[tauri::command]
+pub fn ingest_atlas_image(
+    _window: tauri::WebviewWindow,
+    gate: tauri::State<'_, StartupGate>,
+    input: MainArgs<AtlasIngestInput>,
+) -> Result<String, String> {
+    gate.require_ready()?;
+    let input = input.0;
+    let mut payload = serde_json::json!({
+        "localPath": input.local_path,
+    });
+    if let Some(title) = input.title {
+        payload["title"] = serde_json::Value::String(title);
+    }
+    if let Some(dimension) = input.dimension {
+        payload["dimension"] = serde_json::Value::String(dimension);
+    }
+    if let Some(tags) = input.tags {
+        payload["tags"] = serde_json::Value::Array(
+            tags.into_iter()
+                .map(serde_json::Value::String)
+                .collect(),
+        );
+    }
+    ingest_from_payload(&atlas_root()?, &payload)
 }
 
 #[derive(serde::Deserialize)]
