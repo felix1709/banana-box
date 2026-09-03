@@ -9,25 +9,13 @@ import {
   startAtlasService,
   stopAtlasService,
 } from '@/lib/atlas-ipc'
+import { atlasDimensionLabel } from '@/lib/atlas-dimensions'
 
 const atlas = useAtlasStore()
 const imageUrls = ref<Record<string, string>>({})
 const selectedMarkdown = ref('')
 const serviceRunning = ref(false)
 const serviceBusy = ref(false)
-
-const dimensions = [
-  'scene-concept',
-  'style',
-  'character-pose',
-  'composition',
-  'lighting-atmosphere',
-  'fx-effects',
-  'color-texture',
-  'emotion-mood',
-  'camera-lens',
-  'model-constraints',
-]
 
 const selectedSections = computed(() => {
   const sections: { title: string; body: string }[] = []
@@ -125,23 +113,6 @@ onMounted(async () => {
     </header>
 
     <div class="atlas-body">
-      <aside class="atlas-sidebar">
-        <button
-          type="button"
-          @click="atlas.dimension = null"
-        >
-          全部
-        </button>
-        <button
-          v-for="dimension in dimensions"
-          :key="dimension"
-          type="button"
-          @click="atlas.dimension = dimension"
-        >
-          {{ dimension }}
-        </button>
-      </aside>
-
       <main class="atlas-grid">
         <button
           v-for="entry in atlas.filteredEntries"
@@ -162,7 +133,7 @@ onMounted(async () => {
             暂无图片
           </div>
           <strong>{{ entry.title }}</strong>
-          <span>{{ entry.status }}</span>
+          <span>{{ atlasDimensionLabel(entry.dimension) }} · {{ entry.status }}</span>
         </button>
         <p
           v-if="atlas.filteredEntries.length === 0"
@@ -221,7 +192,6 @@ onMounted(async () => {
 }
 
 .atlas-toolbar button,
-.atlas-sidebar button,
 .atlas-card {
   border: 1px solid var(--bb-border);
   border-radius: var(--bb-radius-md);
@@ -243,29 +213,17 @@ onMounted(async () => {
 .atlas-body {
   flex: 1;
   display: grid;
-  grid-template-columns: 168px minmax(0, 1fr) minmax(220px, 360px);
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 360px);
   gap: 10px;
   padding: 10px;
   min-height: 0;
   overflow: hidden;
 }
 
-.atlas-sidebar,
 .atlas-grid,
 .atlas-detail {
   overflow-y: auto;
   min-height: 0;
-}
-
-.atlas-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.atlas-sidebar button {
-  text-align: left;
-  padding: 7px 9px;
 }
 
 .atlas-grid {

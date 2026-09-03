@@ -7,26 +7,7 @@ use crate::{
 use tauri_plugin_opener::OpenerExt;
 
 fn atlas_root() -> Result<std::path::PathBuf, String> {
-    let home = dirs_home_dir().ok_or_else(|| "HOME_NOT_FOUND".to_string())?;
-    let config = home.join(".banana-box").join("atlas-config.json");
-    let root = if config.exists() {
-        let value: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(config).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
-        std::path::PathBuf::from(
-            value
-                .get("rootPath")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default(),
-        )
-    } else {
-        home.join("Documents").join("AAA-Aesthetic-Atlas")
-    };
-    Ok(root)
-}
-
-fn dirs_home_dir() -> Option<std::path::PathBuf> {
-    std::env::var_os("USERPROFILE").map(std::path::PathBuf::from)
+    crate::atlas::ensure_atlas_root()
 }
 
 #[tauri::command]

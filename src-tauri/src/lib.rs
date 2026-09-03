@@ -226,6 +226,7 @@ pub fn run() {
 
 fn initialize_startup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = app.path().app_data_dir()?;
+    let _ = atlas::ensure_atlas_root();
     let operations = Arc::new(AppOperationGate::default());
     let restore_blockers = Arc::new(RestoreBlockerRegistry::default());
     let credential_mutations = Arc::new(CredentialMutationCoordinator::default());
