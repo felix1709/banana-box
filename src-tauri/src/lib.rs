@@ -1,4 +1,5 @@
 mod app_state;
+mod atlas;
 mod cloud_config;
 mod command_auth;
 mod commands;
