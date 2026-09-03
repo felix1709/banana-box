@@ -99,17 +99,39 @@ onMounted(async () => {
 <template>
   <section class="atlas-page scrollable-panel">
     <header class="atlas-toolbar">
-      <button type="button" @click="openAtlasFolder">打开知识库文件夹</button>
-      <button type="button" @click="refreshEntries">刷新</button>
-      <button type="button" :disabled="serviceBusy" @click="toggleService">
+      <button
+        type="button"
+        @click="openAtlasFolder"
+      >
+        打开知识库文件夹
+      </button>
+      <button
+        type="button"
+        @click="refreshEntries"
+      >
+        刷新
+      </button>
+      <button
+        type="button"
+        :disabled="serviceBusy"
+        @click="toggleService"
+      >
         {{ serviceRunning ? '关闭入库服务' : '开启入库服务' }}
       </button>
-      <input v-model="atlas.search" placeholder="搜索标题或标签" />
+      <input
+        v-model="atlas.search"
+        placeholder="搜索标题或标签"
+      >
     </header>
 
     <div class="atlas-body">
       <aside class="atlas-sidebar">
-        <button type="button" @click="atlas.dimension = null">全部</button>
+        <button
+          type="button"
+          @click="atlas.dimension = null"
+        >
+          全部
+        </button>
         <button
           v-for="dimension in dimensions"
           :key="dimension"
@@ -128,12 +150,26 @@ onMounted(async () => {
           class="atlas-card"
           @click="selectEntry(entry.id)"
         >
-          <img v-if="imageUrls[entry.id]" :src="imageUrls[entry.id]" alt="" />
-          <div v-else class="atlas-card-placeholder">暂无图片</div>
+          <img
+            v-if="imageUrls[entry.id]"
+            :src="imageUrls[entry.id]"
+            alt=""
+          >
+          <div
+            v-else
+            class="atlas-card-placeholder"
+          >
+            暂无图片
+          </div>
           <strong>{{ entry.title }}</strong>
           <span>{{ entry.status }}</span>
         </button>
-        <p v-if="atlas.filteredEntries.length === 0" class="atlas-empty">暂无参考条目</p>
+        <p
+          v-if="atlas.filteredEntries.length === 0"
+          class="atlas-empty"
+        >
+          暂无参考条目
+        </p>
       </main>
 
       <aside class="atlas-detail">
@@ -142,19 +178,27 @@ onMounted(async () => {
             v-if="imageUrls[atlas.selectedEntry.id]"
             :src="imageUrls[atlas.selectedEntry.id]"
             alt=""
-          />
+          >
           <div class="atlas-detail-head">
             <strong>{{ atlas.selectedEntry.title }}</strong>
             <span>{{ atlas.selectedEntry.status }}</span>
           </div>
           <div class="atlas-prompt-sections">
-            <section v-for="section in selectedSections" :key="section.title">
+            <section
+              v-for="section in selectedSections"
+              :key="section.title"
+            >
               <h3>{{ section.title }}</h3>
               <pre>{{ section.body }}</pre>
             </section>
           </div>
         </template>
-        <p v-else class="atlas-empty">点击左侧卡片查看提示词</p>
+        <p
+          v-else
+          class="atlas-empty"
+        >
+          点击左侧卡片查看提示词
+        </p>
       </aside>
     </div>
   </section>
