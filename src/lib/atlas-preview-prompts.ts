@@ -80,6 +80,44 @@ function parseAspectRatio(value: string | undefined) {
 }
 
 const MJ_TERMS: Array<[needle: string, en: string]> = [
+  ['巨型玫瑰花影子', 'giant rose shadow projection'],
+  ['玫瑰花投影', 'rose projection'],
+  ['玫瑰花影子', 'rose shadow'],
+  ['亮黄色绸缎大摆长裙', 'bright yellow satin long skirt'],
+  ['大摆长裙', 'long flowing skirt'],
+  ['深色复古帽饰', 'vintage dark hat'],
+  ['白色蕾丝上衣', 'white lace top'],
+  ['白色蕾丝', 'white lace'],
+  ['复古帽饰', 'vintage hat'],
+  ['一手托腮', 'one hand supporting cheek'],
+  ['托腮', 'hand supporting cheek'],
+  ['交叉于身前', 'arms crossed'],
+  ['眼神柔和', 'gentle gaze'],
+  ['注视镜头', 'looking at viewer'],
+  ['身体朝向正面', 'front-facing'],
+  ['面部朝向正面', 'facing viewer'],
+  ['巨型玫瑰', 'giant rose'],
+  ['挂画', 'framed wall art'],
+  ['木质门', 'wooden door'],
+  ['木质地板', 'wooden floor'],
+  ['复古房间', 'vintage room'],
+  ['温柔神秘', 'gentle mysterious mood'],
+  ['温柔治愈', 'healing gentle mood'],
+  ['恬静', 'tranquil mood'],
+  ['五官精致', 'delicate facial features'],
+  ['苗条', 'slender figure'],
+  ['皮肤纹理细腻', 'delicate skin texture'],
+  ['衣物细微褶皱', 'clothing wrinkle details'],
+  ['绸缎面', 'satin surface'],
+  ['亮黄色', 'bright yellow'],
+  ['复古造型', 'vintage look'],
+  ['创意表现', 'creative portrait'],
+  ['玫瑰', 'rose'],
+  ['投影', 'projection'],
+  ['地板', 'wooden floor'],
+  ['上衣', 'top'],
+  ['裙子', 'skirt'],
+  ['复古', 'vintage'],
   ['碎花丝绸长裙', 'floral silk dress'],
   ['单只白色翅膀', 'single white wing'],
   ['发丝飞扬', 'flowing hair'],
@@ -267,12 +305,24 @@ const MJ_COLOR_WORDS: Array<[needle: string, en: string]> = [
   ['银色', 'silver'],
 ]
 
+function isNegatedSegment(segment: string) {
+  return /(?:无|未|没有|无明显|不明显|规避)/.test(segment)
+}
+
 function collectTerms(values: Array<string | undefined>) {
   const result: string[] = []
   for (const value of values) {
     if (!value) continue
-    for (const [needle, en] of MJ_TERMS) {
-      if (value.includes(needle)) result.push(en)
+    const segments = value.split(/[；，]/)
+    for (const segment of segments) {
+      if (isNegatedSegment(segment)) continue
+      const matchedNeedles: string[] = []
+      for (const [needle, en] of MJ_TERMS) {
+        if (!segment.includes(needle)) continue
+        if (matchedNeedles.some((matched) => matched.includes(needle))) continue
+        result.push(en)
+        matchedNeedles.push(needle)
+      }
     }
   }
   return unique(result)
@@ -299,6 +349,12 @@ function subjectPrefix(values: Array<string | undefined>) {
 
 function unique(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)))
+}
+
+function compactTerms(values: string[]) {
+  return values.filter(
+    (value, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.includes(value)),
+  )
 }
 
 export function buildMjPrompt(source: string, tags: string[] = []) {
@@ -343,13 +399,13 @@ export function buildMjPrompt(source: string, tags: string[] = []) {
     ...collectColorTerms(map['主要色彩']),
   ])
 
-  const segments = unique([
+  const segments = compactTerms(unique([
     ...subject,
     ...keyFeatures,
     ...styleEnvironment,
     ...materialLighting,
     ratio,
-  ])
+  ]))
 
   const suffix = `--ar ${ratio} --style raw --stylize 150 --v 8.1 --no text, watermark`
   return `${segments.join(', ')} ${suffix}`.replace(/\s+/g, ' ').trim()
