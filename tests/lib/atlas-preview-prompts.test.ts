@@ -42,7 +42,10 @@ describe('atlas preview prompt helpers', () => {
   it('builds an English MJ V8 prompt with aspect ratio', () => {
     const output = buildMjPrompt(source, ['人像'])
     expect(output).toContain('--ar 16:9')
-    expect(output).toContain('--v 8')
+    expect(output).toContain('--style raw')
+    expect(output).toContain('--stylize 150')
+    expect(output).toContain('--v 8.1')
+    expect(output).toContain('--no text, watermark')
     expect(output).toContain('master portrait photography')
     expect(/[\u4e00-\u9fff]/.test(output)).toBe(false)
   })
