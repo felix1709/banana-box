@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
-import { checkAppUpdate, installAppUpdate, nextDailyUpdateCheckDelay } from '@/lib/updater'
+import {
+  checkAppUpdate,
+  installAppUpdate,
+  installAppUpdateWithProgress,
+  nextDailyUpdateCheckDelay,
+} from '@/lib/updater'
 
 vi.mock('@tauri-apps/plugin-updater', () => ({
   check: vi.fn(),
@@ -44,6 +49,51 @@ describe('updater', () => {
 
     expect(downloadAndInstall).toHaveBeenCalled()
     expect(relaunch).toHaveBeenCalled()
+  })
+
+  it('reports download progress while downloading and installing', async () => {
+    const progress = vi.fn()
+    vi.mocked(check).mockResolvedValue({
+      currentVersion: '0.1.2',
+      version: '0.1.3',
+      available: true,
+      download: vi.fn(async (onEvent) => {
+        onEvent?.({ event: 'Started', data: { contentLength: 100 } })
+        onEvent?.({ event: 'Progress', data: { chunkLength: 50 } })
+        onEvent?.({ event: 'Finished' })
+      }),
+      install: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Update)
+
+    await installAppUpdateWithProgress(progress).done
+
+    expect(progress).toHaveBeenCalledWith({ percent: 0, phase: 'downloading' })
+    expect(progress).toHaveBeenCalledWith({ percent: 50, phase: 'downloading' })
+    expect(progress).toHaveBeenCalledWith({ percent: 99, phase: 'installing' })
+    expect(progress).toHaveBeenCalledWith({ percent: 100, phase: 'completed' })
+    expect(relaunch).toHaveBeenCalled()
+  })
+
+  it('does not install or relaunch after the download is cancelled', async () => {
+    const install = vi.fn()
+    const close = vi.fn().mockResolvedValue(undefined)
+    vi.mocked(check).mockResolvedValue({
+      currentVersion: '0.1.2',
+      version: '0.1.3',
+      available: true,
+      download: vi.fn().mockResolvedValue(undefined),
+      install,
+      close,
+    } as unknown as Update)
+
+    const controller = installAppUpdateWithProgress()
+    controller.cancel()
+    await controller.done
+
+    expect(install).not.toHaveBeenCalled()
+    expect(relaunch).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
   })
 
   it('schedules the next 10:00 check from a morning timestamp', () => {

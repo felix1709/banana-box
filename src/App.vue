@@ -16,6 +16,7 @@ import { useSyncStatusStore } from '@/stores/syncStatus'
 import { useNotificationsStore } from '@/stores/notifications'
 import { usePresenceStore } from '@/stores/presence'
 import { copyToClipboard, readImageBytes } from '@/lib/ipc'
+import { getAtlasServiceStatus, startAtlasService } from '@/lib/atlas-ipc'
 import { checkAppUpdate, installAppUpdate, nextDailyUpdateCheckDelay } from '@/lib/updater'
 import {
   buildDailyTaskReviewItems,
@@ -586,6 +587,16 @@ function dismissUpdateAvailable() {
   updateAvailable.value = false
 }
 
+async function ensureAtlasServiceRunning() {
+  try {
+    if (!(await getAtlasServiceStatus())) {
+      await startAtlasService()
+    }
+  } catch {
+    // 入库服务启动失败时静默处理，用户仍可在参考图库页面手动开启。
+  }
+}
+
 onMounted(async () => {
   if (isPiWebRepairWindow) return
   await Promise.all([lib.load(), projects.load(), cloud.load()])
@@ -595,6 +606,7 @@ onMounted(async () => {
   }
   fullscreen.value = await getCurrentWindow().isFullscreen().catch(() => false)
   ui.showPanel()
+  void ensureAtlasServiceRunning()
   window.addEventListener('mouseup', clearResizeActive)
   unlistenFloatingDrop = await listen('floating-file-dropped', (event) => {
     if (!isFloatingFileDropPayload(event.payload)) return

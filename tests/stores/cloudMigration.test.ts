@@ -140,6 +140,38 @@ describe('cloud migration store', () => {
     expect(useCloudMigrationStore().status).toBe('completed')
   })
 
+  it('does not upload legacy shared prompt references that only have a shared- id', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 'user-1', email: 'a@example.com' } as never
+    auth.client = clientMock() as never
+    useWorkspacesStore().activeWorkspaceId = 'workspace-1'
+    const library = useLibraryStore()
+    library.hydrate({
+      version: 1,
+      categories: [],
+      prompts: [{
+        id: 'shared-f8e16181-c45e-4f35-8f79-add1d9b7c02f',
+        title: 'Legacy Shared Prompt',
+        content: 'Use this prompt',
+        categoryId: null,
+        tags: ['shared'],
+        image: null,
+        favorite: false,
+        order: 0,
+        createdAt: 1,
+        updatedAt: 2,
+      }],
+      settings: { hotkey: 'Ctrl+Shift+B', theme: 'auto' },
+    })
+
+    await useCloudMigrationStore().migrateNow()
+
+    expect(auth.client?.from).not.toHaveBeenCalledWith('prompts')
+    expect(library.library.prompts[0].sourceType).toBe('shared')
+    expect(library.library.prompts[0].sharedPromptId).toBe('f8e16181-c45e-4f35-8f79-add1d9b7c02f')
+    expect(useCloudMigrationStore().status).toBe('completed')
+  })
+
   it('loads cloud record counts for the active workspace and compares pending upload totals', async () => {
     const auth = useAuthStore()
     auth.user = { id: 'user-1', email: 'a@example.com' } as never

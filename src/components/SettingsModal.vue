@@ -36,10 +36,10 @@ import {
   discardLegacyImportPreview,
   inspectLegacyImport,
 } from '@/lib/backup-ipc'
-import { checkAppUpdate, installAppUpdate } from '@/lib/updater'
+import { checkAppUpdate, installAppUpdateWithProgress } from '@/lib/updater'
 import { parseFile } from '@/lib/parse'
 import type { AiProvider, CheckAiProviderConnectionResult, Prompt, ProviderKind } from '@/types'
-import type { AppUpdateResult } from '@/lib/updater'
+import type { AppUpdateResult, UpdateInstallController, UpdateProgress } from '@/lib/updater'
 import type { LegacyImportPreview } from '@/lib/backup-ipc'
 
 type SettingsTab = 'features' | 'api' | 'hotkeys' | 'import-export'
@@ -79,8 +79,12 @@ const overwriteLegacyCredential = ref(false)
 const legacyImportError = ref('')
 const checkingVersion = ref(false)
 const installingUpdate = ref(false)
+const updatePhase = ref<'idle' | 'downloading' | 'installing' | 'completed' | 'failed'>('idle')
+const updateProgress = ref(0)
 const updateResult = ref<AppUpdateResult | null>(null)
 const updateError = ref('')
+let updateController: UpdateInstallController | null = null
+let updateCancelled = false
 const autostartEnabled = ref(false)
 const loadingAutostart = ref(true)
 const savingAutostart = ref(false)
@@ -514,15 +518,46 @@ async function onCheckUpdate() {
 }
 
 async function onDownloadUpdate() {
+  if (installingUpdate.value || updateController) return
   installingUpdate.value = true
   updateError.value = ''
+  updateProgress.value = 0
+  updatePhase.value = 'downloading'
+  updateCancelled = false
+
+  updateController = installAppUpdateWithProgress((progress: UpdateProgress) => {
+    if (updateCancelled) return
+    updateProgress.value = progress.percent
+    if (progress.phase === 'installing') {
+      updatePhase.value = 'installing'
+    }
+    if (progress.phase === 'completed') {
+      updatePhase.value = 'completed'
+      updateProgress.value = 100
+    }
+  })
+
   try {
-    await installAppUpdate()
-  } catch {
-    updateError.value = '下载更新失败，请稍后重试'
-  } finally {
+    await updateController.done
+    if (updateCancelled) return
     installingUpdate.value = false
+  } catch {
+    if (updateCancelled) return
+    updateError.value = '下载更新失败，请稍后重试'
+    updatePhase.value = 'failed'
+    installingUpdate.value = false
+  } finally {
+    updateController = null
   }
+}
+
+function cancelUpdateDownload() {
+  updateCancelled = true
+  updateController?.cancel()
+  updateController = null
+  updateProgress.value = 0
+  updatePhase.value = 'idle'
+  installingUpdate.value = false
 }
 </script>
 
@@ -622,8 +657,48 @@ async function onDownloadUpdate() {
                 :disabled="installingUpdate"
                 @click="onDownloadUpdate"
               >
-                下载更新
+                {{ installingUpdate ? '下载中...' : '下载更新' }}
               </button>
+              <div
+                v-if="updatePhase === 'downloading' || updatePhase === 'installing'"
+                class="update-progress-panel"
+              >
+                <div class="update-progress-header">
+                  <span>下载更新</span>
+                  <button
+                    type="button"
+                    class="close-button update-progress-close"
+                    aria-label="取消下载"
+                    @click="cancelUpdateDownload"
+                  >
+                    x
+                  </button>
+                </div>
+                <div class="update-progress-body">
+                  <div
+                    class="update-progress-bar"
+                    role="progressbar"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    :aria-valuenow="updateProgress"
+                  >
+                    <div
+                      class="update-progress-fill"
+                      :style="{ width: `${updateProgress}%` }"
+                    />
+                  </div>
+                  <span class="update-progress-text">{{ updateProgress }}%</span>
+                </div>
+                <p class="update-progress-status">
+                  {{ updatePhase === 'installing' ? '正在安装更新...' : '正在下载更新...' }}
+                </p>
+              </div>
+              <p
+                v-else-if="updatePhase === 'completed'"
+                class="version-status success"
+              >
+                下载完成，正在准备重启应用...
+              </p>
             </div>
 
             <section
@@ -1112,9 +1187,65 @@ select {
 .install-update-button {
   margin-top: 8px;
 }
+.update-progress-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-sm);
+  background: var(--bb-surface-soft);
+}
+.update-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--bb-text);
+  font-size: 12px;
+}
+.update-progress-close {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  line-height: 1;
+}
+.update-progress-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.update-progress-bar {
+  width: min(320px, 100%);
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bb-surface-muted);
+  box-shadow: inset 0 0 0 1px var(--bb-border);
+}
+.update-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--bb-primary), #68c9ff);
+  transition: width 160ms ease;
+}
+.update-progress-text {
+  min-width: 42px;
+  color: var(--bb-text-muted);
+  font-size: 12px;
+  text-align: right;
+}
+.update-progress-status {
+  margin: 0;
+  color: var(--bb-text-muted);
+  font-size: 12px;
+}
 .error,
 .version-status.error {
   color: var(--bb-danger);
+}
+.version-status.success {
+  color: var(--bb-primary-strong);
 }
 
 @media (max-width: 560px) {

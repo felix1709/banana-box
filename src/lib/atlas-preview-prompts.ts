@@ -40,55 +40,34 @@ function pick(map: Record<string, string>, keys: string[]) {
     .filter((value): value is string => Boolean(value && value !== UNKNOWN))
 }
 
-function paragraph(title: string, values: string[]) {
-  return `${title}\n${values.map((value) => `- ${value}`).join('\n')}`
+function sectionLine(title: string, values: string[]) {
+  const content = values.length > 0 ? values.join('，') : UNKNOWN
+  return `${title}${content}`
 }
 
 export function buildGptPrompt(source: string) {
   const map = extractAnalysisMap(source)
   const sections = [
-    paragraph(
-      '基础画面属性',
-      pick(map, ['画幅比例', '视图布局', '画面大类']),
+    sectionLine(
+      '【主体描述】',
+      pick(map, ['身份特征', '姿态神态', '穿着配饰', '画面大类']),
     ),
-    paragraph(
-      '核心主体信息',
-      pick(map, ['身份特征', '姿态神态', '穿着配饰']),
+    sectionLine(
+      '【风格】',
+      pick(map, ['摄影风格', '整体氛围', '情绪传递', '整体质感', '色彩风格']),
     ),
-    paragraph(
-      '构图与镜头语言',
-      pick(map, ['景别', '镜头视角', '景深对焦', '空间层次']),
-    ),
-    paragraph(
-      '光影体系',
-      pick(map, ['光源属性', '光位光质', '光影特征', '整体影调']),
-    ),
-    paragraph(
-      '色彩与色调',
-      pick(map, ['整体色调', '色彩质感', '色彩风格', '主要色彩']),
-    ),
-    paragraph(
-      '材质与质感',
-      pick(map, ['皮肤质感', '毛发质感', '物体面料', '整体质感']),
-    ),
-    paragraph(
-      '环境与背景',
+    sectionLine(
+      '【场景】',
       pick(map, ['背景类型', '场景空间', '氛围元素', '背景与主体的关联']),
     ),
-    paragraph(
-      '风格与情绪调性',
-      pick(map, ['摄影风格', '整体氛围', '情绪传递']),
+    sectionLine(
+      '【构图光线】',
+      pick(map, ['景别', '镜头视角', '景深对焦', '空间层次', '视图布局', '光源属性', '光位光质', '光影特征', '整体影调']),
     ),
-    paragraph(
-      '特殊效果与细节',
-      pick(map, ['画面特效', '微观细节', '专属特征']),
-    ),
-    paragraph(
-      '反向约束维度',
-      pick(map, ['画面原生瑕疵', 'AI常见通病', '需规避元素']),
-    ),
+    '【比例】16:9 横构图',
+    '【约束】画面无文字，发丝通透柔顺，布料物理真实',
   ]
-  return sections.filter((section) => !section.endsWith(`\n- ${UNKNOWN}`)).join('\n\n')
+  return sections.join('\n')
 }
 
 function parseAspectRatio(value: string | undefined) {

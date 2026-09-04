@@ -162,7 +162,10 @@ export const useCloudMigrationStore = defineStore('cloudMigration', {
       const projects = useProjectsStore()
       const daily = useDailyTasksStore()
       const personalPrompts = library.library.prompts.filter(
-        (prompt) => prompt.sourceType !== 'shared' && !prompt.sharedPromptId,
+        (prompt) =>
+          prompt.sourceType !== 'shared'
+          && !prompt.sharedPromptId
+          && !prompt.id.startsWith('shared-'),
       )
 
       try {

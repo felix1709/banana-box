@@ -9,7 +9,7 @@ import {
   listAiProviders,
   saveAiProvider,
 } from '@/lib/provider-ipc'
-import { checkAppUpdate, installAppUpdate } from '@/lib/updater'
+import { checkAppUpdate, installAppUpdateWithProgress } from '@/lib/updater'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { open } from '@tauri-apps/plugin-dialog'
 import {
@@ -65,7 +65,7 @@ vi.mock('@/lib/backup-ipc', () => ({
 
 vi.mock('@/lib/updater', () => ({
   checkAppUpdate: vi.fn(),
-  installAppUpdate: vi.fn(),
+  installAppUpdateWithProgress: vi.fn(),
 }))
 
 async function openSettingsTab(wrapper: ReturnType<typeof mount>, index: number) {
@@ -272,7 +272,10 @@ describe('SettingsModal', () => {
       latestVersion: '0.1.3',
       updateAvailable: true,
     })
-    vi.mocked(installAppUpdate).mockResolvedValue(undefined)
+    vi.mocked(installAppUpdateWithProgress).mockReturnValue({
+      cancel: vi.fn(),
+      done: Promise.resolve(),
+    })
     const wrapper = mount(SettingsModal)
 
     await wrapper.find('.version-check-button').trigger('click')
@@ -283,7 +286,85 @@ describe('SettingsModal', () => {
 
     await wrapper.find('.install-update-button').trigger('click')
 
-    expect(installAppUpdate).toHaveBeenCalled()
+    expect(installAppUpdateWithProgress).toHaveBeenCalled()
+  })
+
+  it('shows download progress and disables the update button while downloading', async () => {
+    vi.mocked(checkAppUpdate).mockResolvedValue({
+      currentVersion: '0.1.2',
+      latestVersion: '0.1.3',
+      updateAvailable: true,
+    })
+    let reportProgress: ((progress: { percent: number, phase: string }) => void) | null = null
+    vi.mocked(installAppUpdateWithProgress).mockImplementation((onProgress) => {
+      reportProgress = onProgress
+      return {
+        cancel: vi.fn(),
+        done: new Promise<void>(() => {}),
+      }
+    })
+    const wrapper = mount(SettingsModal)
+
+    await wrapper.find('.version-check-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.find('.install-update-button').trigger('click')
+
+    expect(wrapper.find('.install-update-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.update-progress-panel').exists()).toBe(true)
+
+    reportProgress?.({ percent: 42, phase: 'downloading' })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.update-progress-text').text()).toContain('42%')
+    expect(wrapper.find('.update-progress-fill').attributes('style')).toContain('42%')
+  })
+
+  it('cancels a download and re-enables the update button', async () => {
+    vi.mocked(checkAppUpdate).mockResolvedValue({
+      currentVersion: '0.1.2',
+      latestVersion: '0.1.3',
+      updateAvailable: true,
+    })
+    const cancel = vi.fn()
+    vi.mocked(installAppUpdateWithProgress).mockReturnValue({
+      cancel,
+      done: new Promise<void>(() => {}),
+    })
+    const wrapper = mount(SettingsModal)
+
+    await wrapper.find('.version-check-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.find('.install-update-button').trigger('click')
+    await wrapper.find('.update-progress-close').trigger('click')
+
+    expect(cancel).toHaveBeenCalled()
+    expect(wrapper.find('.update-progress-panel').exists()).toBe(false)
+    expect(wrapper.find('.install-update-button').attributes('disabled')).toBeUndefined()
+  })
+
+  it('shows a failure message and re-enables the update button when download fails', async () => {
+    vi.mocked(checkAppUpdate).mockResolvedValue({
+      currentVersion: '0.1.2',
+      latestVersion: '0.1.3',
+      updateAvailable: true,
+    })
+    let rejectDone: (reason?: unknown) => void = () => {}
+    vi.mocked(installAppUpdateWithProgress).mockReturnValue({
+      cancel: vi.fn(),
+      done: new Promise<void>((_resolve, reject) => {
+        rejectDone = reject
+      }),
+    })
+    const wrapper = mount(SettingsModal)
+
+    await wrapper.find('.version-check-button').trigger('click')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await wrapper.find('.install-update-button').trigger('click')
+    rejectDone(new Error('network down'))
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(wrapper.find('.version-status.error').text()).toContain('下载更新失败')
+    expect(wrapper.find('.install-update-button').attributes('disabled')).toBeUndefined()
   })
 
   it('shows an up-to-date message when no newer release exists', async () => {

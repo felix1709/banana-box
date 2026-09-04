@@ -18,13 +18,19 @@ function normalizeSettings(settings: Partial<Library['settings']>): Library['set
 function normalizeLibrary(library: Library): Library {
   return {
     ...library,
-    prompts: library.prompts.map((prompt, index) => ({
-      ...prompt,
-      favorite: prompt.favorite ?? false,
-      order: prompt.order ?? index,
-      sourceType: prompt.sourceType ?? 'local',
-      sharedPromptId: prompt.sharedPromptId ?? null,
-    })),
+    prompts: library.prompts.map((prompt, index) => {
+      const inferredSharedPromptId =
+        prompt.sharedPromptId ??
+        (prompt.id.startsWith('shared-') ? prompt.id.slice('shared-'.length) : null)
+
+      return {
+        ...prompt,
+        favorite: prompt.favorite ?? false,
+        order: prompt.order ?? index,
+        sourceType: inferredSharedPromptId ? 'shared' : prompt.sourceType ?? 'local',
+        sharedPromptId: inferredSharedPromptId,
+      }
+    }),
     settings: normalizeSettings(library.settings),
   }
 }

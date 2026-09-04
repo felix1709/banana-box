@@ -11,6 +11,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useDailyTasksStore } from '@/stores/dailyTasks'
 import { useUiStore } from '@/stores/ui'
 import * as ipc from '@/lib/ipc'
+import * as atlasIpc from '@/lib/atlas-ipc'
 
 let eventHandlers: Record<string, (event: { payload: unknown }) => void> = {}
 const coreApi = vi.hoisted(() => ({
@@ -88,6 +89,11 @@ vi.mock('@/lib/updater', () => ({
   nextDailyUpdateCheckDelay: vi.fn(() => 2_147_483_647),
 }))
 
+vi.mock('@/lib/atlas-ipc', () => ({
+  getAtlasServiceStatus: vi.fn().mockResolvedValue(false),
+  startAtlasService: vi.fn().mockResolvedValue(undefined),
+}))
+
 describe('App', () => {
   beforeEach(() => {
     vi.useRealTimers()
@@ -114,6 +120,14 @@ describe('App', () => {
     await wrapper.find('.window-drag-strip').trigger('mousedown')
 
     expect(coreApi.invoke).toHaveBeenCalledWith('begin_main_window_drag')
+  })
+
+  it('starts the atlas ingest service by default after app startup', async () => {
+    const wrapper = mount(App)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+
+    expect(atlasIpc.getAtlasServiceStatus).toHaveBeenCalled()
+    expect(atlasIpc.startAtlasService).toHaveBeenCalled()
   })
 
   it('marks and highlights the drag strip while pressing it', async () => {
