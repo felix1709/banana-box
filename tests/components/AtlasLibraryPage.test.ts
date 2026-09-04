@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AtlasLibraryPage from '@/components/atlas/AtlasLibraryPage.vue'
@@ -16,8 +16,10 @@ vi.mock('@/lib/atlas-ipc', () => ({
       score: 1,
       status: 'confirmed',
       file: 'entries/a.md',
+      categoryIds: [],
     },
   ]),
+  loadAtlasCategories: vi.fn().mockResolvedValue([]),
   loadAtlasEntry: vi.fn().mockResolvedValue('---\nid: a\n---\n\n## 提示词片段\n逆光测试'),
   loadAtlasImage: vi.fn().mockResolvedValue('blob:atlas'),
   openAtlasFolder: vi.fn(),
@@ -42,14 +44,17 @@ describe('AtlasLibraryPage', () => {
         score: 1,
         status: 'confirmed',
         file: 'entries/a.md',
+        categoryIds: [],
       },
     ])
 
     const wrapper = mount(AtlasLibraryPage, {
       global: { plugins: [createPinia()] },
     })
+    await flushPromises()
 
     expect(wrapper.find('.atlas-page').exists()).toBe(true)
     expect(wrapper.find('.atlas-grid').exists()).toBe(true)
+    expect(wrapper.find('.atlas-card-favorite').exists()).toBe(true)
   })
 })

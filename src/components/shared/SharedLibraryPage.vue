@@ -29,7 +29,7 @@ function downloadPrompt(prompt: SharedPrompt) {
     <header class="shared-library-toolbar">
       <div>
         <p>Shared</p>
-        <h2>共享库</h2>
+        <h2>共享词库</h2>
       </div>
       <button
         class="shared-refresh-button"

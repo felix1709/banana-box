@@ -195,6 +195,7 @@ pub struct MigrationSummary {
     pub warnings: Vec<String>,
 }
 
+#[derive(Clone)]
 pub struct AppServices {
     pub database: Arc<Database>,
     pub provider_http: Arc<ProviderHttpClient>,

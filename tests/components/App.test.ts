@@ -78,6 +78,16 @@ vi.mock('@/lib/ipc', () => ({
 
 vi.mock('@/lib/productionIpc', () => productionIpc)
 
+vi.mock('@/lib/updater', () => ({
+  checkAppUpdate: vi.fn().mockResolvedValue({
+    currentVersion: '0.1.0',
+    latestVersion: '0.1.0',
+    updateAvailable: false,
+  }),
+  installAppUpdate: vi.fn().mockResolvedValue(undefined),
+  nextDailyUpdateCheckDelay: vi.fn(() => 2_147_483_647),
+}))
+
 describe('App', () => {
   beforeEach(() => {
     vi.useRealTimers()
@@ -391,6 +401,7 @@ describe('App', () => {
 
     expect(update).toHaveBeenCalledWith({
       taskId: 't1',
+      code: 'L36',
       title: 'Shot refinement',
       progress: 45,
       note: 'Keep color pass tight',
@@ -472,6 +483,7 @@ describe('App', () => {
 
     expect(productionIpc.updateDailyTask).toHaveBeenCalledWith({
       taskId: 'task-1',
+      code: 'L36',
       title: 'Already done',
       progress: 100,
       note: 'Completed before review',

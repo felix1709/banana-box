@@ -1,7 +1,7 @@
 use super::model::{
     apply_schedule_progress, main_stage_for_project_stages, main_stage_for_schedule,
-    validate_and_sort_stages, validate_project_fields, validate_project_id,
-    validate_stage_values, CreateProjectInput, ProjectDto, ProjectStageDto, SaveProjectStageInput,
+    validate_and_sort_stages, validate_project_fields, validate_project_id, validate_stage_values,
+    CreateProjectInput, ProjectDto, ProjectStageDto, SaveProjectStageInput,
     SaveProjectWithStagesInput, SetProjectStageInput, StageKey, UpdateProjectInput,
 };
 use crate::db::Database;
@@ -111,7 +111,11 @@ pub fn set_project_public(
 ) -> Result<ProjectDto, String> {
     validate_project_id(project_id)?;
     let now = timestamp();
-    let summary = if is_public { "设为公共项目" } else { "设为个人项目" };
+    let summary = if is_public {
+        "设为公共项目"
+    } else {
+        "设为个人项目"
+    };
 
     db.with_transaction(|transaction| {
         let changed = transaction

@@ -171,13 +171,7 @@ impl ProviderHttpClient {
                 )
                 .await?;
             reject_declared_response_that_exceeds_limit(&response, decoded_limit)?;
-            collect_response(
-                response,
-                total_cancellation,
-                timeouts.idle,
-                decoded_limit,
-            )
-            .await
+            collect_response(response, total_cancellation, timeouts.idle, decoded_limit).await
         };
 
         select_cancel_or_timeout(&cancellation, timeouts.total_non_streaming, read).await?
@@ -188,8 +182,12 @@ impl ProviderHttpClient {
         request: RequestBuilder,
         cancellation: &CancellationToken,
     ) -> Result<Response, String> {
-        self.send_request_with_response_timeout(request, cancellation, self.timeouts.response_header)
-            .await
+        self.send_request_with_response_timeout(
+            request,
+            cancellation,
+            self.timeouts.response_header,
+        )
+        .await
     }
 
     async fn send_request_with_response_timeout(

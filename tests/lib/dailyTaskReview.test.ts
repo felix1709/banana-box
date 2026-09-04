@@ -4,8 +4,11 @@ import {
   addLocalDays,
   buildDailyTaskReviewItems,
   hasExactTitle,
+  isAfterDailyTaskCreateDeadline,
   isWorkday,
+  nextWorkdayLocalDate,
   nextWorkdayReviewDelay,
+  resolveDailyTaskCreateDate,
 } from '@/lib/dailyTaskReview'
 
 describe('daily task review helpers', () => {
@@ -45,6 +48,23 @@ describe('daily task review helpers', () => {
 
   it('adds one local day without timezone drift', () => {
     expect(addLocalDays('2026-07-20', 1)).toBe('2026-07-21')
+  })
+
+  it('moves Friday to Monday when finding the next workday', () => {
+    expect(nextWorkdayLocalDate('2026-07-24')).toBe('2026-07-27')
+  })
+
+  it('keeps a selected non-today date unchanged when creating a task', () => {
+    expect(resolveDailyTaskCreateDate('2026-07-12', new Date(2026, 6, 13, 19, 0, 0))).toBe('2026-07-12')
+  })
+
+  it('keeps today before 18:25', () => {
+    expect(resolveDailyTaskCreateDate('2026-07-20', new Date(2026, 6, 20, 18, 24, 0))).toBe('2026-07-20')
+  })
+
+  it('moves today to the next workday after 18:25', () => {
+    expect(resolveDailyTaskCreateDate('2026-07-24', new Date(2026, 6, 24, 18, 25, 0))).toBe('2026-07-27')
+    expect(isAfterDailyTaskCreateDeadline(new Date(2026, 6, 24, 18, 25, 0))).toBe(true)
   })
 
   it('includes every task in group and task order, including 100 percent tasks', () => {

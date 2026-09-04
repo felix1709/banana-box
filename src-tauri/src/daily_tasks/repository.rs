@@ -150,25 +150,80 @@ pub fn update_task(
     db: &crate::db::Database,
     input: UpdateDailyTaskInput,
 ) -> Result<DailyTaskDayDto, String> {
-    validate_update(&input)?;
+    let code = validate_update(&input)?;
     db.with_immediate_transaction(|transaction| {
-        let (local_date, day_id, _group_id) = find_task_day(transaction, &input.task_id)?;
+        let now = timestamp();
+        let (local_date, day_id, current_group_id) = find_task_day(transaction, &input.task_id)?;
         reject_settled(transaction, &day_id)?;
-        transaction
-            .execute(
-                "UPDATE daily_tasks SET title = ?1, progress = ?2, note = ?3, invested_minutes = ?4, reminder_time = ?5, reminder_content = ?6, updated_at = ?7 WHERE id = ?8",
-                params![
-                    input.title.trim(),
-                    input.progress,
-                    input.note,
-                    input.invested_minutes,
-                    input.reminder_time,
-                    input.reminder_content,
-                    timestamp(),
-                    input.task_id,
-                ],
+        let current_project_id: Option<String> = transaction
+            .query_row(
+                "SELECT project_id FROM daily_task_groups WHERE id = ?1",
+                [&current_group_id],
+                |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
+        let target_group_id = ensure_group(
+            transaction,
+            &day_id,
+            &code,
+            current_project_id.as_deref(),
+            &now,
+        )?;
+        let moved_group = target_group_id != current_group_id;
+        if moved_group {
+            let position: i64 = transaction
+                .query_row(
+                    "SELECT COALESCE(MAX(position) + 1, 0) FROM daily_tasks WHERE group_id = ?1",
+                    [&target_group_id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "UPDATE daily_tasks SET group_id = ?1, position = ?2, title = ?3, progress = ?4, note = ?5, invested_minutes = ?6, reminder_time = ?7, reminder_content = ?8, updated_at = ?9 WHERE id = ?10",
+                    params![
+                        target_group_id,
+                        position,
+                        input.title.trim(),
+                        input.progress,
+                        input.note,
+                        input.invested_minutes,
+                        input.reminder_time,
+                        input.reminder_content,
+                        now,
+                        input.task_id,
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+            let remaining: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM daily_tasks WHERE group_id = ?1",
+                    [&current_group_id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            if remaining == 0 {
+                transaction
+                    .execute("DELETE FROM daily_task_groups WHERE id = ?1", [&current_group_id])
+                    .map_err(|error| error.to_string())?;
+            }
+        } else {
+            transaction
+                .execute(
+                    "UPDATE daily_tasks SET title = ?1, progress = ?2, note = ?3, invested_minutes = ?4, reminder_time = ?5, reminder_content = ?6, updated_at = ?7 WHERE id = ?8",
+                    params![
+                        input.title.trim(),
+                        input.progress,
+                        input.note,
+                        input.invested_minutes,
+                        input.reminder_time,
+                        input.reminder_content,
+                        now,
+                        input.task_id,
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
         load_day_from_connection(transaction, &local_date)
     })
 }

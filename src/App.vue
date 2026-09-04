@@ -16,10 +16,11 @@ import { useSyncStatusStore } from '@/stores/syncStatus'
 import { useNotificationsStore } from '@/stores/notifications'
 import { usePresenceStore } from '@/stores/presence'
 import { copyToClipboard, readImageBytes } from '@/lib/ipc'
+import { checkAppUpdate, installAppUpdate, nextDailyUpdateCheckDelay } from '@/lib/updater'
 import {
-  addLocalDays,
   buildDailyTaskReviewItems,
   hasExactTitle,
+  nextWorkdayLocalDate,
   nextWorkdayReviewDelay,
   type DailyTaskReviewItem,
 } from '@/lib/dailyTaskReview'
@@ -35,7 +36,6 @@ import AppSidebar from '@/components/AppSidebar.vue'
 import PromptCard from '@/components/PromptCard.vue'
 import PromptEditor from '@/components/PromptEditor.vue'
 import SettingsModal from '@/components/SettingsModal.vue'
-import ReverseImagePanel from '@/components/ReverseImagePanel.vue'
 import FastCompressionPanel from '@/components/FastCompressionPanel.vue'
 import DepthVideoPanel from '@/components/DepthVideoPanel.vue'
 import FloatingActionDialog from '@/components/FloatingActionDialog.vue'
@@ -78,6 +78,11 @@ let unlistenReviewDismiss: UnlistenFn | null = null
 let workspaceRealtime: WorkspaceRealtimeSubscription | null = null
 let dailyReminderTimer: ReturnType<typeof window.setTimeout> | null = null
 let dailyTaskReviewTimer: ReturnType<typeof window.setTimeout> | null = null
+let updateCheckTimer: ReturnType<typeof window.setTimeout> | null = null
+const updateAvailable = ref(false)
+const updateChecking = ref(false)
+const updateInstalling = ref(false)
+const updateVersion = ref('')
 let activeDailyTaskReview: {
   sessionId: string
   localDate: string
@@ -287,6 +292,13 @@ function findDailyTask(taskId: string) {
   return null
 }
 
+function findDailyTaskGroupCode(taskId: string) {
+  for (const group of daily.day?.groups ?? []) {
+    if (group.tasks.some((item) => item.id === taskId)) return group.code
+  }
+  return ''
+}
+
 function collectDailyReminders(): DailyReminder[] {
   if (!daily.day || daily.day.settledAt) return []
   return daily.day.groups.flatMap((group) =>
@@ -357,6 +369,7 @@ async function snoozeDailyReminderFromFloat(payload: DailyReminderSnoozePayload)
   try {
     await daily.update({
       taskId: task.id,
+      code: findDailyTaskGroupCode(task.id),
       title: task.title,
       progress: task.progress,
       note: task.note,
@@ -454,6 +467,7 @@ async function completeDailyTaskReviewTask(payload: DailyTaskReviewActionPayload
   try {
     const updatedDay = await updateDailyTaskDirect({
       taskId: task.taskId,
+      code: task.code,
       title: task.title,
       progress: 100,
       note: task.note,
@@ -474,7 +488,7 @@ async function completeDailyTaskReviewTask(payload: DailyTaskReviewActionPayload
 async function delayDailyTaskReviewTask(payload: DailyTaskReviewActionPayload) {
   const task = getActiveDailyTaskReviewItem(payload)
   if (!task || !activeDailyTaskReview) return
-  const nextDate = addLocalDays(activeDailyTaskReview.localDate, 1)
+  const nextDate = nextWorkdayLocalDate(activeDailyTaskReview.localDate)
 
   try {
     const nextDay = await loadDailyTaskDay(nextDate)
@@ -526,6 +540,52 @@ function dismissDailyTaskReview(payload: DailyTaskReviewActionPayload) {
   activeDailyTaskReview = null
 }
 
+function clearUpdateCheckTimer() {
+  if (updateCheckTimer !== null) {
+    window.clearTimeout(updateCheckTimer)
+    updateCheckTimer = null
+  }
+}
+
+function scheduleDailyUpdateCheck() {
+  clearUpdateCheckTimer()
+  const delay = Math.max(0, Math.min(nextDailyUpdateCheckDelay(new Date()), 2_147_483_647))
+  updateCheckTimer = window.setTimeout(() => {
+    void checkForUpdateInBackground()
+  }, delay)
+}
+
+async function checkForUpdateInBackground() {
+  try {
+    updateChecking.value = true
+    const result = await checkAppUpdate()
+    if (result.updateAvailable) {
+      updateAvailable.value = true
+      updateVersion.value = result.latestVersion
+    }
+  } catch {
+    // 静默失败，不打断用户当前操作。
+  } finally {
+    updateChecking.value = false
+    scheduleDailyUpdateCheck()
+  }
+}
+
+async function installAvailableUpdate() {
+  if (updateInstalling.value) return
+  updateInstalling.value = true
+  try {
+    await installAppUpdate()
+  } catch {
+    updateInstalling.value = false
+    ui.showToast('更新失败，请稍后重试')
+  }
+}
+
+function dismissUpdateAvailable() {
+  updateAvailable.value = false
+}
+
 onMounted(async () => {
   if (isPiWebRepairWindow) return
   await Promise.all([lib.load(), projects.load(), cloud.load()])
@@ -565,6 +625,7 @@ onMounted(async () => {
     dismissDailyTaskReview(event.payload)
   })
   scheduleDailyTaskReview()
+  scheduleDailyUpdateCheck()
 })
 
 onUnmounted(() => {
@@ -572,6 +633,7 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', clearResizeActive)
   clearDailyReminderTimer()
   clearDailyTaskReviewTimer()
+  clearUpdateCheckTimer()
   unlistenFloatingDrop?.()
   unlistenFloatingDrop = null
   unlistenReminderOpenTask?.()
@@ -824,7 +886,6 @@ watchEffect(async () => {
             </p>
           </TransitionGroup>
         </section>
-        <ReverseImagePanel v-else-if="ui.activeTool === 'reverse-image'" />
         <FastCompressionPanel v-else-if="ui.activeTool === 'compression'" />
         <DepthVideoPanel v-else-if="ui.activeTool === 'depth-video'" />
         <ProjectBoardPage v-else-if="ui.activeTool === 'projects'" />
@@ -838,6 +899,41 @@ watchEffect(async () => {
     <SettingsModal v-if="ui.settingsOpen" />
     <CloudMigrationDialog />
     <FloatingActionDialog />
+    <div
+      v-if="updateAvailable"
+      class="update-available-mask"
+      @click.self="dismissUpdateAvailable"
+    >
+      <section
+        class="update-available-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="update-available-title"
+      >
+        <header>
+          <h3 id="update-available-title">发现新版本请更新</h3>
+          <p v-if="updateVersion">最新版本：{{ updateVersion }}</p>
+        </header>
+        <footer>
+          <button
+            type="button"
+            class="update-later-button"
+            :disabled="updateInstalling"
+            @click="dismissUpdateAvailable"
+          >
+            稍后
+          </button>
+          <button
+            type="button"
+            class="update-now-button"
+            :disabled="updateInstalling"
+            @click="installAvailableUpdate"
+          >
+            {{ updateInstalling ? '更新中...' : '更新' }}
+          </button>
+        </footer>
+      </section>
+    </div>
     <div
       v-if="ui.toast"
       class="toast"
@@ -1189,5 +1285,63 @@ watchEffect(async () => {
   border-radius: var(--bb-radius-md);
   border: 1px solid var(--bb-border-strong);
   box-shadow: var(--bb-shadow-dialog);
+}
+.update-available-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(1, 5, 9, 0.72);
+  backdrop-filter: blur(6px);
+}
+.update-available-dialog {
+  width: min(380px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--bb-border-strong);
+  border-radius: var(--bb-radius-md);
+  background: var(--bb-surface);
+  box-shadow: var(--bb-shadow-dialog);
+}
+.update-available-dialog header h3,
+.update-available-dialog header p {
+  margin: 0;
+}
+.update-available-dialog header p {
+  margin-top: 6px;
+  color: var(--bb-text-muted);
+  font-size: 12px;
+}
+.update-available-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.update-later-button,
+.update-now-button {
+  min-height: 34px;
+  padding: 7px 14px;
+  border-radius: var(--bb-radius-sm);
+  cursor: pointer;
+}
+.update-later-button {
+  border: 1px solid var(--bb-border);
+  background: var(--bb-surface-soft);
+  color: var(--bb-text);
+}
+.update-now-button {
+  border: 1px solid rgba(102, 247, 211, 0.5);
+  background: var(--bb-primary);
+  color: #06231f;
+  font-weight: 750;
+}
+.update-later-button:disabled,
+.update-now-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 </style>

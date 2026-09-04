@@ -207,15 +207,15 @@ async function onUploadShared() {
   try {
     const result = await shared.uploadLocalPrompt(currentPrompt.value)
     if (result.status === 'duplicate') {
-      const renamedTitle = window.prompt('共享库里已有同名提示词，请修改标题后再上传。', currentPrompt.value.title)
+      const renamedTitle = window.prompt('共享词库里已有同名提示词，请修改标题后再上传。', currentPrompt.value.title)
       if (!renamedTitle?.trim()) return
       const retry = await shared.uploadLocalPrompt(currentPrompt.value, renamedTitle.trim())
       if (retry.status === 'duplicate') {
-        ui.showToast('共享库标题仍重复')
+        ui.showToast('共享词库标题仍重复')
         return
       }
     }
-    ui.showToast('已上传共享库')
+    ui.showToast('已上传共享词库')
   } catch (error) {
     ui.showToast(error instanceof Error ? error.message : String(error))
   } finally {
@@ -491,8 +491,8 @@ function onPointerEnter() {
         type="button"
         class="upload-shared-button"
         data-action="upload-shared-prompt"
-        title="上传共享库"
-        aria-label="上传共享库"
+        title="上传共享词库"
+        aria-label="上传共享词库"
         :disabled="uploadingShared"
         @pointerdown.stop
         @click.stop="onUploadShared"

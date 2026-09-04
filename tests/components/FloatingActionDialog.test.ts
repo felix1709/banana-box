@@ -9,7 +9,7 @@ describe('FloatingActionDialog', () => {
     setActivePinia(createPinia())
   })
 
-  it('shows reverse and compression actions for images', async () => {
+  it('shows compression and atlas actions for images', async () => {
     const ui = useUiStore()
     ui.openFloatingActionDialog({
       filePath: 'C:/tmp/photo.png',
@@ -19,14 +19,7 @@ describe('FloatingActionDialog', () => {
     const wrapper = mount(FloatingActionDialog)
 
     expect(wrapper.text()).toContain('photo.png')
-    expect(wrapper.find('[data-action="reverse-image"]').text()).toContain('反推提示词')
     expect(wrapper.find('[data-action="compress-image"]').text()).toContain('压缩图片')
-
-    await wrapper.find('[data-action="reverse-image"]').trigger('click')
-
-    expect(ui.activeTool).toBe('reverse-image')
-    expect(ui.reverseImageSourcePath).toBe('C:/tmp/photo.png')
-    expect(ui.floatingActionDialogOpen).toBe(false)
 
     ui.openFloatingActionDialog({
       filePath: 'C:/tmp/photo.png',

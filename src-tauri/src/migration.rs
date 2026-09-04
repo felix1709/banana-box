@@ -1911,8 +1911,7 @@ mod tests {
                 services
                     .database
                     .with_connection(|connection| {
-                        crate::db::schema::validate(connection)
-                            .map_err(|error| error.to_string())
+                        crate::db::schema::validate(connection).map_err(|error| error.to_string())
                     })
                     .unwrap();
             }

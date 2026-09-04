@@ -1,7 +1,70 @@
 <!doctype html>
 <html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+
+      html,
+      body {
+        margin: 0;
+        background: transparent;
+      }
+
+      body {
+        width: 240px;
+        padding: 10px 10px 0;
+        color: #e8f6f2;
+      }
+
+      .panel {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        border-radius: 18px;
+        background: #0a141b;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 10px;
+        box-shadow: none;
+      }
+
+      button {
+        display: block;
+        width: 100%;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 14px;
+        background: #0d1b24;
+        color: #e8f6f2;
+        padding: 12px 14px;
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      button.primary {
+        background: #66f7d3;
+        color: #04121a;
+        border-color: #66f7d3;
+        font-weight: 700;
+      }
+
+      #status {
+        margin: 10px 0;
+        white-space: pre-wrap;
+        color: #b7d0c9;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
   <body>
-    <button id="capture">抓取当前网页图片</button>
+    <div class="panel">
+      <button id="capture" class="primary" type="button">抓取当前网页图片</button>
+      <button id="areaCapture" type="button">区域截图</button>
+    </div>
     <pre id="status"></pre>
     <script src="popup.js"></script>
   </body>

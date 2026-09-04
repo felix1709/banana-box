@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
-import { checkAppUpdate, installAppUpdate } from '@/lib/updater'
+import { checkAppUpdate, installAppUpdate, nextDailyUpdateCheckDelay } from '@/lib/updater'
 
 vi.mock('@tauri-apps/plugin-updater', () => ({
   check: vi.fn(),
@@ -44,5 +44,15 @@ describe('updater', () => {
 
     expect(downloadAndInstall).toHaveBeenCalled()
     expect(relaunch).toHaveBeenCalled()
+  })
+
+  it('schedules the next 10:00 check from a morning timestamp', () => {
+    const now = new Date(2026, 6, 20, 9, 30, 0)
+    expect(nextDailyUpdateCheckDelay(now)).toBe(30 * 60_000)
+  })
+
+  it('rolls to the next day after 10:00', () => {
+    const now = new Date(2026, 6, 20, 10, 0, 0)
+    expect(nextDailyUpdateCheckDelay(now)).toBe(24 * 60 * 60_000)
   })
 })

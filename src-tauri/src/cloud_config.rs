@@ -161,17 +161,17 @@ fn load_existing_anon_key(db: &Database) -> Result<Option<String>, String> {
     })
 }
 
-fn validate_cloud_config(input: &SaveCloudConfigInput, has_existing_key: bool) -> Result<(), String> {
+fn validate_cloud_config(
+    input: &SaveCloudConfigInput,
+    has_existing_key: bool,
+) -> Result<(), String> {
     let supabase_url = input.supabase_url.trim().trim_end_matches('/');
     if supabase_url.is_empty() {
         return Err("CLOUD_URL_REQUIRED".into());
     }
     let parsed = url::Url::parse(supabase_url).map_err(|_| "CLOUD_URL_INVALID".to_string())?;
     let is_loopback_http = parsed.scheme() == "http"
-        && matches!(
-            parsed.host_str(),
-            Some("localhost" | "127.0.0.1" | "::1")
-        );
+        && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
     if parsed.scheme() != "https" && !is_loopback_http {
         return Err("CLOUD_URL_INSECURE".into());
     }
@@ -202,7 +202,10 @@ mod tests {
         let (_dir, db) = test_db();
         let config = load_cloud_config(&db).unwrap();
 
-        assert_eq!(config.supabase_url, "https://erovhwtwlrmxusyrwzbc.supabase.co");
+        assert_eq!(
+            config.supabase_url,
+            "https://erovhwtwlrmxusyrwzbc.supabase.co"
+        );
         assert!(config.has_anon_key);
         assert!(config.cloud_enabled);
         assert_eq!(config.updated_at, None);
@@ -213,7 +216,10 @@ mod tests {
         let (_dir, db) = test_db();
         let runtime = load_cloud_runtime_config(&db).unwrap();
 
-        assert_eq!(runtime.supabase_url, "https://erovhwtwlrmxusyrwzbc.supabase.co");
+        assert_eq!(
+            runtime.supabase_url,
+            "https://erovhwtwlrmxusyrwzbc.supabase.co"
+        );
         assert!(!runtime.anon_key.is_empty());
         assert!(runtime.cloud_enabled);
     }
@@ -260,7 +266,9 @@ mod tests {
         let persisted_rows = db
             .with_connection(|connection| {
                 connection
-                    .query_row("SELECT COUNT(*) FROM cloud_config", [], |row| row.get::<_, i64>(0))
+                    .query_row("SELECT COUNT(*) FROM cloud_config", [], |row| {
+                        row.get::<_, i64>(0)
+                    })
                     .map_err(|error| error.to_string())
             })
             .unwrap();

@@ -4,25 +4,33 @@ import {
   Archive,
   Bookmark,
   CalendarDays,
+  Check,
   ChevronDown,
   ChevronRight,
   FileText,
+  Folder,
   FolderKanban,
   Globe,
-  Image as ImageIcon,
+  LayoutGrid,
   Library,
+  Pencil,
   Plus,
+  Trash2,
   Video,
+  X,
 } from '@lucide/vue'
 import { useUiStore, type ActiveTool } from '@/stores/ui'
 import { useAtlasStore } from '@/stores/atlas'
 import CategoryTree from '@/components/CategoryTree.vue'
-import { ATLAS_DIMENSIONS } from '@/lib/atlas-dimensions'
 
 const ui = useUiStore()
 const atlas = useAtlasStore()
 const promptCategoriesExpanded = ref(false)
 const atlasCategoriesExpanded = ref(false)
+const atlasCategoryCreating = ref(false)
+const atlasCategoryEditingId = ref<string | null>(null)
+const atlasCategoryDraft = ref('')
+const atlasCategoryBusy = ref(false)
 
 interface ToolItem {
   id: ActiveTool
@@ -31,15 +39,14 @@ interface ToolItem {
 }
 
 const tools: ToolItem[] = [
-  { id: 'shared-library', label: '共享图库', icon: Library },
+  { id: 'shared-library', label: '共享词库', icon: Library },
   { id: 'prompts', label: '提示词库', icon: FileText },
-  { id: 'reverse-image', label: '反推图片', icon: ImageIcon },
   { id: 'compression', label: '快速压缩', icon: Archive },
   { id: 'depth-video', label: '深度视频', icon: Video },
   { id: 'projects', label: '项目管理', icon: FolderKanban },
   { id: 'daily-tasks', label: '当日任务', icon: CalendarDays },
-  { id: 'pi-web', label: '网页服务', icon: Globe },
-  { id: 'atlas', label: '审美参考', icon: Bookmark },
+  { id: 'pi-web', label: 'Pi智能体', icon: Globe },
+  { id: 'atlas', label: '参考图库', icon: Bookmark },
 ]
 
 function selectTool(toolId: ActiveTool) {
@@ -74,9 +81,78 @@ function toggleAtlasCategories() {
   ui.setActiveTool('atlas')
 }
 
-function selectAtlasDimension(dimension: string | null) {
-  atlas.dimension = dimension
+function selectAtlasCategory(id: string | null) {
+  atlas.selectCategory(id)
   ui.setActiveTool('atlas')
+}
+
+function startCreateAtlasCategory() {
+  atlasCategoryEditingId.value = null
+  atlasCategoryDraft.value = ''
+  atlasCategoryCreating.value = true
+}
+
+function startEditAtlasCategory(id: string, name: string) {
+  atlasCategoryCreating.value = false
+  atlasCategoryEditingId.value = id
+  atlasCategoryDraft.value = name
+}
+
+function cancelAtlasCategoryEdit() {
+  atlasCategoryCreating.value = false
+  atlasCategoryEditingId.value = null
+  atlasCategoryDraft.value = ''
+}
+
+async function submitCreateAtlasCategory() {
+  if (atlasCategoryBusy.value) return
+  atlasCategoryBusy.value = true
+  try {
+    await atlas.createCategory(atlasCategoryDraft.value)
+    ui.showToast('分类已创建')
+    cancelAtlasCategoryEdit()
+  } catch (error) {
+    ui.showToast(atlasCategoryError(error))
+  } finally {
+    atlasCategoryBusy.value = false
+  }
+}
+
+async function submitRenameAtlasCategory() {
+  if (!atlasCategoryEditingId.value || atlasCategoryBusy.value) return
+  atlasCategoryBusy.value = true
+  try {
+    await atlas.renameCategory(atlasCategoryEditingId.value, atlasCategoryDraft.value)
+    ui.showToast('分类已重命名')
+    cancelAtlasCategoryEdit()
+  } catch (error) {
+    ui.showToast(atlasCategoryError(error))
+  } finally {
+    atlasCategoryBusy.value = false
+  }
+}
+
+async function removeAtlasCategory(id: string, name: string) {
+  if (!window.confirm(`删除分类「${name}」后，只会解除图片关联，不会删除图片。确定删除吗？`)) {
+    return
+  }
+  atlasCategoryBusy.value = true
+  try {
+    await atlas.deleteCategory(id)
+    ui.showToast('分类已删除')
+  } catch (error) {
+    ui.showToast(atlasCategoryError(error))
+  } finally {
+    atlasCategoryBusy.value = false
+  }
+}
+
+function atlasCategoryError(error: unknown) {
+  const message = String(error)
+  if (message.includes('ATLAS_CATEGORY_NAME_EMPTY')) return '分类名称不能为空'
+  if (message.includes('ATLAS_CATEGORY_DUPLICATE')) return '已存在同名分类'
+  if (message.includes('ATLAS_CATEGORY_NAME_TOO_LONG')) return '分类名称不能超过 40 个字'
+  return '分类操作失败，请重试'
 }
 </script>
 
@@ -151,7 +227,7 @@ function selectAtlasDimension(dimension: string | null) {
         <button
           type="button"
           class="category-toggle-button"
-          data-category-toggle="atlas"
+          :data-category-toggle="tool.id"
           :aria-expanded="atlasCategoriesExpanded"
           :title="atlasCategoriesExpanded ? '收起分类' : '展开分类'"
           @click.stop="toggleAtlasCategories"
@@ -213,22 +289,129 @@ function selectAtlasDimension(dimension: string | null) {
       >
         <button
           type="button"
-          class="atlas-category-button"
-          :class="{ active: atlas.dimension === null }"
-          @click="selectAtlasDimension(null)"
+          class="create-prompt-header"
+          data-action="create-atlas-category"
+          aria-label="新建分类"
+          title="新建分类"
+          @click.stop="startCreateAtlasCategory"
         >
-          全部
+          <Plus
+            :size="15"
+            class="create-prompt-plus"
+            aria-hidden="true"
+          />
+          <span>新建分类</span>
         </button>
+
         <button
-          v-for="dimension in ATLAS_DIMENSIONS"
-          :key="dimension.id"
           type="button"
-          class="atlas-category-button"
-          :class="{ active: atlas.dimension === dimension.id }"
-          @click="selectAtlasDimension(dimension.id)"
+          class="sidebar-category-main sidebar-category-all"
+          :class="{ active: atlas.selectedCategoryId === null }"
+          @click="selectAtlasCategory(null)"
         >
-          {{ dimension.label }}
+          <LayoutGrid :size="14" />
+          <span>全部参考</span>
+          <small>{{ atlas.entries.length }}</small>
         </button>
+
+        <form
+          v-if="atlasCategoryCreating"
+          class="sidebar-category-editor"
+          @submit.prevent="submitCreateAtlasCategory"
+        >
+          <input
+            v-model="atlasCategoryDraft"
+            autofocus
+            maxlength="40"
+            placeholder="输入分类名称"
+            aria-label="新分类名称"
+          >
+          <button
+            type="submit"
+            title="保存"
+            aria-label="保存新分类"
+          >
+            <Check :size="13" />
+          </button>
+          <button
+            type="button"
+            title="取消"
+            aria-label="取消新建分类"
+            @click="cancelAtlasCategoryEdit"
+          >
+            <X :size="13" />
+          </button>
+        </form>
+
+        <div
+          v-for="category in atlas.categories"
+          :key="category.id"
+          class="sidebar-category-row"
+          :class="{ active: atlas.selectedCategoryId === category.id }"
+        >
+          <button
+            type="button"
+            class="sidebar-category-main"
+            :title="category.name"
+            @click="selectAtlasCategory(category.id)"
+          >
+            <Folder :size="14" />
+            <span>{{ category.name }}</span>
+            <small>{{ category.entryIds.length }}</small>
+          </button>
+          <div
+            v-if="atlas.selectedCategoryId === category.id"
+            class="sidebar-category-actions"
+          >
+            <button
+              type="button"
+              class="sidebar-category-action"
+              title="重命名"
+              aria-label="重命名分类"
+              @click="startEditAtlasCategory(category.id, category.name)"
+            >
+              <Pencil :size="13" />
+            </button>
+            <button
+              type="button"
+              class="sidebar-category-action danger"
+              title="删除分类"
+              aria-label="删除分类"
+              @click="removeAtlasCategory(category.id, category.name)"
+            >
+              <Trash2 :size="13" />
+            </button>
+          </div>
+
+          <form
+            v-if="atlasCategoryEditingId === category.id"
+            class="sidebar-category-editor"
+            @submit.prevent="submitRenameAtlasCategory"
+          >
+            <input
+              v-model="atlasCategoryDraft"
+              autofocus
+              maxlength="40"
+              placeholder="输入分类名称"
+              aria-label="分类新名称"
+            >
+            <button
+              type="submit"
+              title="保存"
+              aria-label="保存重命名"
+            >
+              <Check :size="13" />
+            </button>
+            <button
+              type="button"
+              title="取消"
+              aria-label="取消重命名"
+              @click="cancelAtlasCategoryEdit"
+            >
+              <X :size="13" />
+            </button>
+          </form>
+        </div>
       </div>
     </template>
   </nav>
@@ -361,9 +544,12 @@ function selectAtlasDimension(dimension: string | null) {
   gap: 3px;
 }
 
-.atlas-category-button {
+.sidebar-category-main {
   width: 100%;
   min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 5px 9px;
   border: 1px solid transparent;
   border-radius: var(--bb-radius-sm);
@@ -374,15 +560,100 @@ function selectAtlasDimension(dimension: string | null) {
   text-align: left;
 }
 
-.atlas-category-button:hover,
-.atlas-category-button:focus-visible {
+.sidebar-category-main span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-category-main small {
+  color: var(--bb-text-muted);
+}
+
+.sidebar-category-main:hover,
+.sidebar-category-main:focus-visible {
   background: rgba(102, 247, 211, 0.07);
   color: var(--bb-text);
 }
 
-.atlas-category-button.active {
+.sidebar-category-row.active .sidebar-category-main {
   background: var(--bb-primary-soft);
   color: var(--bb-primary-strong);
   font-weight: 600;
 }
+
+.sidebar-category-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-category-row > .sidebar-category-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sidebar-category-actions {
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-category-action {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--bb-radius-sm);
+  background: transparent;
+  color: var(--bb-text-muted);
+  cursor: pointer;
+}
+
+.sidebar-category-action:hover,
+.sidebar-category-action:focus-visible {
+  background: rgba(102, 247, 211, 0.07);
+  color: var(--bb-text);
+}
+
+.sidebar-category-action.danger {
+  color: var(--bb-danger, #ff6b6b);
+}
+
+.sidebar-category-editor {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  flex-basis: 100%;
+}
+
+.sidebar-category-editor input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-sm);
+  background: var(--bb-surface);
+  color: var(--bb-text);
+  padding: 5px 6px;
+  font-size: 12px;
+}
+
+.sidebar-category-editor button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-sm);
+  background: var(--bb-surface-soft);
+  color: var(--bb-text);
+  cursor: pointer;
+}
+
 </style>

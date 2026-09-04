@@ -70,6 +70,7 @@ pub struct CreateDailyTaskInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateDailyTaskInput {
     pub task_id: String,
+    pub code: String,
     pub title: String,
     pub progress: i64,
     pub note: String,
@@ -190,8 +191,9 @@ pub fn validate_create(input: &CreateDailyTaskInput) -> Result<String, String> {
     Ok(code)
 }
 
-pub fn validate_update(input: &UpdateDailyTaskInput) -> Result<(), String> {
+pub fn validate_update(input: &UpdateDailyTaskInput) -> Result<String, String> {
     uuid::Uuid::parse_str(&input.task_id).map_err(|_| "DAILY_TASK_ID_INVALID")?;
+    let code = normalize_group_code(&input.code)?;
     validate_task_fields(
         &input.title,
         input.progress,
@@ -199,5 +201,6 @@ pub fn validate_update(input: &UpdateDailyTaskInput) -> Result<(), String> {
         input.invested_minutes,
         &input.reminder_time,
         &input.reminder_content,
-    )
+    )?;
+    Ok(code)
 }

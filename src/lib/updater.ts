@@ -1,6 +1,23 @@
 import { relaunch } from '@tauri-apps/plugin-process'
 import { check } from '@tauri-apps/plugin-updater'
 
+export const DAILY_UPDATE_CHECK_HOUR = 10
+export const DAILY_UPDATE_CHECK_MINUTE = 0
+
+export function nextDailyUpdateCheckDelay(now = new Date()) {
+  const next = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    DAILY_UPDATE_CHECK_HOUR,
+    DAILY_UPDATE_CHECK_MINUTE,
+    0,
+    0,
+  )
+  if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1)
+  return Math.max(0, next.getTime() - now.getTime())
+}
+
 export interface AppUpdateResult {
   currentVersion: string
   latestVersion: string

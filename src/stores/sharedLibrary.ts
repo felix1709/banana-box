@@ -69,7 +69,7 @@ export const useSharedLibraryStore = defineStore('sharedLibrary', {
     async load() {
       const auth = useAuthStore()
       if (!auth.client || !auth.user) {
-        this.error = '请先登录后再打开共享库'
+        this.error = '请先登录后再打开共享词库'
         return
       }
       await this.loadWithClient(auth.client)
@@ -95,7 +95,7 @@ export const useSharedLibraryStore = defineStore('sharedLibrary', {
 
     async uploadLocalPrompt(prompt: Prompt, titleOverride?: string): Promise<UploadResult> {
       const auth = useAuthStore()
-      if (!auth.client || !auth.user) throw new Error('请先登录后再上传共享库')
+      if (!auth.client || !auth.user) throw new Error('请先登录后再上传共享词库')
       const title = (titleOverride ?? prompt.title).trim()
       if (!title) throw new Error('提示词标题不能为空')
       const titleKey = normalizeTitleKey(title)

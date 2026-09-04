@@ -5,8 +5,9 @@ use crate::{
         data_dir, mime_from_path, parse_chat_completion_prompt, reverse_image_prompt_instruction,
     },
     provider_http::{
-        MAX_MODEL_ID_BYTES, MAX_PROVIDER_MODELS, MAX_PROVIDER_MODELS_BODY_BYTES,
-        MAX_REVERSE_IMAGE_CONTENT_BYTES, MAX_REVERSE_IMAGE_RESPONSE_BYTES, ProviderHttpTimeouts,
+        ProviderHttpTimeouts, MAX_MODEL_ID_BYTES, MAX_PROVIDER_MODELS,
+        MAX_PROVIDER_MODELS_BODY_BYTES, MAX_REVERSE_IMAGE_CONTENT_BYTES,
+        MAX_REVERSE_IMAGE_RESPONSE_BYTES,
     },
     providers::{AiProvider, ProviderKind, SaveProviderInput},
 };
@@ -287,7 +288,7 @@ fn validate_managed_image_path(image_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn reverse_image_data_url_for_request(
+pub(crate) fn reverse_image_data_url_for_request(
     logical_image_path: &str,
     full_image_path: &Path,
     source_bytes: &[u8],
@@ -325,7 +326,7 @@ fn compress_reverse_image_to_jpeg(source: &Path, target_bytes: usize) -> Result<
     Ok(best)
 }
 
-fn reverse_image_request_timeouts() -> ProviderHttpTimeouts {
+pub(crate) fn reverse_image_request_timeouts() -> ProviderHttpTimeouts {
     ProviderHttpTimeouts {
         response_header: Duration::from_secs(150),
         idle: Duration::from_secs(90),

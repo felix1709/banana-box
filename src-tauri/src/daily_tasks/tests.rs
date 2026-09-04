@@ -44,10 +44,7 @@ fn group_report_omits_daily_header_and_keeps_incomplete_tasks() {
 #[test]
 fn task_input_keeps_chinese_titles_but_rejects_report_structure_injection() {
     assert_eq!(normalize_group_code(" l36 ").unwrap(), "L36");
-    assert!(
-        validate_task_fields("三丽鸥跟进 #角色", 50, "工作记录", 95, "09:30", "提醒")
-            .is_ok()
-    );
+    assert!(validate_task_fields("三丽鸥跟进 #角色", 50, "工作记录", 95, "09:30", "提醒").is_ok());
     assert!(normalize_group_code("#L36").is_err());
     assert!(validate_task_fields("第一行\n第二行", 50, "", 0, "", "").is_err());
     assert!(validate_task_fields("【伪造】", 50, "", 0, "", "").is_err());
@@ -100,6 +97,7 @@ fn tasks_can_update_reorder_and_delete_without_leaving_stale_rows() {
         &db,
         UpdateDailyTaskInput {
             task_id: first.clone(),
+            code: "L36".into(),
             title: "任务一已更新".into(),
             progress: 80,
             note: "备注".into(),

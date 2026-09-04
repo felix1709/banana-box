@@ -31,8 +31,9 @@ export const useDailyTasksStore = defineStore('dailyTasks', {
       catch (error) { this.error = error instanceof Error ? error.message : String(error) }
       finally { this.loading = false }
     },
-    async create(input: Omit<CreateDailyTaskInput, 'localDate' | 'projectId'> & { projectId?: string | null }) {
-      await this.replace(() => createDailyTask({ ...input, localDate: this.selectedDate, projectId: input.projectId ?? null }))
+    async create(input: Omit<CreateDailyTaskInput, 'localDate' | 'projectId'> & { projectId?: string | null; localDate?: string }) {
+      const { localDate, ...rest } = input
+      await this.replace(() => createDailyTask({ ...rest, localDate: localDate ?? this.selectedDate, projectId: input.projectId ?? null }))
     },
     async update(input: UpdateDailyTaskInput) { await this.replace(() => updateDailyTask(input)) },
     async remove(taskId: string) { await this.replace(() => deleteDailyTask(this.selectedDate, taskId)) },

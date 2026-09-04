@@ -1,13 +1,21 @@
 {
   "manifest_version": 3,
-  "name": "AAA-Aesthetic-Atlas Capture",
+  "name": "banana-box",
   "version": "0.1.0",
-  "permissions": ["contextMenus", "activeTab", "scripting"],
+  "icons": {
+    "32": "icons/icon32.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["contextMenus", "activeTab", "scripting", "notifications", "storage", "unlimitedStorage"],
   "host_permissions": ["http://127.0.0.1/*"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "32": "icons/icon32.png",
+      "128": "icons/icon128.png"
+    }
   }
 }

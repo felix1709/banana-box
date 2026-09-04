@@ -15,7 +15,6 @@ describe('AppSidebar', () => {
     const ui = useUiStore()
 
     expect(wrapper.text()).toContain('提示词库')
-    expect(wrapper.text()).toContain('反推图片')
     expect(wrapper.text()).toContain('快速压缩')
     expect(wrapper.text()).toContain('深度视频')
 
@@ -23,9 +22,6 @@ describe('AppSidebar', () => {
 
     await wrapper.find('[data-tool="shared-library"]').trigger('click')
     expect(ui.activeTool).toBe('shared-library')
-
-    await wrapper.find('[data-tool="reverse-image"]').trigger('click')
-    expect(ui.activeTool).toBe('reverse-image')
 
     await wrapper.find('[data-tool="compression"]').trigger('click')
     expect(ui.activeTool).toBe('compression')
@@ -110,7 +106,7 @@ describe('AppSidebar', () => {
     await wrapper.get('[data-tool="pi-web"]').trigger('click')
 
     expect(ui.activeTool).toBe('pi-web')
-    expect(wrapper.text()).toContain('网页服务')
+    expect(wrapper.text()).toContain('Pi智能体')
   })
 
   it('puts a compact prompt create action inside the expanded prompt categories', async () => {
@@ -133,14 +129,11 @@ describe('AppSidebar', () => {
     expect(ui.editingPromptId).toBeNull()
   })
 
-  it('does not put plus actions next to the reverse image or compression tools', async () => {
+  it('does not put plus actions next to the compression tool', async () => {
     const wrapper = mount(AppSidebar)
     await wrapper.find('[data-tool="prompts"]').trigger('click')
 
     expect(wrapper.findAll('[data-action="create-prompt"]')).toHaveLength(1)
-    expect(wrapper.find('[data-tool-row="reverse-image"] [data-action="create-prompt"]').exists()).toBe(
-      false,
-    )
     expect(wrapper.find('[data-tool-row="compression"] [data-action="create-prompt"]').exists()).toBe(
       false,
     )

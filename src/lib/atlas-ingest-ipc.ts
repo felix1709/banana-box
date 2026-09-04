@@ -8,5 +8,5 @@ export interface AtlasIngestInput {
 }
 
 export async function ingestAtlasImage(input: AtlasIngestInput): Promise<string> {
-  return await invoke<string>('ingest_atlas_image', { input })
+  return await invoke<string>('ingest_atlas_image', { ...input })
 }

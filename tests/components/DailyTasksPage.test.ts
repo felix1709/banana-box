@@ -75,7 +75,10 @@ describe('DailyTasksPage', () => {
   })
 
   it('opens a secondary create popover and creates a task with the entered code, title, progress, and note', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-12T08:30:00+08:00'))
     const store = useDailyTasksStore()
+    store.selectedDate = '2026-07-12'
     vi.spyOn(store, 'selectDate').mockResolvedValue()
     const create = vi.spyOn(store, 'create').mockResolvedValue()
     const wrapper = mount(DailyTasksPage)
@@ -100,9 +103,10 @@ describe('DailyTasksPage', () => {
     expect(create).toHaveBeenCalledWith({
       code: 'L36',
       title: 'Shot refinement',
-      progress: 45,
+      progress: 50,
       note: 'Transition pass',
       investedMinutes: 0,
+      localDate: '2026-07-12',
     })
     expect(wrapper.find('[data-field="new-task-minutes"]').exists()).toBe(false)
     expect(document.body.querySelector('.daily-create-popover')).toBeFalsy()
@@ -135,6 +139,7 @@ describe('DailyTasksPage', () => {
     expect(wrapper.get('[data-task-id="t1"] [data-progress-value]').text()).toBe('80%')
     expect(update).toHaveBeenCalledWith({
       taskId: 't1',
+      code: 'L36',
       title: 'Shot refinement',
       progress: 80,
       note: '',
@@ -170,6 +175,7 @@ describe('DailyTasksPage', () => {
 
     expect(update).toHaveBeenCalledWith({
       taskId: 't1',
+      code: 'L36',
       title: 'Shot refinement',
       progress: 45,
       note: 'Transition pass',
@@ -237,8 +243,9 @@ describe('DailyTasksPage', () => {
 
     expect(update).toHaveBeenCalledWith({
       taskId: 't1',
+      code: 'L36',
       title: 'Updated task',
-      progress: 45,
+      progress: 50,
       note: 'Transition pass',
       investedMinutes: 90,
       reminderTime: '',

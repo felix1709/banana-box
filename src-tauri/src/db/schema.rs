@@ -413,8 +413,8 @@ mod tests {
     use super::{
         migrate, schema_fingerprint, validate, validate_migratable, DATABASE_SCHEMA_INVALID,
         MIGRATION_V1, MIGRATION_V2, MIGRATION_V3, MIGRATION_V4, MIGRATION_V5, SCHEMA_VERSION,
-        V1_SCHEMA_FINGERPRINT, V2_SCHEMA_FINGERPRINT, V3_SCHEMA_FINGERPRINT,
-        V4_SCHEMA_FINGERPRINT, V5_SCHEMA_FINGERPRINT, V7_SCHEMA_FINGERPRINT,
+        V1_SCHEMA_FINGERPRINT, V2_SCHEMA_FINGERPRINT, V3_SCHEMA_FINGERPRINT, V4_SCHEMA_FINGERPRINT,
+        V5_SCHEMA_FINGERPRINT, V7_SCHEMA_FINGERPRINT,
     };
     use rusqlite::Connection;
 
@@ -739,7 +739,10 @@ mod tests {
             "sync_state",
             "deleted_at",
         ] {
-            assert!(project_columns.contains(&required.to_string()), "missing projects.{required}");
+            assert!(
+                project_columns.contains(&required.to_string()),
+                "missing projects.{required}"
+            );
         }
 
         let daily_day_columns = table_columns(&connection, "daily_task_days");

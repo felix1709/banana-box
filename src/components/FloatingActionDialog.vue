@@ -10,12 +10,6 @@ function openCompression() {
   ui.closeFloatingActionDialog()
 }
 
-function openReverseImage() {
-  if (!ui.floatingActionFile) return
-  ui.openReverseImageWithSource(ui.floatingActionFile.filePath)
-  ui.closeFloatingActionDialog()
-}
-
 function openDepthVideo() {
   if (!ui.floatingActionFile) return
   ui.openDepthVideoWithSource(ui.floatingActionFile.filePath)
@@ -26,7 +20,7 @@ async function openAtlasIngest() {
   if (!ui.floatingActionFile) return
   try {
     await ingestAtlasImage({ localPath: ui.floatingActionFile.filePath })
-    ui.showToast('已提交审美参考库入库')
+    ui.showToast('已提交参考图库入库')
   } catch {
     ui.showToast('参考库入库失败')
   } finally {
@@ -61,15 +55,6 @@ async function openAtlasIngest() {
           <button
             type="button"
             class="action-button"
-            data-action="reverse-image"
-            @click="openReverseImage"
-          >
-            <strong>反推提示词</strong>
-            <span>调用视觉模型生成可编辑提示词</span>
-          </button>
-          <button
-            type="button"
-            class="action-button"
             data-action="compress-image"
             @click="openCompression"
           >
@@ -82,7 +67,7 @@ async function openAtlasIngest() {
             data-action="atlas-ingest"
             @click="openAtlasIngest"
           >
-            <strong>存入审美参考库</strong>
+            <strong>存入参考图库</strong>
             <span>识图、分类并写入 AAA-Aesthetic-Atlas</span>
           </button>
         </template>

@@ -25,6 +25,20 @@ pub fn save_ingested_asset(
     Ok(path.to_string_lossy().replace('\\', "/"))
 }
 
+pub fn save_thumbnail_asset(
+    root: &Path,
+    entry_id: &str,
+    bytes: &[u8],
+) -> Result<String, String> {
+    let dir = root.join("assets").join("thumbs");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{entry_id}.webp"));
+    let tmp = dir.join(format!("{entry_id}.webp.tmp"));
+    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().replace('\\', "/"))
+}
+
 pub fn write_entry_md(
     root: &Path,
     entry_id: &str,
@@ -48,13 +62,27 @@ pub fn build_frontmatter(
     tags: &[String],
     status: &str,
 ) -> String {
-    let payload = serde_json::json!({
+    build_frontmatter_with_source(entry_id, title, dimension, tags, status, None)
+}
+
+pub fn build_frontmatter_with_source(
+    entry_id: &str,
+    title: &str,
+    dimension: &str,
+    tags: &[String],
+    status: &str,
+    source_url: Option<&str>,
+) -> String {
+    let mut payload = serde_json::json!({
         "id": entry_id,
         "title": title,
         "dimension": dimension,
         "tags": tags,
         "status": status,
     });
+    if let Some(source_url) = source_url {
+        payload["source_url"] = serde_json::Value::String(source_url.to_string());
+    }
     serde_yaml::to_string(&payload).unwrap_or_default()
 }
 

@@ -155,7 +155,10 @@ pub async fn set_project_public(
         project_id,
         is_public,
     } = args.0;
-    run_db(db, move |db| repository::set_project_public(db, &project_id, is_public)).await
+    run_db(db, move |db| {
+        repository::set_project_public(db, &project_id, is_public)
+    })
+    .await
 }
 
 #[tauri::command]

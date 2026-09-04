@@ -6,10 +6,11 @@ import { localToday, useDailyTasksStore } from '@/stores/dailyTasks'
 import { useUiStore } from '@/stores/ui'
 import { getDailyReport } from '@/lib/productionIpc'
 import { copyToClipboard } from '@/lib/ipc'
+import { resolveDailyTaskCreateDate } from '@/lib/dailyTaskReview'
 
 const daily = useDailyTasksStore()
 const ui = useUiStore()
-const draft = reactive({ code: '', title: '', progress: 0, note: '' })
+const draft = reactive({ code: 'L36', title: '', progress: 10, note: '' })
 const copyingReport = ref(false)
 const reportCopied = ref(false)
 const reminderTaskId = ref<string | null>(null)
@@ -21,11 +22,25 @@ const createOpen = ref(false)
 const createTrigger = ref<HTMLButtonElement | null>(null)
 const createPopover = ref<HTMLElement | null>(null)
 const createPopoverStyle = ref<Record<string, string>>({})
+const createError = ref('')
 const editingTaskId = ref<string | null>(null)
-const editDraft = reactive({ title: '', note: '', reminderTime: '', reminderContent: '' })
+const editDraft = reactive({
+  code: '',
+  title: '',
+  progress: 10,
+  note: '',
+  reminderTime: '',
+  reminderContent: '',
+})
+const editError = ref('')
 let reportCopyResetTimer: ReturnType<typeof window.setTimeout> | null = null
 let systemDate = localToday()
 let systemDateTimer: ReturnType<typeof window.setInterval> | null = null
+
+const PROGRESS_STEPS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+const TASK_CODE_PATTERN = /^L\d+$/
+
+type DailyTaskPatch = Partial<DailyTask> & { code?: string }
 
 const reminderTask = computed(() => findTask(reminderTaskId.value))
 const editingTask = computed(() => findTask(editingTaskId.value))
@@ -37,10 +52,41 @@ function moveDate(days: number) {
 }
 
 async function createTask() {
-  if (!draft.code.trim() || !draft.title.trim()) return
-  await daily.create({ ...draft, code: draft.code.trim(), title: draft.title.trim(), investedMinutes: 0 })
-  Object.assign(draft, { code: '', title: '', progress: 0, note: '' })
+  createError.value = validateTaskCode(draft.code)
+  if (createError.value) return
+  if (!draft.title.trim()) {
+    createError.value = '任务名称不能为空'
+    return
+  }
+  const progress = normalizeProgress(draft.progress)
+  if (!PROGRESS_STEPS.includes(progress)) {
+    createError.value = '任务百分比只能是 10 到 100 的 10 倍数'
+    return
+  }
+  const localDate = resolveDailyTaskCreateDate(daily.selectedDate, new Date())
+  await daily.create({
+    ...draft,
+    code: draft.code.trim(),
+    title: draft.title.trim(),
+    progress,
+    investedMinutes: 0,
+    localDate,
+  })
+  Object.assign(draft, { code: 'L36', title: '', progress: 10, note: '' })
+  createError.value = ''
   closeCreatePopover()
+}
+
+function validateTaskCode(value: string) {
+  if (!TASK_CODE_PATTERN.test(value.trim())) {
+    return '任务编号必须为大写 L + 数字，例如 L36'
+  }
+  return ''
+}
+
+function normalizeProgress(value: number) {
+  const stepped = Math.round(value / 10) * 10
+  return Math.min(100, Math.max(10, stepped))
 }
 
 function findTask(taskId: string | null) {
@@ -52,9 +98,17 @@ function findTask(taskId: string | null) {
   return null
 }
 
-function updateInput(task: DailyTask, patch: Partial<DailyTask> = {}) {
+function findGroupForTask(taskId: string) {
+  for (const group of daily.day?.groups ?? []) {
+    if (group.tasks.some((task) => task.id === taskId)) return group
+  }
+  return null
+}
+
+function updateInput(task: DailyTask, patch: DailyTaskPatch = {}) {
   return {
     taskId: task.id,
+    code: patch.code ?? findGroupForTask(task.id)?.code ?? '',
     title: patch.title ?? task.title,
     progress: patch.progress ?? task.progress,
     note: patch.note ?? task.note,
@@ -64,7 +118,7 @@ function updateInput(task: DailyTask, patch: Partial<DailyTask> = {}) {
   }
 }
 
-async function persistTask(task: DailyTask, patch: Partial<DailyTask> = {}) {
+async function persistTask(task: DailyTask, patch: DailyTaskPatch = {}) {
   if (daily.day?.settledAt) return
   await daily.update(updateInput(task, patch))
 }
@@ -135,12 +189,19 @@ async function positionCreatePopover() {
 async function toggleCreatePopover(event: MouseEvent) {
   createTrigger.value = event.currentTarget as HTMLButtonElement
   createOpen.value = !createOpen.value
-  if (createOpen.value) await positionCreatePopover()
+  if (createOpen.value) {
+    Object.assign(draft, { code: 'L36', title: '', progress: 10, note: '' })
+    createError.value = ''
+    await positionCreatePopover()
+  } else {
+    createError.value = ''
+  }
 }
 
 function closeCreatePopover() {
   createOpen.value = false
   createTrigger.value = null
+  createError.value = ''
 }
 
 async function openReminder(task: DailyTask, event: MouseEvent) {
@@ -187,14 +248,18 @@ function closeCreateWhenClickingOutside(event: MouseEvent) {
 function openTaskEditor(task: DailyTask) {
   if (daily.day?.settledAt) return
   editingTaskId.value = task.id
+  editDraft.code = findGroupForTask(task.id)?.code ?? ''
   editDraft.title = task.title
+  editDraft.progress = normalizeProgress(task.progress)
   editDraft.note = task.note
   editDraft.reminderTime = task.reminderTime ?? ''
   editDraft.reminderContent = task.reminderContent ?? ''
+  editError.value = ''
 }
 
 function closeTaskEditor() {
   editingTaskId.value = null
+  editError.value = ''
 }
 
 function syncToCurrentSystemDate() {
@@ -206,9 +271,22 @@ function syncToCurrentSystemDate() {
 
 async function saveTaskEditor() {
   const task = editingTask.value
-  if (!task || !editDraft.title.trim()) return
+  if (!task) return
+  editError.value = validateTaskCode(editDraft.code)
+  if (editError.value) return
+  if (!editDraft.title.trim()) {
+    editError.value = '任务名称不能为空'
+    return
+  }
+  const progress = normalizeProgress(editDraft.progress)
+  if (!PROGRESS_STEPS.includes(progress)) {
+    editError.value = '任务百分比只能是 10 到 100 的 10 倍数'
+    return
+  }
   await persistTask(task, {
+    code: editDraft.code.trim(),
     title: editDraft.title.trim(),
+    progress,
     note: editDraft.note,
     reminderTime: editDraft.reminderTime,
     reminderContent: editDraft.reminderContent.trim(),
@@ -418,11 +496,15 @@ onBeforeUnmount(() => {
           <strong>新增当日任务</strong>
           <span>{{ daily.selectedDate }}</span>
         </header>
-        <input
-          v-model="draft.code"
-          data-field="new-task-code"
-          placeholder="编号，如 L36"
-        >
+        <label>
+          任务编号
+          <input
+            v-model="draft.code"
+            data-field="new-task-code"
+            placeholder="例如 L36"
+            :class="{ 'field-invalid': createError }"
+          >
+        </label>
         <input
           v-model="draft.title"
           data-field="new-task-title"
@@ -433,8 +515,9 @@ onBeforeUnmount(() => {
             v-model.number="draft.progress"
             class="task-progress-range"
             data-field="new-task-progress"
-            min="0"
+            min="10"
             max="100"
+            step="10"
             type="range"
             :style="{ '--task-progress': `${draft.progress}%` }"
             title="进度百分比"
@@ -447,6 +530,13 @@ onBeforeUnmount(() => {
           placeholder="备注"
           rows="2"
         />
+        <p
+          v-if="createError"
+          class="daily-form-error"
+          role="alert"
+        >
+          {{ createError }}
+        </p>
         <button
           class="daily-create-save"
           data-action="create-daily-task"
@@ -517,11 +607,34 @@ onBeforeUnmount(() => {
           </button>
         </header>
         <label>
+          任务编号
+          <input
+            v-model="editDraft.code"
+            data-field="task-editor-code"
+            placeholder="例如 L36"
+            :class="{ 'field-invalid': editError }"
+          >
+        </label>
+        <label>
           任务名称
           <input
             v-model="editDraft.title"
             data-field="task-editor-title"
           >
+        </label>
+        <label class="progress-control">
+          任务百分比
+          <input
+            v-model.number="editDraft.progress"
+            class="task-progress-range"
+            data-field="task-editor-progress"
+            min="10"
+            max="100"
+            step="10"
+            type="range"
+            :style="{ '--task-progress': `${editDraft.progress}%` }"
+          >
+          <output>{{ editDraft.progress }}%</output>
         </label>
         <label>
           备注
@@ -547,6 +660,13 @@ onBeforeUnmount(() => {
             rows="2"
           />
         </label>
+        <p
+          v-if="editError"
+          class="daily-form-error"
+          role="alert"
+        >
+          {{ editError }}
+        </p>
         <footer>
           <button
             type="button"
@@ -581,6 +701,8 @@ onBeforeUnmount(() => {
 .date-nav input { min-height:30px; padding:4px 8px; }
 .daily-error,.daily-settled { margin-top:12px; padding:9px 11px; border:1px solid var(--bb-border); border-radius:var(--bb-radius-sm); color:var(--bb-text-muted); background:var(--bb-surface-soft); }
 .daily-error { border-color:var(--bb-danger-border); color:#ffb6c0; background:var(--bb-danger-soft); }
+.daily-form-error { margin:0; color:#ffb6c0; font-size:11px; }
+.field-invalid { border-color:var(--bb-danger-border) !important; }
 .daily-task input { min-width:0; min-height:30px; padding:5px 8px; }
 .daily-groups { display:grid; gap:16px; }
 .daily-group { display:grid; gap:6px; }

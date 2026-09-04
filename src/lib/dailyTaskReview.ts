@@ -38,6 +38,30 @@ export function addLocalDays(localDate: string, days: number) {
   return localDateFromDate(value)
 }
 
+export function isWorkdayLocalDate(localDate: string) {
+  const [year, month, day] = localDate.split('-').map(Number)
+  return isWorkday(new Date(year, month - 1, day, 12, 0, 0, 0))
+}
+
+export function nextWorkdayLocalDate(localDate: string) {
+  let cursor = localDate
+  for (let offset = 0; offset < 7; offset += 1) {
+    cursor = addLocalDays(cursor, 1)
+    if (isWorkdayLocalDate(cursor)) return cursor
+  }
+  return cursor
+}
+
+export function isAfterDailyTaskCreateDeadline(now = new Date()) {
+  return now.getHours() * 60 + now.getMinutes() >= DAILY_TASK_REVIEW_HOUR * 60 + DAILY_TASK_REVIEW_MINUTE
+}
+
+export function resolveDailyTaskCreateDate(requestedDate: string, now = new Date()) {
+  if (requestedDate !== localDateFromDate(now)) return requestedDate
+  if (!isAfterDailyTaskCreateDeadline(now)) return requestedDate
+  return nextWorkdayLocalDate(requestedDate)
+}
+
 export function nextWorkdayReviewDelay(now = new Date()): NextReviewSchedule {
   for (let offset = 0; offset <= 7; offset += 1) {
     const candidate = new Date(

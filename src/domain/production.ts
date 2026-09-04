@@ -122,6 +122,7 @@ export interface CreateDailyTaskInput {
 
 export interface UpdateDailyTaskInput {
   taskId: string
+  code: string
   title: string
   progress: number
   note: string
