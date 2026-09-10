@@ -15,7 +15,7 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 const PI_WEB_PORT: u16 = 30141;
 const PI_WEB_HOST: &str = "127.0.0.1";
-const PI_WEB_VERSION: &str = "0.7.16";
+pub(crate) const PI_WEB_VERSION: &str = "0.7.16";
 const PI_WEB_ARCHIVE: &str = "pi-web-runtime.zip";
 const NODE_INSTALL_URL: &str = "https://nodejs.org/";
 const DEFAULT_PI_PROVIDER_ID: &str = "leihuo";
@@ -281,7 +281,10 @@ impl PiWebService {
             ));
         }
 
-        if app.is_some_and(bundled_pi_web_available) {
+        if app.is_some_and(|handle| {
+            bundled_pi_web_available(handle)
+                || crate::pi_web_runtime::managed_pi_web_launch(handle).is_some()
+        }) {
             return Ok(PiWebStatus::stopped(PI_WEB_PORT));
         }
 
@@ -520,19 +523,26 @@ pub fn repair_pi_web_config(
     Ok(result)
 }
 
+/// 给「一键下载配置」用：只有配置确实不完整时才写入，已有可用配置一律不动。
+pub(crate) fn auto_repair_pi_agent_config(
+    api_key: &str,
+    base_url: &str,
+) -> Result<bool, String> {
+    let agent_dir = pi_agent_config_dir()?;
+    if !diagnose_pi_agent_config_at(&agent_dir)?.needs_repair {
+        return Ok(false);
+    }
+    repair_pi_agent_config_at(&agent_dir, api_key, base_url)?;
+    Ok(true)
+}
+
 fn build_launch_command(app: &tauri::AppHandle) -> Result<Command, String> {
+    if let Some((node, script)) = crate::pi_web_runtime::managed_pi_web_launch(app) {
+        return Ok(pi_web_launch_command(node, script));
+    }
+
     if let Some((node, script)) = ensure_bundled_pi_web_launch(app)? {
-        let mut command = Command::new(node);
-        command.arg(script);
-        command.args([
-            "--no-open",
-            "-p",
-            &PI_WEB_PORT.to_string(),
-            "-H",
-            PI_WEB_HOST,
-        ]);
-        configure_background_command(&mut command);
-        return Ok(command);
+        return Ok(pi_web_launch_command(node, script));
     }
 
     let mut command = Command::new(npx_command());
@@ -548,7 +558,21 @@ fn build_launch_command(app: &tauri::AppHandle) -> Result<Command, String> {
     Ok(command)
 }
 
-fn bundled_pi_web_available(app: &tauri::AppHandle) -> bool {
+fn pi_web_launch_command(node: PathBuf, script: PathBuf) -> Command {
+    let mut command = Command::new(node);
+    command.arg(script);
+    command.args([
+        "--no-open",
+        "-p",
+        &PI_WEB_PORT.to_string(),
+        "-H",
+        PI_WEB_HOST,
+    ]);
+    configure_background_command(&mut command);
+    command
+}
+
+pub(crate) fn bundled_pi_web_available(app: &tauri::AppHandle) -> bool {
     bundled_runtime_dir(app)
         .and_then(|dir| find_bundled_pi_web_paths(&dir))
         .is_some()
@@ -582,7 +606,16 @@ fn bundled_runtime_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
 }
 
 fn bundled_archive_path(app: &tauri::AppHandle) -> Option<PathBuf> {
-    Some(app.path().resource_dir().ok()?.join(PI_WEB_ARCHIVE))
+    find_bundled_archive(&app.path().resource_dir().ok()?)
+}
+
+pub(crate) fn find_bundled_archive(resource_dir: &Path) -> Option<PathBuf> {
+    [
+        resource_dir.join(PI_WEB_ARCHIVE),
+        resource_dir.join("resources").join(PI_WEB_ARCHIVE),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
 }
 
 fn find_bundled_pi_web_paths(resource_dir: &Path) -> Option<(PathBuf, PathBuf)> {
@@ -1250,7 +1283,7 @@ fn assistant_text_present(event: &Value) -> bool {
     }
 }
 
-fn configure_background_command(command: &mut Command) {
+pub(crate) fn configure_background_command(command: &mut Command) {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1609,6 +1642,21 @@ mod tests {
 
         assert_eq!(resolved_node, node);
         assert_eq!(resolved_script, script);
+    }
+
+    #[test]
+    fn bundled_archive_is_found_next_to_the_exe_or_under_resources() {
+        let flat_dir = tempfile::tempdir().unwrap();
+        assert!(find_bundled_archive(flat_dir.path()).is_none());
+        let flat = flat_dir.path().join(PI_WEB_ARCHIVE);
+        std::fs::write(&flat, b"zip").unwrap();
+        assert_eq!(find_bundled_archive(flat_dir.path()).unwrap(), flat);
+
+        let packed_dir = tempfile::tempdir().unwrap();
+        let packed = packed_dir.path().join("resources").join(PI_WEB_ARCHIVE);
+        std::fs::create_dir_all(packed.parent().unwrap()).unwrap();
+        std::fs::write(&packed, b"zip").unwrap();
+        assert_eq!(find_bundled_archive(packed_dir.path()).unwrap(), packed);
     }
 
     #[test]

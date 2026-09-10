@@ -101,3 +101,50 @@ export async function repairPiWebConfig(
 ): Promise<PiWebConfigRepairResult> {
   return await invoke<PiWebConfigRepairResult>('repair_pi_web_config', { apiKey, baseUrl })
 }
+
+export type PiWebRuntimeSource = 'managed' | 'custom' | 'bundled' | 'none'
+
+export type PiWebRuntimeState = 'notInstalled' | 'ready' | 'updateAvailable' | 'error'
+
+export interface PiWebRuntimeStatus {
+  source: PiWebRuntimeSource
+  state: PiWebRuntimeState
+  installed: boolean
+  version: string
+  latestVersion: string
+  installDir: string
+  nodePath: string
+  npmPath: string
+  canInstall: boolean
+  canUpdate: boolean
+  canClean: boolean
+  message: string
+  detail: string
+}
+
+export interface PiWebProgressPayload {
+  operationId: string
+  phase: string
+  progress: number
+  message: string
+  detail?: string
+  level: 'info' | 'success' | 'error'
+}
+
+export async function getPiWebRuntimeStatus(): Promise<PiWebRuntimeStatus> {
+  return await invoke<PiWebRuntimeStatus>('get_pi_web_runtime_status', {})
+}
+
+export async function installPiWebRuntime(operationId: string): Promise<PiWebRuntimeStatus> {
+  return await invoke<PiWebRuntimeStatus>('install_pi_web_runtime', { operationId })
+}
+
+export async function setPiWebRuntimeDirectory(
+  directory: string | null,
+): Promise<PiWebRuntimeStatus> {
+  return await invoke<PiWebRuntimeStatus>('set_pi_web_runtime_directory', { directory })
+}
+
+export async function cleanPiWebRuntime(operationId?: string): Promise<PiWebRuntimeStatus> {
+  return await invoke<PiWebRuntimeStatus>('clean_pi_web_runtime', { operationId })
+}

@@ -11,6 +11,7 @@ mod legacy_import;
 mod library;
 mod migration;
 mod pi_web;
+mod pi_web_runtime;
 mod projects;
 mod provider_http;
 mod providers;
@@ -70,6 +71,7 @@ pub fn run() {
         })
         .manage(atlas::http_service::AtlasHttpService::new())
         .manage(pi_web::PiWebService::default())
+        .manage(pi_web_runtime::PiWebRuntimeService::default())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -161,6 +163,10 @@ pub fn run() {
             pi_web::repair_pi_web_model_compatibility,
             pi_web::get_pi_web_config_status,
             pi_web::repair_pi_web_config,
+            pi_web_runtime::get_pi_web_runtime_status,
+            pi_web_runtime::install_pi_web_runtime,
+            pi_web_runtime::set_pi_web_runtime_directory,
+            pi_web_runtime::clean_pi_web_runtime,
             commands::load_library,
             commands::save_library,
             commands::load_cloud_config,

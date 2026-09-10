@@ -25,9 +25,39 @@ const api = vi.hoisted(() => ({
   getPiWebConfigStatus: vi.fn(),
   repairPiWebConfig: vi.fn(),
   openPiWebRepairWindow: vi.fn(),
+  getPiWebRuntimeStatus: vi.fn(),
+  installPiWebRuntime: vi.fn(),
+  setPiWebRuntimeDirectory: vi.fn(),
+  cleanPiWebRuntime: vi.fn(),
 }))
 
 vi.mock('@/lib/piWebIpc', () => api)
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(async () => vi.fn()),
+}))
+
+const dialog = vi.hoisted(() => ({ open: vi.fn() }))
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  open: dialog.open,
+}))
+
+const runtimeStatus = {
+  source: 'bundled',
+  state: 'updateAvailable',
+  installed: true,
+  version: '0.7.16',
+  latestVersion: '0.9.0',
+  installDir: '',
+  nodePath: 'C:\\node.exe',
+  npmPath: 'C:\\npm-cli.js',
+  canInstall: false,
+  canUpdate: true,
+  canClean: false,
+  message: '当前使用安装包内置版本 0.7.16',
+  detail: '检测到最新版本 0.9.0。',
+} as const
 
 describe('PiWebPage', () => {
   beforeEach(() => {
@@ -94,6 +124,35 @@ describe('PiWebPage', () => {
       detail: '请停止并重新启动 PI-Web。',
     })
     api.openPiWebRepairWindow.mockResolvedValue(undefined)
+    api.getPiWebRuntimeStatus.mockResolvedValue({ ...runtimeStatus })
+    api.installPiWebRuntime.mockResolvedValue({
+      ...runtimeStatus,
+      source: 'managed',
+      state: 'ready',
+      version: '0.9.0',
+      latestVersion: '0.9.0',
+      canUpdate: false,
+      canClean: true,
+      message: 'PI-WEB 0.9.0 已就绪',
+    })
+    api.setPiWebRuntimeDirectory.mockResolvedValue({
+      ...runtimeStatus,
+      source: 'custom',
+      state: 'ready',
+      canUpdate: false,
+      message: '正在使用手动指定的 PI-WEB',
+    })
+    api.cleanPiWebRuntime.mockResolvedValue({
+      ...runtimeStatus,
+      source: 'none',
+      state: 'notInstalled',
+      installed: false,
+      version: '',
+      canUpdate: false,
+      canInstall: true,
+      canClean: false,
+      message: '尚未安装 PI-WEB',
+    })
   })
 
   it('shows status and starts PI-Web from the main action', async () => {
@@ -208,5 +267,93 @@ describe('PiWebPage', () => {
     )
     expect(api.openPiWebRepairWindow).not.toHaveBeenCalled()
     expect(wrapper.get<HTMLInputElement>('[data-field="pi-web-api-key"]').element.value).toBe('')
+  })
+
+  it('offers one-click download when no PI-WEB is installed yet', async () => {
+    api.getPiWebRuntimeStatus.mockResolvedValue({
+      ...runtimeStatus,
+      source: 'none',
+      state: 'notInstalled',
+      installed: false,
+      version: '',
+      canUpdate: false,
+      canInstall: true,
+      message: '尚未安装 PI-WEB',
+    })
+
+    const wrapper = mount(PiWebPage)
+    await vi.dynamicImportSettled()
+
+    expect(wrapper.text()).toContain('尚未安装 PI-WEB')
+    expect(wrapper.text()).toContain('未安装')
+
+    await wrapper.get('[data-action="install-pi-web-runtime"]').trigger('click')
+    await vi.dynamicImportSettled()
+
+    expect(api.installPiWebRuntime).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('PI-WEB 已就绪，点击「启动 PI-Web」即可使用。')
+    expect(wrapper.text()).toContain('PI-WEB 0.9.0 已就绪')
+  })
+
+  it('offers an update when a newer PI-WEB exists', async () => {
+    const wrapper = mount(PiWebPage)
+    await vi.dynamicImportSettled()
+
+    expect(wrapper.text()).toContain('当前使用安装包内置版本 0.7.16')
+    expect(wrapper.text()).toContain('最新 0.9.0')
+    expect(wrapper.get('[data-action="install-pi-web-runtime"]').text()).toContain('更新 PI-WEB')
+  })
+
+  it('lets users point at an existing PI-WEB folder', async () => {
+    dialog.open.mockResolvedValue('D:\\pi-web')
+
+    const wrapper = mount(PiWebPage)
+    await vi.dynamicImportSettled()
+    await wrapper.get('[data-action="select-pi-web-directory"]').trigger('click')
+    await vi.dynamicImportSettled()
+
+    expect(api.setPiWebRuntimeDirectory).toHaveBeenCalledWith('D:\\pi-web')
+    expect(wrapper.text()).toContain('已切换到手动指定的 PI-WEB 目录。')
+  })
+
+  it('cleans only the downloaded copy after the user confirms', async () => {
+    api.getPiWebRuntimeStatus.mockResolvedValue({
+      ...runtimeStatus,
+      source: 'managed',
+      state: 'ready',
+      version: '0.9.0',
+      latestVersion: '0.9.0',
+      canUpdate: false,
+      canClean: true,
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const wrapper = mount(PiWebPage)
+    await vi.dynamicImportSettled()
+    await wrapper.get('[data-action="clean-pi-web-runtime"]').trigger('click')
+    await vi.dynamicImportSettled()
+
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(api.cleanPiWebRuntime).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('已清理一键下载的 PI-WEB。')
+    confirm.mockRestore()
+  })
+
+  it('keeps the cleanup action away from a manually selected folder', async () => {
+    api.getPiWebRuntimeStatus.mockResolvedValue({
+      ...runtimeStatus,
+      source: 'custom',
+      state: 'ready',
+      installDir: 'D:\\pi-web',
+      canUpdate: false,
+      canClean: false,
+    })
+
+    const wrapper = mount(PiWebPage)
+    await vi.dynamicImportSettled()
+
+    expect(wrapper.find('[data-action="clean-pi-web-runtime"]').exists()).toBe(false)
+    expect(wrapper.find('[data-action="reset-pi-web-directory"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('D:\\pi-web')
   })
 })

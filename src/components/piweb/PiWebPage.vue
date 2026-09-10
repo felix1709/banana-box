@@ -1,19 +1,28 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { Activity, ExternalLink, Play, RefreshCw, Square } from '@lucide/vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { open } from '@tauri-apps/plugin-dialog'
+import { Activity, ExternalLink, Play, RefreshCw, Square, Trash2 } from '@lucide/vue'
+import MediaToolProgressDialog from '@/components/MediaToolProgressDialog.vue'
 import {
+  cleanPiWebRuntime,
   getPiWebConfigStatus,
   getPiWebChatHealth,
+  getPiWebRuntimeStatus,
   getPiWebStatus,
+  installPiWebRuntime,
   openPiWeb,
   repairPiWebConfig,
   repairPiWebModelCompatibility,
+  setPiWebRuntimeDirectory,
   startPiWeb,
   stopPiWeb,
   type PiWebChatHealth,
   type PiWebConfigRepairResult,
   type PiWebConfigStatus,
+  type PiWebProgressPayload,
   type PiWebRepairResult,
+  type PiWebRuntimeStatus,
   type PiWebStatus,
 } from '@/lib/piWebIpc'
 
@@ -34,6 +43,18 @@ const healthBusy = ref(false)
 const repairBusy = ref(false)
 const configBusy = ref(false)
 const configRepairBusy = ref(false)
+const runtime = ref<PiWebRuntimeStatus | null>(null)
+const runtimeBusy = ref(false)
+const runtimeMessage = ref('')
+const runtimeError = ref('')
+const installDialogOpen = ref(false)
+const installStatus = ref<'idle' | 'running' | 'success' | 'error'>('idle')
+const installProgress = ref(0)
+const installMessageText = ref('')
+const installError = ref('')
+const installLogs = ref<string[]>([])
+const installOperationId = ref('')
+let unlistenInstall: UnlistenFn | null = null
 
 const stateLabel = computed(() => status.value?.state ?? 'checking')
 const stateText = computed(() => {
@@ -89,6 +110,165 @@ const primaryLabel = computed(() => {
   if (primaryAction.value === 'start') return '启动 PI-Web'
   return '重新检查'
 })
+
+const runtimeStateText = computed(() => {
+  switch (runtime.value?.state) {
+    case 'notInstalled':
+      return '未安装'
+    case 'updateAvailable':
+      return '版本可更新'
+    case 'ready':
+      return '已就绪'
+    case 'error':
+      return '异常'
+    default:
+      return '检查中'
+  }
+})
+const runtimeSourceText = computed(() => {
+  switch (runtime.value?.source) {
+    case 'managed':
+      return '一键下载'
+    case 'custom':
+      return '手动指定'
+    case 'bundled':
+      return '安装包内置'
+    default:
+      return '未安装'
+  }
+})
+const runtimeNodeText = computed(() => (runtime.value?.nodePath ? 'Node 已就绪' : 'Node 缺失'))
+const runtimeVersionText = computed(() =>
+  runtime.value?.version ? `版本 ${runtime.value.version}` : '未安装',
+)
+const runtimeLatestText = computed(() =>
+  runtime.value?.latestVersion ? `最新 ${runtime.value.latestVersion}` : '最新版本未知',
+)
+const runtimeInstallLabel = computed(() => (runtime.value?.canInstall ? '一键下载配置' : '更新 PI-WEB'))
+
+function describeError(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+async function refreshRuntime() {
+  if (runtimeBusy.value || installStatus.value === 'running') return
+  runtimeBusy.value = true
+  runtimeError.value = ''
+  try {
+    runtime.value = await getPiWebRuntimeStatus()
+  } catch (error) {
+    runtimeError.value = describeError(error)
+  } finally {
+    runtimeBusy.value = false
+  }
+}
+
+function appendInstallLog(line: string) {
+  installLogs.value = [...installLogs.value, line].slice(-80)
+}
+
+async function startInstallListener() {
+  unlistenInstall?.()
+  unlistenInstall = await listen<PiWebProgressPayload>('pi-web-progress', (event) => {
+    const payload = event.payload
+    if (payload.operationId !== installOperationId.value) return
+    installProgress.value = Math.max(installProgress.value, payload.progress)
+    installMessageText.value = payload.message
+    appendInstallLog(payload.detail ? `${payload.message}：${payload.detail}` : payload.message)
+    if (payload.level === 'error') installStatus.value = 'error'
+    if (payload.level === 'success') installStatus.value = 'success'
+  })
+}
+
+async function runRuntimeInstall() {
+  if (installStatus.value === 'running') return
+  installOperationId.value = `pi-web-install-${Date.now()}`
+  installDialogOpen.value = true
+  installStatus.value = 'running'
+  installProgress.value = 0
+  installMessageText.value = '正在检查运行环境'
+  installError.value = ''
+  installLogs.value = []
+  runtimeMessage.value = ''
+  runtimeError.value = ''
+
+  if (status.value?.canStop) {
+    try {
+      status.value = await stopPiWeb()
+    } catch {
+      // 停止失败不阻塞安装；真正切换版本时如果需要会再报错。
+    }
+  }
+
+  await startInstallListener()
+  try {
+    runtime.value = await installPiWebRuntime(installOperationId.value)
+    installStatus.value = 'success'
+    installProgress.value = 100
+    installMessageText.value = runtime.value.message
+    runtimeMessage.value = 'PI-WEB 已就绪，点击「启动 PI-Web」即可使用。'
+    await refresh()
+  } catch (error) {
+    installStatus.value = 'error'
+    installError.value = describeError(error)
+  }
+}
+
+function closeInstallDialog() {
+  if (installStatus.value === 'running') return
+  installDialogOpen.value = false
+}
+
+async function pickRuntimeDirectory() {
+  if (runtimeBusy.value) return
+  const picked = await open({ directory: true, multiple: false })
+  if (!picked || Array.isArray(picked)) return
+  runtimeBusy.value = true
+  runtimeError.value = ''
+  try {
+    runtime.value = await setPiWebRuntimeDirectory(picked)
+    runtimeMessage.value = '已切换到手动指定的 PI-WEB 目录。'
+  } catch (error) {
+    runtimeError.value = describeError(error)
+  } finally {
+    runtimeBusy.value = false
+  }
+}
+
+async function resetRuntimeDirectory() {
+  if (runtimeBusy.value) return
+  runtimeBusy.value = true
+  runtimeError.value = ''
+  try {
+    runtime.value = await setPiWebRuntimeDirectory(null)
+    runtimeMessage.value = '已取消手动指定的目录。'
+  } catch (error) {
+    runtimeError.value = describeError(error)
+  } finally {
+    runtimeBusy.value = false
+  }
+}
+
+async function cleanRuntime() {
+  if (runtimeBusy.value) return
+  const confirmed =
+    typeof window.confirm !== 'function' ||
+    window.confirm(
+      '只会删除 Banana Box 一键下载的 PI-WEB；安装包内置的旧版和你自己的配置都不会动。确定继续吗？',
+    )
+  if (!confirmed) return
+  runtimeBusy.value = true
+  runtimeError.value = ''
+  try {
+    runtime.value = await cleanPiWebRuntime()
+    runtimeMessage.value = '已清理一键下载的 PI-WEB。'
+    await refresh()
+  } catch (error) {
+    runtimeError.value = describeError(error)
+  } finally {
+    runtimeBusy.value = false
+  }
+}
 
 async function refresh() {
   busy.value = true
@@ -176,6 +356,11 @@ async function stop() {
 onMounted(() => {
   refresh()
   void refreshConfigStatus()
+  void refreshRuntime()
+})
+
+onBeforeUnmount(() => {
+  unlistenInstall?.()
 })
 </script>
 
@@ -240,6 +425,94 @@ onMounted(() => {
           停止
         </button>
       </div>
+    </section>
+
+    <section
+      class="pi-web-diagnostics pi-web-runtime-card"
+      aria-live="polite"
+    >
+      <div class="pi-web-card-heading">
+        <div>
+          <h3>PI-WEB 运行环境</h3>
+          <p class="pi-web-health-title">
+            {{ runtime?.message || '正在检查本地 PI-WEB…' }}
+          </p>
+        </div>
+        <button
+          data-action="refresh-pi-web-runtime"
+          type="button"
+          :disabled="runtimeBusy || installStatus === 'running'"
+          @click="refreshRuntime"
+        >
+          <RefreshCw :size="14" />
+          {{ runtimeBusy ? '检查中' : '重新检测' }}
+        </button>
+      </div>
+
+      <div class="pi-web-runtime-grid">
+        <span :data-ready="Boolean(runtime?.installed)">{{ runtimeStateText }}</span>
+        <span :data-ready="runtime?.source === 'managed'">来源：{{ runtimeSourceText }}</span>
+        <span :data-ready="Boolean(runtime?.version)">{{ runtimeVersionText }}</span>
+        <span :data-ready="Boolean(runtime?.latestVersion)">{{ runtimeLatestText }}</span>
+        <span :data-ready="Boolean(runtime?.nodePath)">{{ runtimeNodeText }}</span>
+      </div>
+
+      <p
+        v-if="runtime?.installDir"
+        class="pi-web-health-title"
+      >
+        目录：{{ runtime.installDir }}
+      </p>
+      <p v-if="runtime?.detail">
+        {{ runtime.detail }}
+      </p>
+
+      <div class="pi-web-card-actions">
+        <button
+          v-if="runtime?.canInstall || runtime?.canUpdate"
+          data-action="install-pi-web-runtime"
+          type="button"
+          :disabled="runtimeBusy || installStatus === 'running'"
+          @click="runRuntimeInstall"
+        >
+          <RefreshCw :size="14" />
+          {{ runtimeInstallLabel }}
+        </button>
+        <button
+          data-action="select-pi-web-directory"
+          type="button"
+          :disabled="runtimeBusy || installStatus === 'running'"
+          @click="pickRuntimeDirectory"
+        >
+          手动指定目录
+        </button>
+        <button
+          v-if="runtime?.source === 'custom'"
+          data-action="reset-pi-web-directory"
+          type="button"
+          :disabled="runtimeBusy || installStatus === 'running'"
+          @click="resetRuntimeDirectory"
+        >
+          取消指定
+        </button>
+        <button
+          v-if="runtime?.canClean"
+          data-action="clean-pi-web-runtime"
+          type="button"
+          :disabled="runtimeBusy || installStatus === 'running'"
+          @click="cleanRuntime"
+        >
+          <Trash2 :size="14" />
+          清理
+        </button>
+      </div>
+
+      <p
+        v-if="runtimeMessage || runtimeError"
+        class="pi-web-config-progress"
+      >
+        {{ runtimeError || runtimeMessage }}
+      </p>
     </section>
 
     <section
@@ -392,6 +665,19 @@ onMounted(() => {
       </div>
     </section>
   </main>
+
+  <MediaToolProgressDialog
+    :open="installDialogOpen"
+    title="一键下载配置 PI-WEB"
+    description="自动下载最新版 PI-WEB、写入 API 配置并校验，期间请不要关闭 Banana Box。"
+    :progress="installProgress"
+    :message="installMessageText"
+    :logs="installLogs"
+    :status="installStatus"
+    :error="installError"
+    @close="closeInstallDialog"
+    @retry="runRuntimeInstall"
+  />
 </template>
 
 <style scoped>
