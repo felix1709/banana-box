@@ -14,6 +14,7 @@ export type ActiveTool =
   | 'daily-tasks'
   | 'storyboard'
   | 'pi-web'
+  | 'template-library'
 export interface PromptEditorPrefill {
   title?: string
   content?: string

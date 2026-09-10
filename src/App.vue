@@ -46,6 +46,7 @@ import DailyTasksPage from '@/components/daily/DailyTasksPage.vue'
 import StoryboardPage from '@/components/storyboard/StoryboardPage.vue'
 import PiWebPage from '@/components/piweb/PiWebPage.vue'
 import AtlasLibraryPage from '@/components/atlas/AtlasLibraryPage.vue'
+import TemplateLibraryPage from '@/components/template/TemplateLibraryPage.vue'
 import PiWebRepairWindow from '@/components/piweb/PiWebRepairWindow.vue'
 import CloudMigrationDialog from '@/components/cloud/CloudMigrationDialog.vue'
 import UserCloudMenu from '@/components/cloud/UserCloudMenu.vue'
@@ -859,6 +860,7 @@ watchEffect(async () => {
       <main class="content">
         <SharedLibraryPage v-if="ui.activeTool === 'shared-library'" />
         <AtlasLibraryPage v-else-if="ui.activeTool === 'atlas'" />
+        <TemplateLibraryPage v-else-if="ui.activeTool === 'template-library'" />
         <section
           v-else-if="ui.activeTool === 'prompts'"
           class="prompt-library"

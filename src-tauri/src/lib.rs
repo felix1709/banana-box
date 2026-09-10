@@ -17,6 +17,7 @@ mod providers;
 mod safe_archive;
 mod secrets;
 mod startup;
+mod template_library;
 mod window_state;
 
 use app_state::{
@@ -197,6 +198,8 @@ pub fn run() {
             commands::atlas_commands::get_atlas_service_status,
             commands::atlas_commands::start_atlas_service,
             commands::atlas_commands::stop_atlas_service,
+            commands::template_library_commands::load_template_library,
+            commands::template_library_commands::load_template_image,
             commands::atlas_commands::ingest_atlas_image,
             commands::import_image_from_path,
             commands::compress_media,
@@ -723,3 +726,5 @@ mod tests {
         ));
     }
 }
+
+

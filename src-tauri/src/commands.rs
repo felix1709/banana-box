@@ -2,6 +2,7 @@ pub(crate) mod backup_commands;
 pub(crate) mod atlas_commands;
 pub(crate) mod provider_commands;
 pub(crate) mod startup_commands;
+pub(crate) mod template_library_commands;
 
 // src-tauri/src/commands.rs
 // IPC 命令：前端通过 src/lib/ipc.ts 调用这些函数。
@@ -2057,3 +2058,4 @@ mod tests {
         );
     }
 }
+

@@ -12,6 +12,7 @@ import {
   FolderKanban,
   Globe,
   LayoutGrid,
+  LayoutTemplate,
   Library,
   Pencil,
   Plus,
@@ -41,6 +42,7 @@ interface ToolItem {
 const tools: ToolItem[] = [
   { id: 'shared-library', label: '共享词库', icon: Library },
   { id: 'prompts', label: '提示词库', icon: FileText },
+  { id: 'template-library', label: '模板词库', icon: LayoutTemplate },
   { id: 'compression', label: '快速压缩', icon: Archive },
   { id: 'depth-video', label: '深度视频', icon: Video },
   { id: 'projects', label: '项目管理', icon: FolderKanban },
